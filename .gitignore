@@ -145,5 +145,14 @@ vite.config.ts.timestamp-*
 # Astro generated types
 .astro/
 
+# Local Cloudflare state and credentials
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*-service-account*.json
+service-account*.json
+credentials*.json
+
 # Turbo Repo
 .turbo

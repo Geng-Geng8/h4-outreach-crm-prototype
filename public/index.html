@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f6f5ef">
+  <meta name="h4-api-origin" content="">
+  <title>School outreach · H4 Community</title>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./editor.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="H4 Community home"><span class="brand-mark">H4<span>↗</span></span><span class="brand-name">HOW HIP HOP HELPS<br><strong>School outreach</strong></span></a>
+    <span class="mode-pill"><span aria-hidden="true"></span><span id="mode-label">Test spreadsheet</span></span>
+  </header>
+  <main id="main">
+    <section id="welcome" class="welcome" aria-labelledby="welcome-heading">
+      <div class="welcome-copy">
+        <p class="eyebrow">H4 COMMUNITY · ONTARIO SCHOOLS</p>
+        <h1 id="welcome-heading">Make the next<br>connection count.</h1>
+        <p class="intro">A shared home for school outreach.<br>Sign in to see the schools you’re working with.</p>
+        <div class="login-card">
+          <h2>Your work starts here</h2>
+          <p>Use the Google account your H4 supervisor added to the CRM.</p>
+          <div id="google-button" aria-label="Google sign-in"></div>
+          <p id="login-status" class="login-status" role="status" aria-live="polite">Checking the Google connection…</p>
+          <button id="retry" class="button secondary" type="button" hidden>Try again</button>
+          <p class="quiet-note">Sign in to browse schools and claim one for your outreach.</p>
+        </div>
+      </div>
+      <aside class="welcome-art" aria-label="Outreach brings schools and community together">
+        <div class="art-top"><span class="small-label">GOOD THINGS START WITH</span><span class="art-arrow" aria-hidden="true">↗</span></div>
+        <p class="art-word">a little<br><em>outreach.</em></p>
+        <div class="school-drawing" aria-hidden="true"><span class="school-roof"></span><span class="school-building"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="school-door"></span><span class="art-sun"></span></div>
+        <div class="art-bottom"><span>Schools. Students. Community.</span><span aria-hidden="true">✳</span></div>
+      </aside>
+    </section>
+
+    <section id="workspace" class="workspace" aria-labelledby="workspace-heading" hidden>
+      <div class="workspace-top">
+        <div><p class="eyebrow">YOUR OUTREACH WORKSPACE</p><h1 id="workspace-heading">Your schools.</h1><p id="workspace-description" class="intro"></p></div>
+        <div class="account-panel"><span class="avatar" id="avatar" aria-hidden="true"></span><div><strong id="user-name"></strong><span id="user-email"></span><span id="user-role"></span></div><button id="sign-out" type="button" class="text-button">Sign out</button></div>
+      </div>
+
+      <nav class="workspace-tabs" role="tablist" aria-label="Workspace views">
+        <button id="tab-my-schools" role="tab" aria-selected="true" class="tab-btn active" type="button">My schools</button>
+        <button id="tab-directory" role="tab" aria-selected="false" class="tab-btn" type="button">Browse directory</button>
+        <button id="tab-demo-claim" role="tab" aria-selected="false" class="tab-btn" type="button">🧪 Synthetic claim demo</button>
+      </nav>
+
+      <div id="schools-view">
+        <div class="workspace-tools"><div class="count-label"><strong id="school-count">0</strong><span id="school-count-label">schools</span></div><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search schools</span><input id="search" type="search" placeholder="Search by school, board or region" autocomplete="off"></label><button id="refresh" class="button secondary" type="button">Refresh</button></div>
+        <p class="visibility-note">Select a school to edit its contact details, stage, follow-up and notes. Students can edit only their own schools.</p>
+        <p id="workspace-status" class="workspace-status" role="status" aria-live="polite"></p>
+        <div id="school-list" class="school-list"></div>
+        <div id="empty-state" class="empty-state" hidden><span aria-hidden="true">↗</span><h2 id="empty-title">No schools assigned yet</h2><p id="empty-description">Your supervisor can help you find your next school.</p></div>
+      </div>
+
+      <div id="directory-view" hidden>
+        <div class="workspace-tools"><div class="count-label"><strong id="dir-count">0</strong><span id="dir-count-label">schools</span></div><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search directory</span><input id="dir-search" type="search" placeholder="Search directory by name, board, city or region" autocomplete="off"></label><button id="dir-refresh" class="button secondary" type="button">Refresh directory</button></div>
+        <p class="visibility-note">Claims save to the test spreadsheet. Contact details and other students’ assignments remain hidden.</p>
+        <p id="dir-status" class="workspace-status" role="status" aria-live="polite"></p>
+        <p id="dir-feedback" class="demo-feedback" role="status" aria-live="polite"></p>
+        <div id="dir-list" class="school-list"></div>
+        <div id="dir-empty-state" class="empty-state" hidden><span aria-hidden="true">↗</span><h2>No matching directory schools</h2><p>Try a different school name, board, city or region.</p></div>
+      </div>
+
+      <div id="demo-view" hidden>
+        <div class="demo-banner" role="note">
+          <strong>🧪 Synthetic Claim Demo</strong> — Test data only. Claims run through the SQLite Durable Object coordinator using invented schools. Real Google Sheets records remain untouched.
+        </div>
+        <p id="demo-feedback" class="demo-feedback" role="status" aria-live="polite"></p>
+        <div id="demo-list" class="school-list"></div>
+      </div>
+    </section>
+    <dialog id="school-editor" aria-labelledby="editor-title">
+      <form id="editor-form" novalidate>
+        <div class="editor-header"><div><p class="eyebrow">SCHOOL DETAILS</p><h2 id="editor-title">Edit school</h2><p id="editor-meta"></p></div><button type="button" id="editor-close" class="text-button" aria-label="Close editor">Close</button></div>
+        <p id="editor-status"></p>
+        <div id="editor-fields" class="editor-grid">
+          <label>Contact name<input id="edit-contactName" maxlength="300" autocomplete="off"></label>
+          <label>Contact role<input id="edit-contactRole" maxlength="300" autocomplete="off"></label>
+          <label>Email<input id="edit-email" type="email" maxlength="300" autocomplete="off"></label>
+          <label>Phone<input id="edit-phone" type="tel" maxlength="100" autocomplete="off"></label>
+          <label>Stage<select id="edit-stage"><option>Not Contacted</option><option>Contacted</option><option>Interested</option><option>Engaged</option><option>Booked</option><option>Cold</option></select></label>
+          <label>Priority<select id="edit-priority"><option value="">Not set</option><option>High</option><option>Medium</option><option>Low</option></select></label>
+          <label>Outreach goal<input id="edit-outreachGoal" maxlength="300"></label>
+          <label>Follow-up due<input id="edit-followUpDue" type="date"></label>
+          <label class="editor-wide">Next action<input id="edit-nextAction" maxlength="1000"></label>
+          <label class="editor-wide">Notes / reply<textarea id="edit-notes" maxlength="4000" rows="5"></textarea></label>
+          <p id="cold-warning" class="editor-wide quiet-note"></p>
+        </div>
+        <div class="editor-actions"><p id="editor-feedback" class="editor-feedback" role="status" aria-live="polite"></p><button type="button" id="editor-reload" class="button secondary">Reload saved values</button><button type="submit" id="editor-save" class="button">Save changes</button></div>
+      </form>
+    </dialog>
+  </main>
+  <div id="save-toast" class="save-toast" role="status" aria-live="polite" hidden></div>
+  <footer><span>H4 Community <span aria-hidden="true">/</span> How Hip Hop Helps</span><span>2026–2027 outreach season</span></footer>
+</body>
+</html>

@@ -1,0 +1,25 @@
+.school-open{display:block;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer;appearance:none}
+.school-open:hover{border-color:#234d3e;box-shadow:0 4px 18px #173c2e12}
+.school-open:focus-visible{outline:3px solid #234d3e;outline-offset:3px}
+.edit-hint{display:block;margin-top:18px;color:#234d3e;font-size:13px;font-weight:700}
+#school-editor{width:min(700px,calc(100% - 28px));max-height:calc(100dvh - 32px);padding:0;border:1px solid #d9dfd1;border-radius:16px;color:#19251e;background:#fafaf5;box-shadow:0 24px 90px #132b2550}
+#school-editor::backdrop{background:#142f26a8}
+#editor-form{padding:28px}
+.editor-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.editor-header .eyebrow{margin:0 0 9px;font-size:10px}
+.editor-header h2{font-size:24px;line-height:1.2;margin:0;letter-spacing:-.5px}
+#editor-meta{font-size:12px;color:#637266;margin:10px 0 0}
+#editor-status{padding:12px 14px;background:#eaf0e0;border-radius:7px;font-size:13px;line-height:1.5;margin:20px 0}
+.editor-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:17px}
+.editor-grid label{display:flex;flex-direction:column;gap:7px;font-size:12px;font-weight:650}
+.editor-grid input,.editor-grid select,.editor-grid textarea{width:100%;min-width:0;min-height:44px;padding:11px;border:1px solid #cbd4c3;border-radius:6px;background:white;color:#19251e;font:inherit;font-size:16px;font-weight:400}
+.editor-grid input:focus,.editor-grid select:focus,.editor-grid textarea:focus{outline:2px solid #234d3e;outline-offset:1px}
+.editor-grid textarea{resize:vertical;line-height:1.5}
+.editor-grid :disabled{background:#f0f2eb;color:#657165}
+.editor-wide{grid-column:1/-1}
+#cold-warning{margin:0;line-height:1.5}
+.editor-actions{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;position:sticky;bottom:-28px;background:#fafaf5;padding:16px 0 6px;margin-top:10px;border-top:1px solid #dfe4d7}
+.editor-feedback{flex-basis:100%;margin:0;font-size:13px;line-height:1.45;color:#234d3e}
+.editor-feedback[data-kind=error]{color:#a52424;font-weight:600}
+.save-toast{position:fixed;right:24px;bottom:24px;z-index:1000;max-width:calc(100vw - 48px);padding:13px 20px;background:#234d3e;color:white;border-radius:10px;box-shadow:0 5px 25px #132b2540;font-size:14px;font-weight:650}
+@media(max-width:560px){#editor-form{padding:20px}.editor-grid{grid-template-columns:minmax(0,1fr)}.editor-header h2{font-size:21px}.editor-actions{bottom:-20px;flex-wrap:wrap}.editor-actions button{flex:1;min-height:46px}}

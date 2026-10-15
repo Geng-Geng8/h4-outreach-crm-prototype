@@ -1,0 +1,31 @@
+{
+  "name": "h4-outreach-crm-save-proof",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only Google sign-in preview, with a separate synthetic save-safety proof.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --test --test-concurrency=1 test/save-safety.test.mjs test/read-only.test.mjs test/frontend.test.mjs test/operator-recovery.test.mjs test/claim-workflow.test.mjs test/google-writes.test.mjs",
+    "dev": "node scripts/dev.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261015.1",
+    "esbuild": "0.28.2",
+    "miniflare": "4.20260730.0",
+    "typescript": "7.0.2",
+    "wrangler": "4.151.0"
+  },
+  "overrides": {
+    "miniflare": {
+      "undici": "7.29.1",
+      "sharp": "0.35.5"
+    }
+  },
+  "dependencies": {
+    "jose": "6.2.12"
+  }
+}

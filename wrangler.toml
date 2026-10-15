@@ -1,0 +1,22 @@
+name = "h4-outreach-crm-prototype-api"
+main = "src/read-only.ts"
+compatibility_date = "2026-07-01"
+workers_dev = true
+preview_urls = false
+
+[vars]
+PROOF_MODE = "disabled"
+GOOGLE_SHEET_ID = "1QzYTKdeWWa2TpOtGSmJ0NDMeY_U-u3ImeCVdpCmJrH4"
+ALLOWED_ORIGIN = "https://geng-geng8.github.io"
+GOOGLE_CLIENT_ID = "730012675523-e6lt3bljdu9rpa1j15jch5rv3ka4liq6.apps.googleusercontent.com"
+ENABLE_REAL_WRITES = "true"
+
+[[durable_objects.bindings]]
+name = "COORDINATOR"
+class_name = "TestSheetCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TestSheetCoordinator"]
+
+# Google service-account email and private key are Worker secrets, never vars.

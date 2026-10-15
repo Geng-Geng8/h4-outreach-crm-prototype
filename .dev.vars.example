@@ -1,0 +1,7 @@
+# Public Google OAuth Web Application client ID (not a client secret).
+GOOGLE_CLIENT_ID=""
+# Absolute path to the downloaded service-account JSON key, OUTSIDE this repository.
+# Example: C:/Users/your-name/Documents/H4-secrets/h4-read-only-key.json
+GOOGLE_APPLICATION_CREDENTIALS=""
+# true saves claims to the pinned TEST spreadsheet; requires Editor access there.
+ENABLE_REAL_WRITES="false"
