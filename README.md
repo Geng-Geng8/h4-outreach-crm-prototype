@@ -5,8 +5,9 @@ card under My schools to edit contact details, stage, follow-up and notes. See
 [test claims](docs/test-claims.md). User-authorized writes are enabled in ignored
 local configuration; the user granted Editor access and a real Google-authenticated
 test claim succeeded. The historical read-only/synthetic milestones below
-remain useful context. GitHub Pages and Cloudflare hosting are being configured;
-see [hosting setup](docs/hosting.md) for deployment and the test URL.
+remain useful context. The hosted test screen is available at
+https://geng-geng8.github.io/h4-outreach-crm-prototype/ with a Cloudflare API.
+See [hosting setup](docs/hosting.md) for deployment details.
 
 Google-authenticated H4 school outreach with test-sheet claiming and editing.
 The SQLite-backed coordinator serializes saves and preserves retry safety.

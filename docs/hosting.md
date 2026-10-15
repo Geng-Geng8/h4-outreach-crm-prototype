@@ -9,6 +9,24 @@ Production remains out of scope.
 - Data: the existing dedicated test workbook only.
 - Keys: Cloudflare Worker secrets; the public repository and Pages artifact contain none.
 
+## Deployment verification (October 15, 2026)
+
+GitHub Pages published successfully; its real browser screen loads the Cloudflare
+configuration and Google button. The deployed API reports credentials configured
+and writes enabled. Hosted POST preflight succeeds for the Pages origin (204);
+unauthenticated bootstrap returns 401 and a different origin returns 403.
+TypeScript checks and all 78 existing tests passed; the additional Pages API-origin
+test passed with the eight frontend tests. The Pages artifact contains only the
+allowlisted static files. Local writes were disabled and its server stopped.
+
+Hosted Google-authenticated reads and saves still require the Google OAuth origin
+setting and a browser acceptance check. Local live-sheet save evidence is recorded
+separately in `test-claims.md`; it is not proof of a hosted save.
+
+The public publishing history starts with a sanitized snapshot. Earlier local
+development history remains on `codex/save-safety-proof`; use the dedicated
+`codex/hosted-prototype` branch for continuing work against published `main`.
+
 ## First deployment
 
 1. `npx wrangler login`, then `npx wrangler deploy` on the existing free Workers plan.
