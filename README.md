@@ -9,6 +9,10 @@ remain useful context. The hosted test screen is available at
 https://geng-geng8.github.io/h4-outreach-crm-prototype/ with a Cloudflare API.
 See [hosting setup](docs/hosting.md) for deployment details.
 
+**Log outreach:** each claimed school has a button for recording a contact or
+follow-up, outcome, summary and next action. Saves update the school and its
+activity log together. See [outreach behavior and verification](docs/outreach.md).
+
 Google-authenticated H4 school outreach with test-sheet claiming and editing.
 The SQLite-backed coordinator serializes saves and preserves retry safety.
 

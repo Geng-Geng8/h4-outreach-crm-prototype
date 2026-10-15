@@ -2,6 +2,39 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readHarness, ACTOR, OTHER, SUPERVISOR } from "./read-only-harness.mjs";
 
+test("outreach API: verified ownership, atomic activity, safe retry, stale protection and preserved notes/formulas", async (t) => {
+  const h = await readHarness(t, { ENABLE_REAL_WRITES: "true", GOOGLE_ADAPTER_TEST: "true" });
+  const row = h.demoSheets.tables.Schools[1], token = await h.token();
+  row[13] = "Existing school note"; const before = [row[16], row[17]], initialCount = Number(row[26]);
+  const input = { recordId: row[0], expectedRequestId: row[27], requestId: crypto.randomUUID(), channel: "Phone", activityType: "FollowUp", outcome: "Left a message", summary: "Synthetic outreach summary", stage: "Contacted", followUpDue: "2026-11-01", nextAction: "Call again" };
+  const save = async (body, bearer = token) => {
+    const response = await h.request("/api/activities", { method: "POST", token: bearer, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  };
+  assert.equal((await save(input, "forged.jwt.token")).status, 401);
+  assert.equal((await save(input, await h.token({ email: OTHER }))).status, 403);
+  assert.equal((await save(input, await h.token({ email: "unlisted@example.test" }))).status, 403);
+  assert.equal((await save(input, await h.token({ email: "revoked@example.test" }))).status, 403);
+  assert.equal((await save({ ...input, requestId: crypto.randomUUID(), summary: " " })).status, 422);
+  assert.equal(h.demoSheets.attempts, 0);
+  const preflight = await h.request("/api/activities", { method: "OPTIONS", headers: { Origin: "http://localhost:8787", "access-control-request-method": "POST", "access-control-request-headers": "authorization,content-type" } });
+  assert.equal(preflight.status, 204);
+  const result = await save(input); assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(h.demoSheets.attempts, 1); assert.equal(h.demoSheets.batches[0].data.length, 3);
+  const current = h.demoSheets.tables.Schools[1];
+  assert.equal(current[8], "Contacted"); assert.match(current[9], /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(current[10], "2026-11-01"); assert.equal(current[11], "Call again");
+  assert.equal(current[13], "Existing school note"); assert.equal(current[26], initialCount + 1);
+  assert.deepEqual([current[16], current[17]], before);
+  const activity = h.demoSheets.tables["Activity Log"].find((item) => item[11] === input.requestId);
+  assert.equal(activity[7], input.summary); assert.equal(activity[12], ACTOR); assert.equal(activity[13], "FollowUp");
+  assert.equal((await save(input)).status, 200); assert.equal(h.demoSheets.attempts, 1);
+  assert.equal((await save({ ...input, requestId: crypto.randomUUID() })).status, 409);
+  assert.equal((await save({ ...input, requestId: crypto.randomUUID(), expectedRequestId: input.requestId, stage: "Cold" })).status, 422);
+  const outreach = await save({ ...input, requestId: crypto.randomUUID(), expectedRequestId: input.requestId, activityType: "Outreach" });
+  assert.equal(outreach.status, 200); assert.equal(h.demoSheets.tables.Schools[1][26], initialCount + 1);
+});
+
 test("school editor: own details, other-student denial and Supervisor access", async (t) => {
   const h = await readHarness(t, { ENABLE_REAL_WRITES: "true", GOOGLE_ADAPTER_TEST: "true" });
   const school = h.demoSheets.tables.Schools[1];

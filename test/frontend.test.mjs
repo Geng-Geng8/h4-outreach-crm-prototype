@@ -6,6 +6,57 @@ import { webcrypto } from "node:crypto";
 
 const appCode = await readFile("public/app.js", "utf8");
 
+test("Log outreach validates required text, locks double taps, retries the same request and confirms only after save", async (t) => {
+  const record = { recordId: "00000000-0000-4000-8000-000000000001", schoolName: "Example School", schoolBoard: "EXAMPLE", geographicRegion: "Example Region", stage: "Not Contacted", lastRequestId: "00000000-0000-4000-8000-000000000002", notes: "Keep these notes" };
+  const requests = []; let resolveSave;
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record });
+    assert.equal(url, "./api/activities"); requests.push(JSON.parse(init.body));
+    return new Promise((done) => { resolveSave = done; });
+  } }); t.after(cleanup);
+  await signIn("alex@example.test");
+  const logButton = getEl("school-list").children[0].children[1];
+  assert.equal(logButton.textContent, "Log outreach"); logButton.click();
+  // Await the detail read started by the real card action.
+  for (let i = 0; i < 10 && getEl("editor-save").disabled; i++) await new Promise((done) => setTimeout(done, 1));
+  assert.equal(getEl("outreach-fields").hidden, false); assert.equal(getEl("field-notes").hidden, true);
+  assert.equal(getEl("edit-stage").value, "Contacted");
+  await context.saveSchoolEdits({ preventDefault() {} }); assert.equal(requests.length, 0);
+  getEl("log-outcome").value = "Left a message"; getEl("log-summary").value = "Asked about a workshop.";
+  getEl("log-activityType").value = "FollowUp";
+  const first = context.saveSchoolEdits({ preventDefault() {} });
+  await context.saveSchoolEdits({ preventDefault() {} }); assert.equal(requests.length, 1);
+  assert.equal(getEl("editor-save").textContent, "Saving…");
+  resolveSave(Response.json({ code: "COMMIT_UNCERTAIN" }, { status: 503 })); await first;
+  context.closeSchoolEditor(); await context.openSchoolEditor(record.recordId, false, "activity");
+  assert.equal(getEl("log-summary").value, "Asked about a workshop."); assert.equal(getEl("log-summary").disabled, true);
+  const retry = context.saveSchoolEdits({ preventDefault() {} });
+  assert.deepEqual(requests[0], requests[1]); assert.equal(requests[0].activityType, "FollowUp");
+  assert.equal(requests[0].notes, undefined); assert.equal(requests[0].stage, "Contacted");
+  resolveSave(Response.json({ ok: true, record: { ...record, lastRequestId: requests[0].requestId } })); await retry;
+  assert.equal(getEl("school-editor").open, false); assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+});
+
+test("outreach conflict keeps the message, reloads current school values and clears private drafts on sign-out", async (t) => {
+  let record = { recordId: "00000000-0000-4000-8000-000000000001", schoolName: "Example School", schoolBoard: "EXAMPLE", geographicRegion: "Example Region", stage: "Contacted", followUpDue: "2026-10-20", lastRequestId: "00000000-0000-4000-8000-000000000002" };
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record });
+    return Response.json({ code: "CONFLICT_STALE_VERSION" }, { status: 409 });
+  } }); t.after(cleanup);
+  await signIn("alex@example.test"); await context.openSchoolEditor(record.recordId, false, "activity");
+  getEl("log-outcome").value = "Reply"; getEl("log-summary").value = "Private draft";
+  await context.saveSchoolEdits({ preventDefault() {} }); assert.equal(getEl("editor-save").disabled, true);
+  record = { ...record, stage: "Interested", followUpDue: "2026-11-01", lastRequestId: "00000000-0000-4000-8000-000000000003" };
+  await context.openSchoolEditor(record.recordId, true, "activity");
+  assert.equal(getEl("log-summary").value, "Private draft"); assert.equal(getEl("edit-stage").value, "Interested");
+  assert.equal(getEl("edit-followUpDue").value, "2026-11-01"); assert.equal(getEl("editor-save").disabled, false);
+  getEl("sign-out").click(); assert.equal(getEl("school-editor").open, false); assert.equal(getEl("log-summary").value, "");
+});
+
 test("editor shows Saving immediately, keeps failed drafts open, then closes with Saved only after confirmation", async (t) => {
   let resolveSave;
   const requests = [];
@@ -74,7 +125,7 @@ test("editor reopening loads fresh values and preserves a stale draft without ov
   const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler });
   t.after(cleanup);
   await signIn("alex@example.test");
-  getEl("school-list").children[0].click();
+  getEl("school-list").children[0].children[0].click();
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(getEl("school-editor").open, true);
   assert.equal(getEl("edit-notes").value, "Original");

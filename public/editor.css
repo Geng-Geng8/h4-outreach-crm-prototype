@@ -2,6 +2,11 @@
 .school-open:hover{border-color:#234d3e;box-shadow:0 4px 18px #173c2e12}
 .school-open:focus-visible{outline:3px solid #234d3e;outline-offset:3px}
 .edit-hint{display:block;margin-top:18px;color:#234d3e;font-size:13px;font-weight:700}
+.school-card>.school-open{border:0;padding:0;background:transparent;border-radius:3px}
+.school-card>.school-open:hover{box-shadow:none}
+.school-log{width:100%;margin-top:16px}
+#outreach-fields{margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid #dfe4d7}
+#outreach-fields .quiet-note{margin:0;line-height:1.6}
 #school-editor{width:min(700px,calc(100% - 28px));max-height:calc(100dvh - 32px);padding:0;border:1px solid #d9dfd1;border-radius:16px;color:#19251e;background:#fafaf5;box-shadow:0 24px 90px #132b2550}
 #school-editor::backdrop{background:#142f26a8}
 #editor-form{padding:28px}

@@ -486,7 +486,8 @@ export class SheetCoordinator extends DurableObject<Env> {
         activityType = text(input.activityType, 30);
         if (!["Outreach", "FollowUp"].includes(activityType)) throw new ApiError(422, "INVALID_ACTIVITY_TYPE");
         outcome = text(input.outcome, 300); summary = text(input.summary);
-        // Proof-only interpretation. Final counting/reset and transition policy is unresolved.
+        if (!outcome.trim() || !summary.trim()) throw new ApiError(422, "OUTREACH_DETAILS_REQUIRED");
+        // Explicit follow-up events increment once; other outreach does not reset the count.
         const count = Number(row[C.count]);
         if (!Number.isInteger(count) || count < 0) throw new ApiError(422, "INVALID_STORED_COUNT");
         const originalStage = row[C.stage];
@@ -498,7 +499,8 @@ export class SheetCoordinator extends DurableObject<Env> {
           row[C.stage] = stage;
         }
         row[C.count] = count + (activityType === "FollowUp" ? 1 : 0);
-        row[C.contacted] = day; row[C.notes] = summary;
+        row[C.contacted] = day;
+        // The activity keeps its own summary. Never replace separately edited school notes.
         if (input.followUpDue !== undefined) row[C.due] = date(input.followUpDue);
         if (input.nextAction !== undefined) row[C.action] = text(input.nextAction);
       }

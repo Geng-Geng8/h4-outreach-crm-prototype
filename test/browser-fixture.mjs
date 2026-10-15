@@ -6,7 +6,9 @@ import { createServer } from "node:http";
 import { readHarness, ACTOR, SUPERVISOR } from "./read-only-harness.mjs";
 
 let cleanup;
-const h = await readHarness({ after(fn) { cleanup = fn; } }, { ALLOWED_ORIGIN: "http://localhost:8788" });
+const fixturePort = Number(process.env.H4_FIXTURE_PORT || 8788);
+const fixtureOrigin = `http://localhost:${fixturePort}`;
+const h = await readHarness({ after(fn) { cleanup = fn; } }, { ALLOWED_ORIGIN: fixtureOrigin, ENABLE_REAL_WRITES: "true", GOOGLE_ADAPTER_TEST: "true" });
 const fixtureGoogle = `
 window.google = {accounts:{id:{
   initialize(options){this.options=options}, disableAutoSelect(){},
@@ -24,7 +26,7 @@ document.getElementById("fixture-restore").onclick=async()=>{await fetch("/fixtu
 
 const server = createServer(async (request, response) => {
   try {
-    const url = new URL(request.url, "http://localhost:8788");
+    const url = new URL(request.url, fixtureOrigin);
     let body, type = "text/plain", status = 200, headers = {};
     if (url.pathname === "/fixture/gsi.js") { body = fixtureGoogle; type = "text/javascript"; }
     else if (url.pathname === "/fixture/tools.js") { body = fixtureTools; type = "text/javascript"; }
@@ -54,6 +56,6 @@ const server = createServer(async (request, response) => {
     response.writeHead(status, { ...headers, "content-type": type, "cache-control": "no-store" }); response.end(body);
   } catch { response.writeHead(500); response.end("Synthetic browser fixture unavailable"); }
 });
-server.listen(8788, "127.0.0.1", () => console.log("Synthetic UI test only: http://localhost:8788"));
+server.listen(fixturePort, "127.0.0.1", () => console.log(`Synthetic UI test only: ${fixtureOrigin}`));
 const stop = async () => { server.close(); await cleanup(); process.exit(0); };
 process.on("SIGINT", stop); process.on("SIGTERM", stop);

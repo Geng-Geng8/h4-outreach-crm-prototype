@@ -41,7 +41,7 @@ export default (() => {
         if (request.method === "OPTIONS") {
           const requested = (request.headers.get("access-control-request-headers") ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
           const reqMethod = request.headers.get("access-control-request-method");
-          const isPostClaim = ["/api/demo/claim", "/api/schools/claim", "/api/schools/update", "/api/operator/recovery"].includes(url.pathname) && reqMethod === "POST";
+          const isPostClaim = ["/api/demo/claim", "/api/schools/claim", "/api/schools/update", "/api/activities", "/api/operator/recovery"].includes(url.pathname) && reqMethod === "POST";
           if ((reqMethod !== "GET" && !isPostClaim) ||
               requested.some((header) => !["authorization", "content-type"].includes(header))) {
             return json(405, { ok: false, code: "READ_ONLY_MODE" });
@@ -51,12 +51,12 @@ export default (() => {
           headers.set("access-control-max-age", "600");
           return new Response(null, { status: 204, headers });
         }
-        if (request.method !== "GET" && !(request.method === "POST" && ["/api/demo/claim", "/api/schools/claim", "/api/schools/update", "/api/operator/recovery"].includes(url.pathname))) {
+        if (request.method !== "GET" && !(request.method === "POST" && ["/api/demo/claim", "/api/schools/claim", "/api/schools/update", "/api/activities", "/api/operator/recovery"].includes(url.pathname))) {
           headers.set("allow", "GET, OPTIONS");
           return json(405, { ok: false, code: "READ_ONLY_MODE" });
         }
         const writesEnabled = env.ENABLE_REAL_WRITES === "true";
-        if (url.pathname === "/api/schools/detail" || url.pathname === "/api/schools/update") {
+        if (["/api/schools/detail", "/api/schools/update", "/api/activities"].includes(url.pathname)) {
           const expectedMethod = url.pathname.endsWith("/detail") ? "GET" : "POST";
           if (request.method !== expectedMethod) return json(405, { ok: false, code: "METHOD_NOT_ALLOWED" });
           // Leave disabled-write probes inert, as in earlier read-only milestones.

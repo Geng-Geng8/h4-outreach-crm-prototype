@@ -10,6 +10,8 @@ let activeRequest, activeDirRequest, activeDemoRequest, expiryTimer;
 let googleLoading, currentTab = "my-schools";
 const pendingClaims = new Map(); // osn -> requestId
 const editFields = ["contactName", "contactRole", "email", "phone", "stage", "priority", "outreachGoal", "followUpDue", "nextAction", "notes"];
+const outreachFields = ["channel", "activityType", "outcome", "summary"];
+const detailOnlyFields = ["contactName", "contactRole", "email", "phone", "priority", "outreachGoal", "notes"];
 let editing = null, editorSeq = 0, editorRead;
 let saveToastTimer;
 const editDrafts = new Map();
@@ -21,6 +23,7 @@ function forgetSession() {
   clearTimeout(saveToastTimer); el("save-toast").hidden = true;
   el("school-editor").close?.();
   for (const field of editFields) el(`edit-${field}`).value = "";
+  for (const field of outreachFields) el(`log-${field}`).value = "";
   el("editor-title").textContent = "Edit school"; el("editor-meta").textContent = ""; el("editor-status").textContent = "";
   el("editor-feedback").textContent = "";
   activeRequest?.abort();
@@ -90,7 +93,8 @@ function renderSchools() {
   el("school-count-label").textContent = schools.length === 1 ? "school" : "schools";
   el("school-list").replaceChildren();
   for (const school of visible) {
-    const card = document.createElement("button"); card.className = "school-card school-open"; card.type = "button";
+    const container = document.createElement("article"); container.className = "school-card";
+    const card = document.createElement("button"); card.className = "school-open"; card.type = "button";
     card.setAttribute("aria-label", `Edit ${school.schoolName}`);
     card.onclick = () => openSchoolEditor(school.recordId);
     const stage = document.createElement("span"); stage.className = "school-stage"; stage.textContent = school.stage || "Stage not set";
@@ -102,7 +106,11 @@ function renderSchools() {
     const meta = document.createElement("p"); meta.className = "school-meta"; meta.textContent = [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · ") || "Location not listed";
     const assignment = document.createElement("p"); assignment.className = "assignment"; assignment.textContent = school.assignedTo ? `Assigned to ${school.assignedTo}` : "Unassigned";
     const editHint = document.createElement("span"); editHint.className = "edit-hint"; editHint.textContent = "Edit school →";
-    card.append(stage, priority, heading, meta, assignment, editHint); el("school-list").append(card);
+    const log = document.createElement("button"); log.className = "button school-log"; log.type = "button";
+    log.textContent = "Log outreach"; log.setAttribute("aria-label", `Log outreach for ${school.schoolName}`);
+    log.onclick = () => openSchoolEditor(school.recordId, false, "activity");
+    log.disabled = config?.writesEnabled !== true;
+    card.append(stage, priority, heading, meta, assignment, editHint); container.append(card, log); el("school-list").append(container);
   }
   el("empty-state").hidden = visible.length > 0;
   el("empty-title").textContent = query ? "No matching schools" : "No schools assigned yet";
@@ -111,9 +119,13 @@ function renderSchools() {
 
 function editorInputs(disabled) {
   for (const field of editFields) el(`edit-${field}`).disabled = disabled;
+  for (const field of outreachFields) el(`log-${field}`).disabled = disabled;
 }
 
 function editorValues() { return Object.fromEntries(editFields.map((field) => [field, el(`edit-${field}`).value])); }
+function outreachValues() { return Object.fromEntries(outreachFields.map((field) => [field, el(`log-${field}`).value])); }
+function editorDraftKey(edit) { return `${edit.mode ?? "details"}:${edit.id}`; }
+function editorSaveLabel(edit) { return edit.mode === "activity" ? "Save outreach" : "Save changes"; }
 
 function editorFeedback(message, kind = "info") {
   el("editor-status").textContent = message;
@@ -129,24 +141,34 @@ function showSaveToast(message) {
 
 function closeSchoolEditor() {
   if (editing?.busy) return;
-  if (editing?.original) {
+  if (editing?.original && !editing.saved) {
     const values = editorValues();
-    if (editing.pending || editFields.some((key) => values[key] !== String(editing.original[key] ?? ""))) {
-      editDrafts.set(editing.id, { values, pending: editing.pending, original: editing.original });
-    } else editDrafts.delete(editing.id);
+    const activity = outreachValues();
+    if (editing.pending || (editing.mode === "activity" ? activity.outcome || activity.summary : editFields.some((key) => values[key] !== String(editing.original[key] ?? "")))) {
+      editDrafts.set(editorDraftKey(editing), { values, activity, pending: editing.pending, original: editing.original });
+    } else editDrafts.delete(editorDraftKey(editing));
   }
   editorSeq++; editorRead?.abort(); editing = null;
   el("school-editor").close();
 }
 
-async function openSchoolEditor(id, reload = false) {
+async function openSchoolEditor(id, reload = false, mode = "details") {
   if (!credential) return;
+  const retainedActivity = reload && mode === "activity" && editing?.id === id ? outreachValues() : null;
   const session = sessionVersion, seq = ++editorSeq;
   editorRead?.abort(); editorRead = new AbortController();
-  editing = { id, original: null, pending: null, busy: false };
+  editing = { id, mode, original: null, pending: null, busy: false };
+  el("editor-kind").textContent = mode === "activity" ? "LOG OUTREACH" : "SCHOOL DETAILS";
+  el("outreach-fields").hidden = mode !== "activity";
+  for (const field of detailOnlyFields) el(`field-${field}`).hidden = mode === "activity";
+  for (const field of outreachFields) {
+    el(`log-${field}`).value = field === "channel" ? "Email" : field === "activityType" ? "Outreach" : "";
+    el(`log-${field}`).required = mode === "activity" && ["outcome", "summary"].includes(field);
+  }
   el("editor-title").textContent = "Loading school…"; el("editor-meta").textContent = "";
   editorFeedback("Loading saved information…");
-  el("editor-save").disabled = true; el("editor-save").textContent = "Save changes";
+  el("editor-save").disabled = true; el("editor-save").textContent = editorSaveLabel(editing);
+  el("editor-reload").textContent = mode === "activity" ? "Reload school values" : "Reload saved values";
   el("editor-close").disabled = false; el("editor-reload").disabled = true;
   for (const field of editFields) el(`edit-${field}`).value = "";
   editorInputs(true);
@@ -158,9 +180,14 @@ async function openSchoolEditor(id, reload = false) {
     const data = await response.json();
     if (session !== sessionVersion || seq !== editorSeq || !credential) return;
     if (!response.ok) throw new Error(data.code === "NOT_OWNER" ? "You can edit only your assigned schools." : "Could not load this school. Close and try again.");
-    const draft = reload ? null : editDrafts.get(id);
+    const draft = reload ? null : editDrafts.get(editorDraftKey(editing));
     editing.original = draft?.original ?? data.record; editing.pending = draft?.pending ?? null;
     for (const field of editFields) el(`edit-${field}`).value = draft?.values[field] ?? String(data.record[field] ?? "");
+    if (mode === "activity") {
+      const activity = retainedActivity ?? draft?.activity;
+      if (activity) for (const field of outreachFields) el(`log-${field}`).value = activity[field];
+      if (!draft && data.record.stage === "Not Contacted") el("edit-stage").value = "Contacted";
+    }
     el("editor-title").textContent = data.record.schoolName;
     el("editor-meta").textContent = [data.record.schoolBoard, `Assigned to ${data.record.assignedTo || "you"}`].filter(Boolean).join(" · ");
     const day = new Date().toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
@@ -169,9 +196,10 @@ async function openSchoolEditor(id, reload = false) {
     if (cold) cold.disabled = !coldAllowed;
     el("cold-warning").textContent = coldAllowed ? "" : "Cold requires two follow-ups and a past follow-up date. Interested, Engaged and Booked schools stay protected.";
     const staleDraft = draft?.original && draft.original.lastRequestId !== data.record.lastRequestId && !editing.pending;
-    editorFeedback(staleDraft ? "Your draft is kept, but saved information changed. Use Reload saved values before editing the latest version." : draft ? "Your unsaved draft was restored." : "Changes save to the test spreadsheet.", staleDraft ? "error" : "info");
+    editing.stale = !!staleDraft;
+    editorFeedback(staleDraft ? "Your draft is kept, but saved information changed. Reload school values and review before saving." : retainedActivity ? "Latest school values loaded. Your outreach text is kept; review stage and follow-up before saving." : draft ? "Your unsaved draft was restored." : "Changes save to the test spreadsheet.", staleDraft ? "error" : "info");
     editorInputs(!!editing.pending);
-    el("editor-save").disabled = !!staleDraft; el("editor-save").textContent = editing.pending ? "Retry save" : "Save changes";
+    el("editor-save").disabled = !!staleDraft; el("editor-save").textContent = editing.pending ? "Retry save" : editorSaveLabel(editing);
     el("editor-reload").disabled = !!editing.pending;
   } catch (error) {
     if (session !== sessionVersion || seq !== editorSeq || error.name === "AbortError") return;
@@ -181,10 +209,11 @@ async function openSchoolEditor(id, reload = false) {
 
 async function saveSchoolEdits(event) {
   event.preventDefault();
-  if (!credential || !editing?.original || editing.busy) return;
+  if (!credential || !editing?.original || editing.busy || editing.stale) return;
   const session = sessionVersion, edit = editing;
   if (!edit.pending) {
-    const invalid = editFields.map((field) => el(`edit-${field}`)).find((input) => input.validity?.valid === false);
+    const inputs = edit.mode === "activity" ? [...outreachFields.map((field) => el(`log-${field}`)), ...["stage", "followUpDue", "nextAction"].map((field) => el(`edit-${field}`))] : editFields.map((field) => el(`edit-${field}`));
+    const invalid = inputs.find((input) => input.validity?.valid === false);
     if (invalid) {
       editorFeedback(invalid.validationMessage || "Please check the highlighted field before saving.", "error");
       invalid.reportValidity?.(); invalid.focus?.();
@@ -193,16 +222,25 @@ async function saveSchoolEdits(event) {
   }
   if (!edit.pending) {
     const values = editorValues();
+    if (edit.mode === "activity") {
+      const activity = outreachValues();
+      if (!activity.outcome.trim() || !activity.summary.trim()) { editorFeedback("Add an outcome and a short description before saving.", "error"); return; }
+      edit.pending = { recordId: edit.id, expectedRequestId: edit.original.lastRequestId, requestId: crypto.randomUUID(), ...activity,
+        followUpDue: values.followUpDue, nextAction: values.nextAction,
+        ...(values.stage !== edit.original.stage ? { stage: values.stage } : {}),
+      };
+    } else {
     const patch = Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== String(edit.original[key] ?? "")));
     if (!Object.keys(patch).length) { closeSchoolEditor(); showSaveToast("No changes to save"); return; }
     edit.pending = { recordId: edit.id, expectedRequestId: edit.original.lastRequestId, requestId: crypto.randomUUID(), patch };
+    }
   }
   edit.busy = true; editorInputs(true);
   el("editor-save").disabled = true; el("editor-close").disabled = true; el("editor-reload").disabled = true;
   el("editor-save").textContent = "Saving…";
   editorFeedback("Saving…");
   try {
-    const response = await apiFetch("./api/schools/update", {
+    const response = await apiFetch(edit.mode === "activity" ? "./api/activities" : "./api/schools/update", {
       method: "POST", headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
       credentials: "omit", cache: "no-store", body: JSON.stringify(edit.pending),
     });
@@ -210,11 +248,11 @@ async function saveSchoolEdits(event) {
     if (session !== sessionVersion || editing !== edit || !credential) return;
     if (response.ok) {
       edit.original = { ...edit.original, ...edit.pending.patch, lastRequestId: data.record.lastRequestId };
-      edit.pending = null; editDrafts.delete(edit.id);
+      edit.pending = null; edit.saved = true; editDrafts.delete(editorDraftKey(edit));
       editorFeedback("Saved to the test spreadsheet.");
       edit.busy = false;
       closeSchoolEditor();
-      showSaveToast("✓ Saved");
+      showSaveToast(edit.mode === "activity" ? "✓ Outreach saved" : "✓ Saved");
       await refresh();
     } else if (response.status === 401 || response.status === 403) {
       forgetSession(); status("Your access changed. Please sign in again.");
@@ -222,9 +260,11 @@ async function saveSchoolEdits(event) {
       return;
     } else if (response.status === 409 || response.status === 422 || ["SHEETS_REJECTED", "TEST_SHEET_EDIT_ACCESS_REQUIRED"].includes(data.code)) {
       edit.pending = null;
+      edit.stale = data.code === "CONFLICT_STALE_VERSION";
       editorFeedback(data.code === "CONFLICT_STALE_VERSION"
-        ? "Someone changed this school. Your draft is kept. Use Reload saved values before editing the latest version."
+        ? "Someone changed this school. Your draft is kept. Reload school values and review before saving."
         : data.code === "COLD_RULE_VIOLATION" ? "This school cannot be marked Cold yet. Check the follow-up rule below."
+        : data.code === "OUTREACH_DETAILS_REQUIRED" ? "Add an outcome and a short description before saving."
         : data.message || "The spreadsheet rejected this change. Your draft is kept.", "error");
     } else {
       editorFeedback("Save status is uncertain. Use Retry save to check safely; your draft is kept.", "error");
@@ -235,7 +275,7 @@ async function saveSchoolEdits(event) {
     edit.busy = false;
     if (session === sessionVersion && editing === edit) {
       editorInputs(!!edit.pending);
-      el("editor-save").disabled = false; el("editor-save").textContent = edit.pending ? "Retry save" : "Save changes";
+      el("editor-save").disabled = !!edit.stale; el("editor-save").textContent = edit.pending ? "Retry save" : editorSaveLabel(edit);
       el("editor-close").disabled = false; el("editor-reload").disabled = !!edit.pending;
     }
   }
@@ -624,7 +664,7 @@ el("sign-out").addEventListener("click", () => {
 });
 el("editor-form").addEventListener("submit", saveSchoolEdits);
 el("editor-close").addEventListener("click", closeSchoolEditor);
-el("editor-reload").addEventListener("click", () => { if (editing) openSchoolEditor(editing.id, true); });
+el("editor-reload").addEventListener("click", () => { if (editing) openSchoolEditor(editing.id, true, editing.mode); });
 el("school-editor").addEventListener("cancel", (event) => { event.preventDefault(); closeSchoolEditor(); });
 el("refresh").addEventListener("click", refresh);
 el("retry").addEventListener("click", initialize);
