@@ -23,8 +23,8 @@
 .editor-grid :disabled{background:#f0f2eb;color:#657165}
 .editor-wide{grid-column:1/-1}
 #cold-warning{margin:0;line-height:1.5}
-.editor-actions{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;position:sticky;bottom:-28px;background:#fafaf5;padding:16px 0 6px;margin-top:10px;border-top:1px solid #dfe4d7}
+.editor-actions{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;position:sticky;bottom:0;background:#fafaf5;padding:16px 0 6px;margin-top:10px;border-top:1px solid #dfe4d7}
 .editor-feedback{flex-basis:100%;margin:0;font-size:13px;line-height:1.45;color:#234d3e}
 .editor-feedback[data-kind=error]{color:#a52424;font-weight:600}
 .save-toast{position:fixed;right:24px;bottom:24px;z-index:1000;max-width:calc(100vw - 48px);padding:13px 20px;background:#234d3e;color:white;border-radius:10px;box-shadow:0 5px 25px #132b2540;font-size:14px;font-weight:650}
-@media(max-width:560px){#editor-form{padding:20px}.editor-grid{grid-template-columns:minmax(0,1fr)}.editor-header h2{font-size:21px}.editor-actions{bottom:-20px;flex-wrap:wrap}.editor-actions button{flex:1;min-height:46px}}
+@media(max-width:560px){#editor-form{padding:20px}.editor-grid{grid-template-columns:minmax(0,1fr)}.editor-header h2{font-size:21px}.editor-actions{bottom:0;flex-wrap:wrap}.editor-actions button{flex:1;min-height:46px}}
