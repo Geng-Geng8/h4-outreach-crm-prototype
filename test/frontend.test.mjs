@@ -6,6 +6,160 @@ import { webcrypto } from "node:crypto";
 
 const appCode = await readFile("public/app.js", "utf8");
 
+const resumeKey = "h4.crm.resume-view.v1";
+const reloadRecord = { recordId: "example", schoolName: "Example School", schoolBoard: "EXAMPLE", geographicRegion: "North", stage: "Contacted", nextAction: "Private next step", notes: "Private notes", lastRequestId: "version-1" };
+const reloadPayload = () => ({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [reloadRecord], sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+function fixtureCredential(nonce) {
+  return { credential: `header.${Buffer.from(JSON.stringify({ nonce })).toString("base64url")}.signature` };
+}
+async function until(predicate) {
+  for (let i = 0; i < 100; i++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.fail("Expected browser state did not arrive");
+}
+function reloadFetch(url) {
+  if (url.includes("/api/config")) return Promise.resolve(Response.json({ ready: true, writesEnabled: true, googleClientId: "fixture-client" }));
+  if (url.includes("/api/schools/detail")) return Promise.resolve(Response.json({ record: reloadRecord }));
+  return Promise.resolve(Response.json(reloadPayload()));
+}
+
+test("F5 obtains a fresh Google credential, checks server access, then restores the tab without persisting private data", async (t) => {
+  const storage = new Map();
+  const before = setupEnv({ storage, fetchHandler: reloadFetch }); t.after(before.cleanup);
+  await before.signIn("alex@example.test"); before.context.switchTab("my-schools");
+  assert.deepEqual([...storage], [[resumeKey, "my-schools"]]); before.cleanup();
+  let respond, google;
+  const after = setupEnv({ storage, onPrompt: (options) => { google = options; }, fetchHandler: async (url, init) => {
+    if (url.includes("/api/config")) return reloadFetch(url);
+    assert.match(init.headers.Authorization, /^Bearer /);
+    return new Promise((resolve) => { respond = resolve; });
+  } }); t.after(after.cleanup);
+  await until(() => google);
+  assert.equal(google.auto_select, true);
+  assert.notEqual(google.nonce, before.googleOptions().nonce);
+  assert.equal(after.getEl("session-restore").hidden, false);
+  assert.equal(after.getEl("workspace").hidden, true);
+  const pending = google.callback(fixtureCredential(google.nonce));
+  await until(() => respond);
+  assert.equal(after.getEl("school-list").children.length, 0, "no cached records before server authorization");
+  respond(Response.json(reloadPayload())); await pending;
+  assert.equal(after.getEl("workspace").hidden, false);
+  assert.equal(after.getEl("schools-view").hidden, false);
+  assert.equal(after.getEl("session-restore").hidden, true);
+  assert.equal(after.getEl("user-name").textContent, "Alex");
+  assert.deepEqual([...storage], [[resumeKey, "my-schools"]]);
+});
+
+test("blocked automatic sign-in offers manual confirmation; explicit sign-out stops restoration and ignores old callbacks", async (t) => {
+  const storage = new Map([[resumeKey, "my-schools"]]); let prompts = 0;
+  const h = setupEnv({ storage, fetchHandler: reloadFetch, onPrompt: (_, notification) => { prompts++; notification({ isNotDisplayed: () => true }); } }); t.after(h.cleanup);
+  await until(() => h.googleOptions());
+  assert.equal(h.getEl("session-restore").hidden, true);
+  assert.equal(h.getEl("welcome").hidden, false);
+  assert.match(h.getEl("login-status").textContent, /confirmation/);
+  const old = h.googleOptions();
+  await h.signIn("alex@example.test");
+  assert.equal(h.getEl("schools-view").hidden, false);
+  h.getEl("sign-out").click(); await until(() => h.googleOptions() !== old);
+  await old.callback(fixtureCredential(old.nonce));
+  assert.equal(h.getEl("workspace").hidden, true);
+  assert.equal(h.getEl("school-list").children.length, 0);
+  assert.equal(storage.has(resumeKey), false);
+  const next = setupEnv({ storage, fetchHandler: reloadFetch, onPrompt: () => prompts++ }); t.after(next.cleanup);
+  await until(() => next.googleOptions());
+  assert.equal(next.googleOptions().auto_select, false); assert.equal(prompts, 1);
+});
+
+test("revoked restore is rejected by the server and clears the navigation hint and all protected content", async (t) => {
+  const storage = new Map([[resumeKey, "home"]]); let options;
+  const h = setupEnv({ storage, onPrompt: (value) => { options = value; }, fetchHandler: (url) => url.includes("/api/config") ? reloadFetch(url) : Promise.resolve(new Response("Access revoked", { status: 403 })) }); t.after(h.cleanup);
+  await until(() => options);
+  await options.callback(fixtureCredential(options.nonce));
+  assert.equal(h.getEl("workspace").hidden, true);
+  assert.equal(h.getEl("session-restore").hidden, true);
+  assert.equal(h.getEl("home-actions").children.length, 0);
+  assert.equal(h.getEl("user-name").textContent, "");
+  assert.equal(storage.has(resumeKey), false);
+  assert.equal(h.googleOptions().auto_select, false);
+});
+
+test("temporary refresh failures keep the signed-in workspace and draft; recovery succeeds and a real 403 clears them", async (t) => {
+  let failure = "";
+  const h = setupEnv({ fetchHandler: (url) => {
+    if (url.includes("/api/bootstrap")) {
+      if (failure === "network") return Promise.reject(new TypeError("Network lost"));
+      if (failure === "json") return Promise.resolve(new Response("broken JSON"));
+      if (failure) return Promise.resolve(new Response("Unavailable", { status: Number(failure) }));
+    }
+    return reloadFetch(url);
+  } }); t.after(h.cleanup);
+  await h.signIn("alex@example.test"); await h.context.openSchoolEditor(reloadRecord.recordId);
+  h.getEl("edit-notes").value = "Keep my draft";
+  for (failure of ["503", "network", "json"]) {
+    await h.context.refresh();
+    assert.equal(h.getEl("workspace").hidden, false);
+    assert.equal(h.getEl("school-editor").open, true);
+    assert.equal(h.getEl("edit-notes").value, "Keep my draft");
+    assert.match(h.getEl("home-status").textContent, /last loaded records/);
+    assert.equal(h.getEl("refresh").disabled, false);
+  }
+  failure = ""; await h.context.refresh(); assert.equal(h.getEl("workspace-status").textContent, "Up to date");
+  failure = "403"; await h.context.refresh();
+  assert.equal(h.getEl("workspace").hidden, true);
+  assert.equal(h.getEl("edit-notes").value, ""); assert.equal(h.getEl("school-editor").open, false);
+});
+
+test("first-load outage can retry without another Google login; disabled browser storage does not break login", async (t) => {
+  let bootstrap = 0, configs = 0;
+  const storage = { get() { throw new Error("Storage blocked"); }, set() { throw new Error("Storage blocked"); }, delete() { throw new Error("Storage blocked"); } };
+  const h = setupEnv({ storage, fetchHandler: (url) => {
+    if (url.includes("/api/config")) configs++;
+    if (url.includes("/api/bootstrap") && bootstrap++ === 0) return Promise.resolve(Response.json({}, { status: 503 }));
+    return reloadFetch(url);
+  } }); t.after(h.cleanup);
+  await h.signIn("alex@example.test");
+  assert.equal(h.getEl("workspace").hidden, true); assert.equal(h.getEl("retry").hidden, false);
+  h.getEl("retry").click(); await until(() => !h.getEl("workspace").hidden);
+  assert.equal(bootstrap, 2); assert.equal(configs, 1);
+  h.getEl("sign-out").click(); assert.equal(h.getEl("workspace").hidden, true);
+});
+
+test("a timed-out refresh unlocks retry without signing out; token expiry still clears protected data", async (t) => {
+  let hang = false;
+  const h = setupEnv({ timerDelay: (ms) => ms === 15000 ? 5 : ms, fetchHandler: (url, init) => {
+    if (hang && url.includes("/api/bootstrap")) return new Promise((_, reject) => {
+      init.signal.addEventListener("abort", () => reject(Object.assign(new Error("Aborted"), { name: "AbortError" })));
+    });
+    return reloadFetch(url);
+  } }); t.after(h.cleanup);
+  await h.signIn("alex@example.test"); hang = true; await h.context.refresh();
+  assert.equal(h.getEl("workspace").hidden, false);
+  assert.match(h.getEl("home-status").textContent, /timed out/);
+  assert.equal(h.getEl("refresh").disabled, false);
+  assert.equal(h.getEl("home-refresh").disabled, false);
+  const expired = setupEnv({ fetchHandler: async (url) => url.includes("/api/config") ? reloadFetch(url) : Response.json({ ...reloadPayload(), sessionExpiresAt: 1 }) }); t.after(expired.cleanup);
+  await expired.signIn("alex@example.test");
+  assert.equal(expired.getEl("workspace").hidden, true);
+  assert.equal(expired.getEl("home-actions").children.length, 0);
+  assert.match(expired.getEl("login-status").textContent, /expired/);
+});
+
+test("access rejection during save resets the Google button so a fresh authorized login can recover", async (t) => {
+  const h = setupEnv({ fetchHandler: (url) => url.includes("/api/schools/update")
+    ? Promise.resolve(Response.json({ code: "USER_NOT_ALLOWED" }, { status: 403 })) : reloadFetch(url) }); t.after(h.cleanup);
+  await h.signIn("alex@example.test"); const old = h.googleOptions();
+  await h.context.openSchoolEditor(reloadRecord.recordId);
+  h.getEl("edit-notes").value = "Changed notes";
+  await h.context.saveSchoolEdits({ preventDefault() {} });
+  assert.equal(h.getEl("workspace").hidden, true);
+  assert.notEqual(h.googleOptions().nonce, old.nonce);
+  assert.equal(h.getEl("google-button").hidden, false);
+  await h.signIn("alex@example.test");
+  assert.equal(h.getEl("workspace").hidden, false);
+});
+
 test("students land on My Outreach with correct priorities, quick actions and a working follow-up reminder", async (t) => {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const records = [
@@ -372,7 +526,7 @@ test("a definitely rejected directory claim starts a fresh request on retry", as
   assert.equal(getEl("dir-feedback").textContent, "School claimed successfully");
 });
 
-function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = [] }) {
+function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = [], storage = new Map(), onPrompt, timerDelay = (ms) => ms }) {
   let googleOptions;
   const windowListeners = new Map();
   const activeTimers = new Set();
@@ -465,6 +619,8 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
           initialize: (opts) => { googleOptions = opts; },
           renderButton: () => {},
           disableAutoSelect: () => {},
+          prompt: (notification) => onPrompt?.(googleOptions, notification),
+          cancel: () => {},
         },
       },
     },
@@ -474,6 +630,11 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
     document,
     window,
     navigator: { onLine: online },
+    sessionStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, String(value)),
+      removeItem: (key) => storage.delete(key),
+    },
     crypto: webcrypto,
     el: (id) => getEl(id),
     fetch: fetchHandler,
@@ -482,7 +643,7 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       t = globalThis.setTimeout(() => {
         activeTimers.delete(t);
         fn();
-      }, ms);
+      }, timerDelay(ms));
       t.unref?.();
       activeTimers.add(t);
       return t;
@@ -510,6 +671,8 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
   };
 
   vm.createContext(context);
+  getEl("workspace").hidden = true;
+  getEl("session-restore").hidden = true;
   vm.runInContext(appCode, context);
 
   async function signIn(email = "supervisor@example.test") {
@@ -530,7 +693,7 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
     await new Promise((r) => setTimeout(r, 20));
   }
 
-  return { context, getEl, signIn, cleanup,
+  return { context, getEl, signIn, cleanup, googleOptions: () => googleOptions,
     dispatchWindow: (event) => Promise.all((windowListeners.get(event) ?? []).map((callback) => callback({}))),
   };
 }

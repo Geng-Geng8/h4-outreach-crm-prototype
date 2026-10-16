@@ -882,6 +882,10 @@ footer span span {
   }
 }
 
+.session-restore { display: grid; place-items: center; min-height: 60vh; padding: 40px 0; }
+.session-restore .login-card { width: min(100%, 460px); margin: 0; }
+.session-restore h1 { font-size: 28px; letter-spacing: -.6px; line-height: 1.2; }
+
 /* Connectivity is based on API reachability, separate from save confirmation. */
 .mode-pill[data-state="checking"] > span:first-child{background:#8a8a79}
 .mode-pill[data-state="offline"]{background:#fff2ed;border-color:#d9b5a9;color:#842f20;animation:connection-pulse 1.8s ease-in-out infinite}
