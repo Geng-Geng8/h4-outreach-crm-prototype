@@ -5,6 +5,20 @@ import { readHarness, ACTOR, OTHER, SUPERVISOR, CLIENT, SCOPE } from "./read-onl
 const sheetReads = (h) => h.calls.filter((call) => call.host === "sheets.googleapis.com");
 const schoolReads = (h) => sheetReads(h).filter((call) => call.ranges.some((range) => range.startsWith("'Schools'!")));
 
+test("installation metadata and correctly sized icons are public static assets", async (t) => {
+  const h = await readHarness(t);
+  const response = await h.request("/manifest.webmanifest?v=1");
+  assert.equal(response.status, 200); assert.match(response.headers.get("content-type"), /application\/manifest\+json/);
+  assert.equal((await response.json()).short_name, "H4 Outreach");
+  for (const size of [48, 180, 192, 512]) {
+    const icon = await h.request(`/assets/icons/h4-outreach-v1-${size}.png`);
+    assert.equal(icon.status, 200); assert.equal(icon.headers.get("content-type"), "image/png");
+    const png = Buffer.from(await icon.arrayBuffer());
+    assert.equal(png.readUInt32BE(16), size); assert.equal(png.readUInt32BE(20), size);
+  }
+  assert.equal(h.calls.length, 0, "loading installation assets never calls Google or reads school data");
+});
+
 test("team dashboard shares all progress summaries with students, but no private fields or edit grants", async (t) => {
   const h = await readHarness(t);
   h.tables.Schools[1][9] = "2026-10-14"; h.tables.Schools[1][10] = "2026-10-20";
