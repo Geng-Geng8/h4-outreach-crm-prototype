@@ -49,21 +49,39 @@
       </div>
 
       <nav class="workspace-tabs" role="tablist" aria-label="Workspace views">
-        <button id="tab-dashboard" role="tab" aria-selected="false" aria-controls="dashboard-view" class="tab-btn" type="button">Team dashboard</button>
-        <button id="tab-my-schools" role="tab" aria-selected="true" class="tab-btn active" type="button">My schools</button>
-        <button id="tab-directory" role="tab" aria-selected="false" class="tab-btn" type="button">Browse directory</button>
+        <button id="tab-home" role="tab" aria-selected="true" aria-controls="home-view" class="tab-btn active" type="button">My Outreach</button>
+        <button id="tab-dashboard" role="tab" aria-selected="false" aria-controls="dashboard-view" class="tab-btn" type="button">Team Progress</button>
+        <button id="tab-my-schools" role="tab" aria-selected="false" aria-controls="schools-view" class="tab-btn" type="button">My Schools</button>
+        <button id="tab-directory" role="tab" aria-selected="false" aria-controls="directory-view" class="tab-btn" type="button">Find School</button>
         <button id="tab-demo-claim" role="tab" aria-selected="false" class="tab-btn" type="button">🧪 Synthetic claim demo</button>
       </nav>
 
+      <div id="home-view" role="tabpanel" aria-labelledby="tab-home" hidden>
+        <div class="dashboard-heading"><div><h2 id="home-message">Your next connection starts here.</h2><p id="home-description">Start with today’s follow-ups, then keep your conversations moving.</p></div><button id="home-refresh" class="button secondary" type="button">Refresh</button></div>
+        <p id="home-status" class="workspace-status" role="status" aria-live="polite"></p>
+        <div id="home-content" hidden>
+          <div id="home-metrics" class="dashboard-metrics" aria-label="Outreach totals"></div>
+          <div id="overview-panel" hidden>
+            <div class="dashboard-section-heading"><h3>Outreach pipeline</h3><p>Select a stage to review its schools.</p></div>
+            <div id="overview-pipeline" class="dashboard-pipeline" aria-label="Overall outreach pipeline"></div>
+            <div class="dashboard-section-heading"><h3>Student progress</h3><p>School counts by current stage.</p></div>
+            <div class="dashboard-table-wrap"><table class="dashboard-table student-progress-table"><caption class="sr-only">Individual student progress, visible only to supervisors</caption><thead><tr><th scope="col">Student</th><th scope="col">Assigned</th><th scope="col">Current pipeline</th><th scope="col">Booked</th><th scope="col">Overdue</th><th scope="col">Review</th></tr></thead><tbody id="overview-students"></tbody></table></div>
+            <p class="quiet-note">“Schools contacted” counts schools with a recorded last-contact date. Pipeline and booking totals count school records, not outreach events or individual workshops.</p>
+          </div>
+          <div class="dashboard-section-heading"><div><h3 id="home-actions-title">What to do next</h3><p id="home-actions-description">Follow-ups first, then your highest-priority schools.</p></div><button id="home-find" class="button secondary" type="button">Find a school</button></div>
+          <label id="home-filter-label" class="home-filter">Show<select id="home-filter"><option value="">My priority actions</option><option value="due">Due today or overdue</option><option value="warm">Interested or Engaged</option><option value="booked">My bookings</option></select></label>
+          <p id="home-action-count" class="workspace-status" role="status" aria-live="polite"></p>
+          <div id="home-actions" class="school-list"></div>
+          <p id="home-empty" class="empty-state" hidden></p>
+          <button id="home-more" class="button secondary" type="button" hidden>Show more schools</button>
+          <button id="home-schools" class="text-button home-all-schools" type="button">View my schools →</button>
+        </div>
+      </div>
+
       <div id="dashboard-view" role="tabpanel" aria-labelledby="tab-dashboard" hidden>
-        <div class="dashboard-heading"><div><h2>The team at a glance.</h2><p>Every claimed school, from first contact to a booked workshop.</p></div><button id="dashboard-refresh" class="button secondary" type="button">Refresh dashboard</button></div>
+        <div class="dashboard-heading"><div><h2>Every school. One shared picture.</h2><p>See who is handling each school and where the conversation stands.</p></div><button id="dashboard-refresh" class="button secondary" type="button">Refresh team</button></div>
         <p id="dashboard-status" class="workspace-status" role="status" aria-live="polite"></p>
         <div id="dashboard-content" hidden>
-          <div id="dashboard-metrics" class="dashboard-metrics" aria-label="Team totals"></div>
-          <div class="dashboard-section-heading"><h3>Outreach pipeline</h3><p>Choose a stage to see its schools.</p></div>
-          <div id="dashboard-pipeline" class="dashboard-pipeline" aria-label="Filter by outreach stage"></div>
-          <div class="dashboard-section-heading"><h3>Who’s working on what</h3><p>Choose a team member to see their assignments.</p></div>
-          <div id="dashboard-team" class="dashboard-team" aria-label="Filter by team member"></div>
           <div class="dashboard-section-heading"><h3>School status</h3><button id="dashboard-clear" class="text-button" type="button">Clear filters</button></div>
           <div class="dashboard-filters">
             <label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search team schools</span><input id="dashboard-search" type="search" placeholder="Search school, board or region" autocomplete="off"></label>
@@ -78,7 +96,8 @@
         </div>
       </div>
 
-      <div id="schools-view">
+      <div id="schools-view" role="tabpanel" aria-labelledby="tab-my-schools" hidden>
+        <div id="schools-scope" class="visibility-note" hidden><span id="schools-scope-label"></span><button id="schools-scope-clear" class="text-button" type="button">Show all schools</button></div>
         <div class="workspace-tools"><div class="count-label"><strong id="school-count">0</strong><span id="school-count-label">schools</span></div><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search schools</span><input id="search" type="search" placeholder="Search by school, board or region" autocomplete="off"></label><button id="refresh" class="button secondary" type="button">Refresh</button></div>
         <p class="visibility-note">Select a school to edit details, or choose Log outreach to record a contact or follow-up. Students can update only their own schools.</p>
         <p id="workspace-status" class="workspace-status" role="status" aria-live="polite"></p>
@@ -86,9 +105,9 @@
         <div id="empty-state" class="empty-state" hidden><span aria-hidden="true">↗</span><h2 id="empty-title">No schools assigned yet</h2><p id="empty-description">Your supervisor can help you find your next school.</p></div>
       </div>
 
-      <div id="directory-view" hidden>
+      <div id="directory-view" role="tabpanel" aria-labelledby="tab-directory" hidden>
         <div class="workspace-tools"><div class="count-label"><strong id="dir-count">0</strong><span id="dir-count-label">schools</span></div><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search directory</span><input id="dir-search" type="search" placeholder="Search directory by name, board, city or region" autocomplete="off"></label><button id="dir-refresh" class="button secondary" type="button">Refresh directory</button></div>
-        <p class="visibility-note">Claim an available school to start your outreach. See everyone’s assignments and progress in Team dashboard.</p>
+        <p class="visibility-note">Claim an available school to start your outreach. See everyone’s assignments and school status in Team Progress.</p>
         <p id="dir-status" class="workspace-status" role="status" aria-live="polite"></p>
         <p id="dir-feedback" class="demo-feedback" role="status" aria-live="polite"></p>
         <div id="dir-list" class="school-list"></div>

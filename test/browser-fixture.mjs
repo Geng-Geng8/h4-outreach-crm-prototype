@@ -9,6 +9,18 @@ let cleanup;
 const fixturePort = Number(process.env.H4_FIXTURE_PORT || 8788);
 const fixtureOrigin = `http://localhost:${fixturePort}`;
 const h = await readHarness({ after(fn) { cleanup = fn; } }, { ALLOWED_ORIGIN: fixtureOrigin, ENABLE_REAL_WRITES: "true", GOOGLE_ADAPTER_TEST: "true" });
+// Representative local-only progress, including an overdue task and a booking.
+const sample = h.tables.Schools[1];
+sample[6] = "office@example.test";
+sample[8] = "Contacted"; sample[9] = "2000-01-01"; sample[10] = "2000-01-02"; sample[11] = "Call the school office about a workshop";
+for (const [number, name, stage, next] of [[101, "Interested Example School", "Interested", "Confirm a time with the principal"], [102, "Booked Example School", "Booked", "Confirm workshop details"], [103, "New Example School", "Not Contacted", "Introduce H4 to the school office"]]) {
+  const row = structuredClone(sample);
+  row[0] = `00000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
+  row[1] = name; row[8] = stage; row[9] = stage === "Not Contacted" ? "" : "2000-01-01";
+  row[10] = "2099-01-01"; row[11] = next; row[24] = String(900000 + number);
+  h.tables.Schools.push(row);
+}
+h.demoSheets.tables = structuredClone(h.tables);
 const fixtureGoogle = `
 window.google = {accounts:{id:{
   initialize(options){this.options=options}, disableAutoSelect(){},
@@ -47,7 +59,11 @@ const server = createServer(async (request, response) => {
       const isBinary = (upstream.headers.get("content-type") ?? "").startsWith("image/");
       body = isBinary ? Buffer.from(await upstream.arrayBuffer()) : await upstream.text();
       status = upstream.status; headers = Object.fromEntries(upstream.headers);
+      if (request.method === "POST" && status === 200 && ["/api/schools/claim", "/api/schools/update", "/api/activities"].includes(url.pathname)) {
+        h.tables.Schools = structuredClone(h.demoSheets.tables.Schools);
+      }
       type = upstream.headers.get("content-type") ?? type;
+      if (url.pathname === "/api/config") body = JSON.stringify({ ...JSON.parse(body), demoAvailable: false });
       if (url.pathname === "/app.js") body = body.replace("https://accounts.google.com/gsi/client", "/fixture/gsi.js");
       if (url.pathname === "/" || url.pathname === "/index.html") {
         body = body.replace("<body>", '<body><aside class="fixture-banner">SYNTHETIC UI TEST · No Google account or real school data used. <button id="fixture-revoke" class="button">Revoke Alex</button> <button id="fixture-restore" class="button">Restore Alex</button><span id="fixture-feedback" role="status"></span></aside><script src="/fixture/tools.js" defer></script>');

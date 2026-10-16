@@ -17,6 +17,14 @@ export type SchoolSummary = {
   recordId: string; schoolName: string; schoolBoard: string;
   assignedTo: string; stage: string; priority: string; geographicRegion: string;
 };
+export type ActionSchool = SchoolSummary & {
+  lastContacted: string; followUpDue: string; nextAction: string;
+};
+type StudentProgress = { id: string; name: string; active: boolean };
+async function studentId(email: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 export type DirectoryEntry = {
   osn: string; schoolName: string; schoolBoard: string;
   schoolLevel: string; gradeRange: string; city: string;
@@ -138,30 +146,36 @@ export class GoogleSheetsReadOnly {
     return { email, name: value(row[1]).trim() || email, role: role as CrmUser["role"] };
   }
 
-  async schools(user: CrmUser): Promise<SchoolSummary[]> {
+  async schools(user: CrmUser): Promise<ActionSchool[]> {
+    return (await this.actionData(user)).schools.map(({ ownerEmail: _ownerEmail, ...school }) => school);
+  }
+
+  private async actionData(user: CrmUser, includeUsers = false) {
     // Read only the columns needed for the minimal screen and ownership checks.
     // No notes, contacts, phone numbers, value, social handles, or Activity Log.
     const ranges = await this.read([
-      "'Schools'!A1:D1000", "'Schools'!I1:I1000", "'Schools'!M1:M1000",
+      "'Schools'!A1:D1000", "'Schools'!I1:L1000", "'Schools'!M1:M1000",
       "'Schools'!S1:S1000", "'Schools'!Z1:Z1000",
+      ...(includeUsers ? ["'CRM Users'!A1:D1000"] : []),
     ]);
-    const [base, stages, priorities, regions, owners] = ranges.map((range) => range.values ?? []);
+    const [base, stages, priorities, regions, owners, users] = ranges.map((range) => range.values ?? []);
     checkHeader(base?.[0], HEADERS.Schools.slice(0, 4));
-    checkHeader(stages?.[0], ["Stage"]); checkHeader(priorities?.[0], ["Priority"]);
+    checkHeader(stages?.[0], ["Stage", "Last Contacted", "Follow-Up Due", "Next Action"]); checkHeader(priorities?.[0], ["Priority"]);
     checkHeader(regions?.[0], ["Geographic Region"]); checkHeader(owners?.[0], ["Owner Email"]);
-    const summaries: SchoolSummary[] = [];
+    const summaries: (ActionSchool & { ownerEmail: string })[] = [];
     for (let index = 1; index < (base?.length ?? 0); index++) {
       const row = base![index]!;
       if (!row[0]) continue;
       const owner = value(owners?.[index]?.[0]).trim().toLowerCase();
       if (user.role !== "Supervisor" && owner !== user.email) continue;
       summaries.push({
-        recordId: value(row[0]), schoolName: value(row[1]), schoolBoard: value(row[2]),
+        recordId: value(row[0]), schoolName: value(row[1]), schoolBoard: value(row[2]), ownerEmail: owner,
         assignedTo: value(row[3]), stage: value(stages?.[index]?.[0]),
+        lastContacted: value(stages?.[index]?.[1]), followUpDue: value(stages?.[index]?.[2]), nextAction: value(stages?.[index]?.[3]),
         priority: value(priorities?.[index]?.[0]), geographicRegion: value(regions?.[index]?.[0]),
       });
     }
-    return summaries;
+    return { schools: summaries, users: users ?? [] };
   }
 
   async teamSchools(user: CrmUser): Promise<(SchoolSummary & {
@@ -191,6 +205,30 @@ export class GoogleSheetsReadOnly {
       });
     }
     return summaries;
+  }
+
+  async overview(user: CrmUser) {
+    if (user.role !== "Supervisor") throw new ApiError(403, "SUPERVISOR_ROLE_REQUIRED");
+    // Reuse the role-scoped projection and fetch roster in the same batch.
+    // Roster information never enters the shared Team Progress response.
+    const { schools, users } = await this.actionData(user, true);
+    checkHeader(users[0], HEADERS["CRM Users"]);
+    const students: StudentProgress[] = [];
+    const owners = new Map<string, { id: string; active: boolean; student: boolean }>();
+    for (const row of users.slice(1)) {
+      const email = value(row[0]).trim().toLowerCase();
+      if (!email) continue;
+      const id = await studentId(email), active = ["TRUE", ""].includes(value(row[3]).trim().toUpperCase());
+      const student = value(row[2]).trim() === "co-op";
+      owners.set(email, { id, active, student });
+      if (student) students.push({ id, name: value(row[1]).trim() || "Unnamed student", active });
+    }
+    // Ownership is joined by verified email, never by non-unique display names.
+    return { students, schools: schools.map(({ ownerEmail: email, ...school }) => {
+      const owner = owners.get(email);
+      return { ...school, studentId: owner?.student ? owner.id : "",
+        assignmentIssue: !email ? "Unassigned school" : !owner ? "Owner is not listed in CRM Users" : !owner.active ? "Owner is inactive" : "" };
+    }) };
   }
 
   async directory(): Promise<DirectoryEntry[]> {

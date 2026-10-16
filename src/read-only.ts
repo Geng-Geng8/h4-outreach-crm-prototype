@@ -260,6 +260,10 @@ export default (() => {
             const identity = await verifyGoogleIdentity(request, env.GOOGLE_CLIENT_ID!);
             if (!reader?.matches(env)) reader = new GoogleSheetsReadOnly(env);
             const user = await reader.authorize(identity.email);
+            if (url.searchParams.get("view") === "overview") {
+              if (user.role !== "Supervisor") throw new ApiError(403, "SUPERVISOR_ROLE_REQUIRED");
+              return json(200, { ok: true, ...await reader.overview(user) });
+            }
             return json(200, { ok: true, schools: await reader.teamSchools(user) });
           } catch (error) {
             return error instanceof ApiError
@@ -273,11 +277,12 @@ export default (() => {
           const identity = await verifyGoogleIdentity(request, env.GOOGLE_CLIENT_ID!);
           if (!reader?.matches(env)) reader = new GoogleSheetsReadOnly(env);
           const user = await reader.authorize(identity.email);
-          const schools = await reader.schools(user);
+          const overview = user.role === "Supervisor" ? await reader.overview(user) : undefined;
+          const schools = overview?.schools ?? await reader.schools(user);
           return json(200, {
             ok: true, mode: "read-only", writesEnabled: false,
             currentUser: { ...user, subject: identity.subject }, sessionExpiresAt: identity.expiresAt,
-            schools, visibility: {
+            schools, ...(overview ? { overview: { students: overview.students } } : {}), visibility: {
               scope: user.role === "Supervisor" ? "all-school-summaries" : "assigned-school-summaries",
               privateNotes: false, contacts: false, activities: false,
             },

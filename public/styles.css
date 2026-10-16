@@ -901,6 +901,45 @@ footer span span {
 .dashboard-metric:first-child { background: var(--brand-pine); border-color: var(--brand-pine); color: white; }
 .dashboard-metric strong { display: block; font-size: 36px; font-weight: 700; line-height: 1.1; letter-spacing: -1px; margin-bottom: 10px; }
 .dashboard-metric span { font-size: 12px; }
+.dashboard-metric { color: var(--text-main); text-align: left; }
+button.dashboard-metric { min-height: 100px; }
+button.dashboard-metric:hover { border-color: var(--brand-pine); box-shadow: var(--shadow-md); }
+.dashboard-metric:first-child { color: white; }
+.home-filter { display: flex; gap: 10px; align-items: center; font-size: 12px; margin-bottom: 12px; }
+.home-filter select { padding: 10px 12px; min-height: 44px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: white; color: var(--text-main); }
+.action-card { display: flex; flex-direction: column; }
+.action-card h3 { font-size: 17px; line-height: 1.4; letter-spacing: -.3px; margin: 16px 0 8px; }
+.action-next { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; margin: 16px 0 6px; }
+.action-date { font-size: 12px; color: var(--text-muted); margin: 0 0 18px; }
+.action-date.dashboard-due, .attention-reasons { color: #9a4027; }
+.attention-reasons { font-size: 11px; line-height: 1.6; background: #fff4ee; border-radius: var(--radius-sm); padding: 8px 10px; }
+.action-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: auto; }
+.action-buttons .button { padding: 12px 8px; min-height: 44px; font-size: 12px; }
+.action-buttons .text-button { min-height: 44px; font-size: 12px; }
+.home-all-schools { display: block; margin-top: 16px; min-height: 44px; }
+#schools-scope { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 20px; }
+#schools-scope .text-button { min-height: 44px; }
+.student-pipeline { max-width: 300px; }
+.student-pipeline span { display: inline-block; white-space: nowrap; padding: 4px 7px; margin: 3px; background: var(--surface-muted); border-radius: 4px; font-size: 10px; }
+.student-progress-table td:first-child { width: auto; }
+.student-progress-table .text-button { min-height: 44px; }
+.student-home .dashboard-metrics { margin: 16px 0 24px; }
+.student-home .dashboard-metric { min-height: 72px; padding: 14px 16px; }
+.student-home .dashboard-metric strong { font-size: 26px; margin-bottom: 5px; }
+#home-view:not(.student-home) .dashboard-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 600px) {
+  .student-home .dashboard-metric { min-height: 68px; padding: 12px 14px; }
+  .student-home .dashboard-metric strong { font-size: 23px; }
+  .student-home .dashboard-metric span { font-size: 11px; }
+  .home-filter { flex-wrap: wrap; }
+  .home-filter select { max-width: 100%; }
+  .home-filter select, .dashboard-filters select, .dashboard-filters input { font-size: 16px; }
+  .student-pipeline { flex-wrap: wrap; justify-content: start !important; max-width: none; }
+  .student-pipeline::before { width: 100%; }
+  .student-progress-table .text-button { white-space: normal; text-align: right; }
+  .action-next { font-size: 14px; }
+  .action-date { font-size: 13px; }
+}
 .dashboard-pipeline { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 9px; }
 .pipeline-step { text-align: left; border: 1px solid var(--line); border-top: 3px solid #a7b99a; border-radius: var(--radius-md); padding: 16px 14px; background: white; color: var(--text-main); min-height: 109px; }
 .pipeline-step:nth-child(3), .pipeline-step:nth-child(4) { border-top-color: var(--accent-gold); }
@@ -908,13 +947,7 @@ footer span span {
 .pipeline-step:last-child { border-top-color: #8d9b9c; }
 .pipeline-step span { display: block; font-size: 11px; min-height: 30px; }
 .pipeline-step strong { display: block; font-size: 28px; margin-top: 10px; }
-.pipeline-step:hover, .team-member:hover { background: var(--surface-muted); }
-.pipeline-step[aria-pressed="true"], .team-member[aria-pressed="true"] { outline: 2px solid var(--brand-pine); outline-offset: 1px; background: var(--brand-pine-subtle); }
-.dashboard-team { display: flex; gap: 10px; flex-wrap: wrap; }
-.team-member { text-align: left; padding: 15px 18px; border: 1px solid var(--line); border-radius: var(--radius-md); background: white; color: var(--text-main); }
-.team-member strong, .team-member span { display: block; }
-.team-member strong { font-size: 14px; margin-bottom: 7px; }
-.team-member span { color: var(--text-muted); font-size: 11px; }
+.pipeline-step:hover { background: var(--surface-muted); }
 .dashboard-filters { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
 .dashboard-filters .search { flex: 1 1 260px; margin: 0; order: 0; }
 .dashboard-filters > label:not(.search) { display: grid; gap: 6px; font-size: 11px; color: var(--text-muted); }
@@ -959,4 +992,10 @@ footer span span {
   .dashboard-table td:first-child::before { display: none; }
   .dashboard-table .dashboard-due { flex-wrap: wrap; }
   .dashboard-due .dashboard-school-meta { margin: 0; }
+  .dashboard-filters input, .dashboard-filters select { font-size: 16px; }
+  .action-buttons button, .workspace-tabs button { min-height: 44px; }
+  .workspace-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: visible; gap: 4px; }
+  .workspace-tabs .tab-btn { padding: 10px 4px; font-size: 11px; white-space: normal; line-height: 1.35; border-radius: var(--radius-md); }
+  #home-view:not(.student-home) .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #home-view:not(.student-home) .dashboard-metric:last-child { grid-column: 1 / -1; }
 }

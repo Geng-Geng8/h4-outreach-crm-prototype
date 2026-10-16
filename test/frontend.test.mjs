@@ -6,7 +6,116 @@ import { webcrypto } from "node:crypto";
 
 const appCode = await readFile("public/app.js", "utf8");
 
-test("team dashboard totals, pipeline and combined filters show team status without other-owner actions", async (t) => {
+test("students land on My Outreach with correct priorities, quick actions and a working follow-up reminder", async (t) => {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const records = [
+    { recordId: "overdue", schoolName: "Overdue School", stage: "Contacted", followUpDue: "2000-01-01", nextAction: "Call the office" },
+    { recordId: "today", schoolName: "Today School", stage: "Interested", followUpDue: today, nextAction: "Follow up today" },
+    { recordId: "high", schoolName: "Priority School", stage: "Not Contacted", priority: "High" },
+    { recordId: "booked", schoolName: "Booked School", stage: "Booked", followUpDue: "2000-01-01" },
+    { recordId: "cold", schoolName: "Cold School", stage: "Cold", followUpDue: "2000-01-01" },
+    { recordId: "engaged", schoolName: "Engaged School", stage: "Engaged", followUpDue: "2099-01-01" },
+  ].map((school) => ({ schoolBoard: "EXAMPLE", geographicRegion: "North", assignedTo: "Alex", lastRequestId: "00000000-0000-4000-8000-000000000002", ...school }));
+  const requests = [], saves = [];
+  const h = setupEnv({ fetchHandler: async (url, init = {}) => {
+    requests.push(url);
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: records, sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record: records[0] });
+    if (url.includes("/api/schools/update")) {
+      const body = JSON.parse(init.body); saves.push(body); Object.assign(records[0], body.patch, { lastRequestId: body.requestId });
+      return Response.json({ ok: true, record: records[0] });
+    }
+    return Response.json({ directory: [] });
+  } }); t.after(h.cleanup);
+  await h.signIn("alex@example.test");
+  assert.equal(h.getEl("tab-home").textContent, "My Outreach"); assert.equal(h.getEl("tab-home").getAttribute("aria-selected"), "true");
+  assert.equal(h.getEl("home-view").hidden, false); assert.equal(h.getEl("overview-panel").hidden, true);
+  assert.equal(h.getEl("workspace-heading").textContent, "My Outreach.");
+  assert.equal(requests.length, 2, "initial config + bootstrap, with no extra dashboard fetch");
+  assert.deepEqual(h.getEl("home-metrics").children.map((node) => node.children[0].textContent), ["6", "2", "2", "1"]);
+  assert.equal(h.getEl("home-actions").children[0].children[1].textContent, "Overdue School");
+  assert.match(h.getEl("home-description").textContent, /Overdue School.*Call the office/);
+  h.getEl("home-metrics").children[3].click(); assert.equal(h.getEl("home-actions").children.length, 1);
+  assert.equal(h.getEl("home-actions").children[0].children[1].textContent, "Booked School");
+  await h.context.openAction("overdue", "reminder");
+  assert.equal(h.getEl("school-editor").open, true); assert.equal(h.getEl("edit-followUpDue").focused, true);
+  h.getEl("edit-followUpDue").value = "2099-02-01"; await h.context.saveSchoolEdits({ preventDefault() {} });
+  assert.equal(saves.length, 1); assert.equal(saves[0].patch.followUpDue, "2099-02-01");
+  assert.equal(h.getEl("save-toast").textContent, "✓ Saved"); assert.equal(h.getEl("school-editor").open, false);
+  assert.equal(h.getEl("home-metrics").children[1].children[0].textContent, "1");
+  await h.context.openAction("overdue", "contact"); assert.equal(h.getEl("edit-contactName").focused, true);
+  h.context.closeSchoolEditor(); await h.context.openAction("overdue", "log"); assert.equal(h.getEl("outreach-fields").hidden, false);
+  h.context.closeSchoolEditor(); h.getEl("home-find").click();
+  assert.equal(h.getEl("directory-view").hidden, false);
+  assert.equal(h.context.dashboardToday(new Date("2026-10-16T02:00:00Z")), "2026-10-15");
+  assert.equal(h.context.dashboardToday(new Date("2026-01-16T04:59:00Z")), "2026-01-15");
+  assert.equal(h.context.dueState({ stage: "Interested", followUpDue: today }, today), "today");
+});
+
+test("supervisors land on H4 Overview; totals use dates, student drill-down survives refresh, downgrade and revocation clear protected data", async (t) => {
+  let role = "Supervisor", revoked = false;
+  const records = [
+    { recordId: "1", schoolName: "Alex First School", studentId: "alex", stage: "Not Contacted", followUpDue: "2000-01-01", nextAction: "Make contact" },
+    { recordId: "2", schoolName: "Sam School", studentId: "sam", stage: "Interested", followUpDue: "2000-01-01", lastContacted: "2026-10-01" },
+    { recordId: "3", schoolName: "Booked School", studentId: "alex", stage: "Booked" },
+    { recordId: "4", schoolName: "Cold School", studentId: "alex", stage: "Cold" },
+  ].map((s) => ({ schoolBoard: "EXAMPLE", geographicRegion: "North", assignedTo: s.studentId === "sam" ? "Sam" : "Alex", ...s }));
+  const h = setupEnv({ fetchHandler: async (url) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (revoked) return Response.json({ code: "USER_NOT_ALLOWED" }, { status: 403 });
+    if (url.includes("/api/dashboard")) return Response.json({ ok: true, schools: records.map(({ studentId, nextAction, ...school }) => ({ ...school, canEdit: false })) });
+    return Response.json({ currentUser: { name: "Morgan", email: "morgan@example.test", role }, schools: role === "Supervisor" ? records : [records[0]],
+      ...(role === "Supervisor" ? { overview: { students: [{ id: "alex", name: "Alex", active: true }, { id: "sam", name: "Sam", active: true }, { id: "new", name: "New student", active: true }] } } : {}), sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+  } }); t.after(h.cleanup);
+  await h.signIn("morgan@example.test");
+  assert.equal(h.getEl("workspace-heading").textContent, "H4 Overview."); assert.equal(h.getEl("overview-panel").hidden, false);
+  assert.deepEqual(h.getEl("home-metrics").children.map((node) => node.children[0].textContent), ["4", "1", "1", "1", "2"]);
+  assert.equal(h.getEl("overview-students").children.length, 3);
+  const sam = h.getEl("overview-students").children.find((row) => row.children[0].children[0].textContent === "Sam");
+  assert.equal(sam.children[1].textContent, "1"); assert.equal(sam.children[4].textContent, "1");
+  h.context.renderPipeline("overview-pipeline", [...records, { stage: "Legacy stage" }], () => {});
+  assert.equal(h.getEl("overview-pipeline").children.length, 7);
+  assert.equal(h.getEl("overview-pipeline").children[6].children[1].textContent, "1");
+  h.context.renderHome();
+  sam.children[5].children[0].click(); assert.equal(h.getEl("school-list").children.length, 1);
+  assert.equal(h.getEl("school-count").textContent, "1"); assert.equal(h.getEl("school-count-label").textContent, "of 4 schools");
+  records.push({ ...records[1], recordId: "5", schoolName: "New Sam School" }); await h.context.refresh();
+  assert.equal(h.getEl("school-list").children.length, 2, "student filter follows new assignments after refresh");
+  h.getEl("schools-scope-clear").click(); assert.equal(h.getEl("school-list").children.length, 5);
+  h.getEl("overview-pipeline").children[4].click(); assert.equal(h.getEl("school-list").children.length, 1);
+  role = "co-op"; await h.context.refresh();
+  assert.equal(h.getEl("tab-home").textContent, "My Outreach"); assert.equal(h.getEl("overview-students").children.length, 0);
+  assert.equal(h.getEl("overview-panel").hidden, true); assert.equal(h.getEl("home-metrics").children.length, 4);
+  assert.equal(h.getEl("school-list").children.length, 1);
+  await h.context.loadDashboard(); assert.equal(h.getEl("dashboard-rows").children.length, 5);
+  revoked = true; await h.context.loadDashboard();
+  assert.equal(h.getEl("workspace").hidden, true); assert.equal(h.getEl("home-actions").children.length, 0);
+  assert.equal(h.getEl("home-metrics").children.length, 0); assert.equal(h.getEl("dashboard-rows").children.length, 0);
+  assert.equal(h.getEl("home-description").textContent, ""); assert.equal(h.getEl("schools-scope-label").textContent, "");
+  assert.equal(h.getEl("school-count").textContent, "0");
+});
+
+test("quick-action revocation clears protected home data, and late bootstrap JSON cannot restore signed-out data", async (t) => {
+  let late = false, resolveJson;
+  const payload = { currentUser: { name: "Morgan", email: "morgan@example.test", role: "Supervisor" }, schools: [{ recordId: "1", schoolName: "Protected School", schoolBoard: "EXAMPLE", geographicRegion: "North", nextAction: "Protected action" }], overview: { students: [{ id: "alex", name: "Protected Student", active: true }] }, sessionExpiresAt: Math.floor(Date.now()/1000)+3600 };
+  const h = setupEnv({ fetchHandler: async (url) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/schools/detail")) return Response.json({ code: "USER_NOT_ALLOWED" }, { status: 403 });
+    if (late) return { ok: true, json: () => new Promise((resolve) => { resolveJson = resolve; }) };
+    return Response.json(payload);
+  } }); t.after(h.cleanup);
+  await h.signIn("morgan@example.test"); await h.context.openAction("1", "reminder");
+  assert.equal(h.getEl("workspace").hidden, true); assert.equal(h.getEl("home-actions").children.length, 0);
+  assert.equal(h.getEl("overview-students").children.length, 0); assert.equal(h.getEl("school-editor").open, false);
+  await h.signIn("morgan@example.test"); late = true;
+  const pending = h.context.refresh(); await new Promise((resolve) => setTimeout(resolve, 1));
+  h.getEl("sign-out").click(); resolveJson(payload); await pending;
+  assert.equal(h.getEl("workspace").hidden, true); assert.equal(h.getEl("home-actions").children.length, 0);
+  assert.equal(h.getEl("overview-students").children.length, 0); assert.equal(h.getEl("home-metrics").children.length, 0);
+});
+
+test("Team Progress combines school filters without individual performance cards or other-owner actions", async (t) => {
   const stages = ["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Cold", "Legacy stage"];
   const records = stages.map((stage, i) => ({ recordId: String(i), schoolName: `School ${i}`, schoolBoard: "BOARD", geographicRegion: "North",
     assignedTo: i % 2 ? "Sam" : "Alex", stage, lastContacted: "", followUpDue: "2000-01-01", canEdit: i % 2 === 0 }));
@@ -21,11 +130,11 @@ test("team dashboard totals, pipeline and combined filters show team status with
   await h.context.loadDashboard();
   assert.equal(h.getEl("dashboard-view").hidden, false); assert.equal(h.getEl("schools-view").hidden, true);
   assert.equal(h.getEl("dashboard-rows").children.length, 7);
-  assert.deepEqual(h.getEl("dashboard-metrics").children.map((node) => node.children[0].textContent), ["7", "1", "1", "5"]);
-  assert.equal(h.getEl("dashboard-pipeline").children.length, 7);
+  assert.equal(h.getEl("dashboard-metrics").children.length, 0);
+  assert.equal(h.getEl("dashboard-team").children.length, 0);
   assert.equal(h.getEl("dashboard-rows").children.find((row) => row.children[0].children[0].textContent === "School 1").children[5].textContent, "View only");
   assert.equal(h.getEl("dashboard-rows").children[0].children[5].children[0].textContent, "Open school →");
-  h.getEl("dashboard-pipeline").children[4].click();
+  h.getEl("dashboard-stage").value = "Booked"; h.context.renderDashboard();
   assert.equal(h.getEl("dashboard-count").textContent, "Showing 1 of 7 claimed schools");
   assert.equal(h.getEl("dashboard-rows").children[0].children[0].children[0].textContent, "School 4");
   h.getEl("dashboard-owner").value = "Sam"; h.context.renderDashboard();
@@ -323,6 +432,7 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       open: false,
       showModal() { this.open = true; },
       close() { this.open = false; },
+      focus() { this.focused = true; },
       children,
       replaceChildren: (...args) => { children.length = 0; children.push(...args); },
       append: (...args) => { children.push(...args); },

@@ -55,10 +55,49 @@ test("verified Google identity receives only its assigned school summaries", asy
   assert.equal(result.body.writesEnabled, false);
   assert.equal(result.body.visibility.scope, "assigned-school-summaries");
   assert.deepEqual(Object.keys(result.body.schools[0]).sort(), [
-    "recordId", "schoolName", "schoolBoard", "assignedTo", "stage", "priority", "geographicRegion",
+    "recordId", "schoolName", "schoolBoard", "assignedTo", "stage", "priority", "geographicRegion", "lastContacted", "followUpDue", "nextAction",
   ].sort());
   assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_|Other Student School|sam@example\.test/);
   assert.equal(result.headers.get("cache-control"), "no-store");
+});
+
+test("My Outreach receives own next actions and due dates, never another student's next action or roster", async (t) => {
+  const h = await readHarness(t);
+  h.tables.Schools[1][11] = "Call the school office"; h.tables.Schools[1][10] = "2026-10-16";
+  h.tables.Schools.find((row) => row[3] === "Sam")[11] = "PRIVATE_OTHER_NEXT_ACTION";
+  const token = await h.token(), result = await h.bootstrap(token);
+  assert.equal(result.body.schools[0].nextAction, "Call the school office");
+  assert.equal(result.body.schools[0].followUpDue, "2026-10-16");
+  assert.equal(result.body.overview, undefined); assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_|studentId|assignmentIssue/);
+  const team = await h.request("/api/dashboard", { token });
+  assert.doesNotMatch(await team.text(), /PRIVATE_|nextAction|studentId|assignmentIssue|students/);
+});
+
+test("H4 Overview rejects students before school reads, even with forged role hints", async (t) => {
+  const h = await readHarness(t);
+  const response = await h.request("/api/dashboard?view=overview&role=Supervisor", { token: await h.token(), headers: { "x-proof-actor": SUPERVISOR, "x-role": "Supervisor" } });
+  assert.equal(response.status, 403); assert.equal((await response.json()).code, "SUPERVISOR_ROLE_REQUIRED");
+  assert.equal(schoolReads(h).length, 0);
+});
+
+test("Supervisor overview includes zero-assignment students and joins schools by identity instead of name", async (t) => {
+  const h = await readHarness(t);
+  h.tables["CRM Users"][1][1] = "Student"; h.tables["CRM Users"][2][1] = "Student";
+  h.tables["CRM Users"].push(["new@example.test", "New student", "co-op", true]);
+  const result = await h.bootstrap(await h.token({ email: SUPERVISOR }));
+  assert.equal(result.status, 200); const students = result.body.overview.students;
+  assert.equal(students.filter((s) => s.name === "Student").length, 2);
+  assert.notEqual(result.body.schools[0].studentId, result.body.schools[1].studentId);
+  assert.ok(students.some((s) => s.id === result.body.schools[0].studentId));
+  assert.ok(students.some((s) => s.name === "New student" && !result.body.schools.some((school) => school.studentId === s.id)));
+  assert.ok(students.some((s) => s.name === "Revoked" && s.active === false));
+  assert.doesNotMatch(JSON.stringify(result.body.schools), /ownerEmail|@|PRIVATE_/);
+  assert.equal(sheetReads(h).length, 2, "authentication and one batched school/roster read");
+  const token = await h.token({ email: SUPERVISOR });
+  assert.equal((await h.request("/api/dashboard?view=overview", { token })).status, 200);
+  h.tables["CRM Users"].find((row) => row[0] === SUPERVISOR)[2] = "co-op";
+  assert.equal((await h.request("/api/dashboard?view=overview", { token })).status, 403);
+  assert.equal((await h.bootstrap(token)).body.overview, undefined);
 });
 
 test("Supervisor can read all summaries, without contact details, notes, users or activities", async (t) => {
