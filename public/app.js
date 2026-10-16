@@ -56,21 +56,66 @@ const detailOnlyFields = ["contactName", "contactRole", "email", "phone", "prior
 let editing = null, editorSeq = 0, editorRead;
 let saveToastTimer;
 const editDrafts = new Map();
+const sessionKey = "h4.crm.session-token.v1";
 const resumeKey = "h4.crm.resume-view.v1";
 const resumableViews = ["home", "my-schools", "directory", "dashboard"];
-let resumeView = null, resumeTimer;
+let resumeView = null, sessionWasExpired = false;
+
+function parseJwtPayload(token) {
+  if (typeof token !== "string") return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const encoded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(encoded));
+  } catch {
+    return null;
+  }
+}
+
+function isSessionExpired(token) {
+  const payload = parseJwtPayload(token);
+  if (!payload || typeof payload.exp !== "number") return true;
+  return payload.exp * 1000 <= Date.now();
+}
+
+function savedSession() {
+  try {
+    const token = sessionStorage.getItem(sessionKey);
+    if (typeof token !== "string" || !token) return null;
+    if (isSessionExpired(token)) {
+      sessionWasExpired = true;
+      forgetSession();
+      return null;
+    }
+    return token;
+  } catch {
+    return null;
+  }
+}
+
+function rememberSession(token) {
+  // Session token only: allows reload without re-prompting Google within the same browser tab.
+  // Never persist private school records, notes, contacts, or cached user details.
+  try {
+    if (token) sessionStorage.setItem(sessionKey, token);
+    else sessionStorage.removeItem(sessionKey);
+  } catch { /* Storage may be disabled. */ }
+}
+
 function savedView() {
   try { const view = sessionStorage.getItem(resumeKey); return resumableViews.includes(view) ? view : null; }
   catch { return null; }
 }
+
 function rememberView() {
-  // A navigation hint only. Never store tokens, accounts, school data or drafts.
+  // A navigation hint only.
   if (credential && !el("workspace").hidden && resumableViews.includes(currentTab)) {
     try { sessionStorage.setItem(resumeKey, currentTab); } catch { /* Storage may be disabled. */ }
   }
 }
+
 function finishRestore(message) {
-  clearTimeout(resumeTimer);
   if (el("session-restore")) el("session-restore").hidden = true;
   if (!credential) { el("welcome").hidden = false; el("google-button").hidden = false; status(message); }
 }
@@ -85,13 +130,17 @@ function refreshFailed(message) {
   if (!visibleWorkspace) {
     if (el("session-restore")) el("session-restore").hidden = true;
     el("welcome").hidden = false; status(detail); el("retry").hidden = false; el("google-button").hidden = false;
+    if (config?.ready) showGoogleButton().catch(() => {});
   }
 }
 function forgetSession() {
   sessionVersion++;
-  nonce = ""; resumeView = null; clearTimeout(resumeTimer);
+  nonce = ""; resumeView = null;
   window.google?.accounts?.id.cancel?.();
-  try { sessionStorage.removeItem(resumeKey); } catch { /* No persistent credentials to clear. */ }
+  try {
+    sessionStorage.removeItem(sessionKey);
+    sessionStorage.removeItem(resumeKey);
+  } catch { /* Storage may be disabled. */ }
   if (el("session-restore")) el("session-restore").hidden = true;
   editorSeq++; editorRead?.abort(); editing = null; editDrafts.clear();
   clearTimeout(saveToastTimer); el("save-toast").hidden = true;
@@ -155,25 +204,15 @@ async function googleClient() {
   return googleLoading;
 }
 
-async function showGoogleButton(restore = false) {
+async function showGoogleButton() {
   const google = await googleClient();
   nonce = crypto.randomUUID() + crypto.randomUUID();
   const callbackNonce = nonce;
-  google.initialize({ client_id: config.googleClientId, nonce, auto_select: restore,
+  google.initialize({ client_id: config.googleClientId, nonce, auto_select: false,
     callback: (response) => { if (nonce === callbackNonce) return onGoogleSignIn(response); } });
   el("google-button").replaceChildren();
   google.renderButton(el("google-button"), { theme: "outline", size: "large", shape: "pill", text: "continue_with", width: 280 });
   el("google-button").hidden = false;
-  if (restore) {
-    const fallback = () => {
-      if (!credential && nonce === callbackNonce) finishRestore("Google needs a quick confirmation. Continue below to return to your workspace.");
-    };
-    resumeTimer = setTimeout(fallback, 5000);
-    if (typeof google.prompt === "function") google.prompt((notification) => {
-      if (notification.isNotDisplayed?.() || notification.isSkippedMoment?.()) fallback();
-    });
-    else fallback();
-  }
 }
 
 async function onGoogleSignIn(response) {
@@ -181,11 +220,13 @@ async function onGoogleSignIn(response) {
   // claim are verified on the server before any school data is returned.
   try {
     if (typeof response.credential !== "string") throw new Error();
-    const encoded = response.credential.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    const payload = JSON.parse(atob(encoded));
-    if (!nonce || payload.nonce !== nonce) throw new Error();
+    const payload = parseJwtPayload(response.credential);
+    if (!payload || !nonce || payload.nonce !== nonce) throw new Error();
     const previousView = resumeView || savedView();
-    forgetSession(); credential = response.credential; resumeView = previousView;
+    forgetSession();
+    credential = response.credential;
+    rememberSession(credential);
+    resumeView = previousView;
     if (previousView && el("session-restore")) { el("session-restore").hidden = false; el("welcome").hidden = true; }
     el("google-button").hidden = true;
     await refresh();
@@ -1019,6 +1060,7 @@ async function refresh() {
     el("workspace-status").textContent = config?.writesEnabled ? "Up to date" : "Up to date · viewing only";
     renderSchools(); renderHome(); el("welcome").hidden = true; el("workspace").hidden = false;
     if (el("session-restore")) el("session-restore").hidden = true;
+    rememberSession(credential);
     rememberView();
     el("retry").hidden = true;
     clearTimeout(expiryTimer);
@@ -1041,9 +1083,14 @@ async function refresh() {
 
 async function initialize() {
   el("retry").hidden = true; el("google-button").hidden = true;
+  const existingSession = savedSession();
   resumeView = savedView();
-  if (resumeView && el("session-restore")) {
-    el("session-restore").hidden = false; el("welcome").hidden = true;
+  if (existingSession) {
+    credential = existingSession;
+    if (el("session-restore")) { el("session-restore").hidden = false; el("welcome").hidden = true; }
+  } else {
+    if (el("session-restore")) el("session-restore").hidden = true;
+    el("welcome").hidden = false;
   }
   if (browserOffline()) {
     finishRestore("You’re not connected. Reconnect, then try again.");
@@ -1062,12 +1109,18 @@ async function initialize() {
       status("Google sign-in hasn’t been connected yet. This preview is ready for your supervisor to finish setup.");
       return;
     }
-    loadingGoogle = true;
-    await showGoogleButton(!!resumeView);
-    el("google-button").hidden = false;
-    if (!resumeView && !credential) status("Only accounts approved by H4 can view schools.");
+    if (credential) {
+      await refresh();
+    } else {
+      loadingGoogle = true;
+      await showGoogleButton();
+      el("google-button").hidden = false;
+      const expiredNotice = sessionWasExpired;
+      sessionWasExpired = false;
+      status(expiredNotice ? "Your session expired. Please sign in again." : "Only accounts approved by H4 can view schools.");
+    }
   } catch {
-    finishRestore("We couldn’t restore your workspace. Please try again.");
+    finishRestore(credential ? "We couldn’t restore your workspace. Please try again." : "We couldn’t reach the app. Please try again.");
     status(browserOffline() ? "You’re not connected. Reconnect, then try again."
       : loadingGoogle ? "Google sign-in couldn’t load. Please try again."
       : "We couldn’t reach the app. Please try again.");
@@ -1081,8 +1134,9 @@ el("sign-out").addEventListener("click", () => {
   showGoogleButton().catch(() => { el("retry").hidden = false; });
 });
 el("restore-sign-in")?.addEventListener("click", () => {
-  window.google?.accounts?.id.cancel?.();
+  forgetSession();
   finishRestore("Continue with Google to return to your workspace.");
+  if (config?.ready) showGoogleButton().catch(() => {});
 });
 el("editor-form").addEventListener("submit", saveSchoolEdits);
 el("editor-close").addEventListener("click", closeSchoolEditor);
