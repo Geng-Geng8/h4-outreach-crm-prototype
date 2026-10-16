@@ -59,14 +59,14 @@ current workspace and unsaved draft, with a visible warning that records are sta
 An initial failed read exposes no records and offers a retry. Shared dashboard
 read failures continue to hide that view's content.
 
-Browser reloads use a tab-scoped navigation hint to attempt Google automatic
-sign-in / One Tap, then fetch freshly authorized records before showing the
-workspace. Only the selected tab name is stored in sessionStorage; credentials,
-accounts, records and drafts remain in memory. Explicit sign-out removes the hint,
-cancels One Tap and disables Google auto-selection. Browser privacy settings or
-Google cooldown may require confirmation using the normal sign-in button. This
-does not promise silent sign-in in every browser, and unsaved drafts do not survive
-a full browser reload. Real token expiry and revoked membership still require login.
+Browser reloads preserve the active app session token and selected view in tab-scoped
+`sessionStorage`. On reload, the client validates token expiry and contacts the server
+(`/api/bootstrap`) with `Authorization: Bearer` to verify active CRM membership and
+fetch fresh authorized records before revealing the workspace. Cached user details or
+records are never treated as authentication. Explicit sign-out clears the session token
+and navigation hint from `sessionStorage` and disables auto-selection. Real token expiry,
+revoked access (403), or manual cancellation immediately clear stored session tokens and
+restore the sign-in screen.
 
 ## Verification and release
 

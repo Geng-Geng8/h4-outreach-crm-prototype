@@ -6,11 +6,12 @@ import { webcrypto } from "node:crypto";
 
 const appCode = await readFile("public/app.js", "utf8");
 
+const sessionKey = "h4.crm.session-token.v1";
 const resumeKey = "h4.crm.resume-view.v1";
 const reloadRecord = { recordId: "example", schoolName: "Example School", schoolBoard: "EXAMPLE", geographicRegion: "North", stage: "Contacted", nextAction: "Private next step", notes: "Private notes", lastRequestId: "version-1" };
 const reloadPayload = () => ({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [reloadRecord], sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
-function fixtureCredential(nonce) {
-  return { credential: `header.${Buffer.from(JSON.stringify({ nonce })).toString("base64url")}.signature` };
+function fixtureCredential(nonce, exp = Math.floor(Date.now() / 1000) + 3600) {
+  return { credential: `header.${Buffer.from(JSON.stringify({ nonce, exp })).toString("base64url")}.signature` };
 }
 async function until(predicate) {
   for (let i = 0; i < 100; i++) {
@@ -25,64 +26,192 @@ function reloadFetch(url) {
   return Promise.resolve(Response.json(reloadPayload()));
 }
 
-test("F5 obtains a fresh Google credential, checks server access, then restores the tab without persisting private data", async (t) => {
+test("F5 restores the tab via session storage without prompting Google account chooser or caching private data", async (t) => {
   const storage = new Map();
   const before = setupEnv({ storage, fetchHandler: reloadFetch }); t.after(before.cleanup);
   await before.signIn("alex@example.test"); before.context.switchTab("my-schools");
-  assert.deepEqual([...storage], [[resumeKey, "my-schools"]]); before.cleanup();
-  let respond, google;
-  const after = setupEnv({ storage, onPrompt: (options) => { google = options; }, fetchHandler: async (url, init) => {
+  assert.equal(storage.has(sessionKey), true);
+  assert.equal(storage.get(resumeKey), "my-schools");
+  assert.equal(storage.size, 2, "only session token and view hint are stored; no private data");
+  before.cleanup();
+
+  let respond, promptCalled = false;
+  const after = setupEnv({ storage, onPrompt: () => { promptCalled = true; }, fetchHandler: async (url, init) => {
     if (url.includes("/api/config")) return reloadFetch(url);
     assert.match(init.headers.Authorization, /^Bearer /);
     return new Promise((resolve) => { respond = resolve; });
   } }); t.after(after.cleanup);
-  await until(() => google);
-  assert.equal(google.auto_select, true);
-  assert.notEqual(google.nonce, before.googleOptions().nonce);
+
+  // Before server authorization arrives: restore view is active, workspace is hidden, no cached schools
+  await until(() => respond);
+  assert.equal(promptCalled, false, "Google account chooser was not prompted on refresh");
   assert.equal(after.getEl("session-restore").hidden, false);
   assert.equal(after.getEl("workspace").hidden, true);
-  const pending = google.callback(fixtureCredential(google.nonce));
-  await until(() => respond);
   assert.equal(after.getEl("school-list").children.length, 0, "no cached records before server authorization");
-  respond(Response.json(reloadPayload())); await pending;
-  assert.equal(after.getEl("workspace").hidden, false);
+
+  respond(Response.json(reloadPayload()));
+  await until(() => !after.getEl("workspace").hidden);
   assert.equal(after.getEl("schools-view").hidden, false);
   assert.equal(after.getEl("session-restore").hidden, true);
   assert.equal(after.getEl("user-name").textContent, "Alex");
-  assert.deepEqual([...storage], [[resumeKey, "my-schools"]]);
+  assert.equal(storage.get(resumeKey), "my-schools");
 });
 
-test("blocked automatic sign-in offers manual confirmation; explicit sign-out stops restoration and ignores old callbacks", async (t) => {
-  const storage = new Map([[resumeKey, "my-schools"]]); let prompts = 0;
-  const h = setupEnv({ storage, fetchHandler: reloadFetch, onPrompt: (_, notification) => { prompts++; notification({ isNotDisplayed: () => true }); } }); t.after(h.cleanup);
-  await until(() => h.googleOptions());
-  assert.equal(h.getEl("session-restore").hidden, true);
-  assert.equal(h.getEl("welcome").hidden, false);
-  assert.match(h.getEl("login-status").textContent, /confirmation/);
-  const old = h.googleOptions();
+test("explicit sign-out clears session token and navigation hint; subsequent reload stays on welcome screen", async (t) => {
+  const storage = new Map();
+  const h = setupEnv({ storage, fetchHandler: reloadFetch }); t.after(h.cleanup);
   await h.signIn("alex@example.test");
-  assert.equal(h.getEl("schools-view").hidden, false);
-  h.getEl("sign-out").click(); await until(() => h.googleOptions() !== old);
-  await old.callback(fixtureCredential(old.nonce));
+  assert.equal(storage.has(sessionKey), true);
+  const old = h.googleOptions();
+
+  h.getEl("sign-out").click();
+  await until(() => h.googleOptions() !== old);
+  assert.equal(storage.has(sessionKey), false);
+  assert.equal(storage.has(resumeKey), false);
   assert.equal(h.getEl("workspace").hidden, true);
   assert.equal(h.getEl("school-list").children.length, 0);
-  assert.equal(storage.has(resumeKey), false);
-  const next = setupEnv({ storage, fetchHandler: reloadFetch, onPrompt: () => prompts++ }); t.after(next.cleanup);
+  assert.equal(h.getEl("login-status").textContent, "You’re signed out.");
+
+  // Stale callback from earlier nonce does not restore session
+  await old.callback(fixtureCredential(old.nonce));
+  assert.equal(h.getEl("workspace").hidden, true);
+  assert.equal(storage.has(sessionKey), false);
+
+  // Subsequent reload starts cleanly on sign-in screen without restore attempt
+  const next = setupEnv({ storage, fetchHandler: reloadFetch }); t.after(next.cleanup);
   await until(() => next.googleOptions());
-  assert.equal(next.googleOptions().auto_select, false); assert.equal(prompts, 1);
+  assert.equal(next.getEl("session-restore").hidden, true);
+  assert.equal(next.getEl("welcome").hidden, false);
+  assert.equal(next.getEl("google-button").hidden, false);
 });
 
-test("revoked restore is rejected by the server and clears the navigation hint and all protected content", async (t) => {
-  const storage = new Map([[resumeKey, "home"]]); let options;
-  const h = setupEnv({ storage, onPrompt: (value) => { options = value; }, fetchHandler: (url) => url.includes("/api/config") ? reloadFetch(url) : Promise.resolve(new Response("Access revoked", { status: 403 })) }); t.after(h.cleanup);
-  await until(() => options);
-  await options.callback(fixtureCredential(options.nonce));
+test("expired session on reload clears storage, prevents workspace access, and prompts for fresh sign-in", async (t) => {
+  // Scenario A: Client-side expired token (exp in the past)
+  const expiredPayload = Buffer.from(JSON.stringify({ nonce: "test", exp: Math.floor(Date.now() / 1000) - 60 })).toString("base64url");
+  const expiredToken = `header.${expiredPayload}.signature`;
+  const storage = new Map([[sessionKey, expiredToken], [resumeKey, "my-schools"]]);
+
+  const h = setupEnv({ storage, fetchHandler: reloadFetch }); t.after(h.cleanup);
+  await until(() => h.googleOptions());
+  assert.equal(h.getEl("workspace").hidden, true);
+  assert.equal(h.getEl("session-restore").hidden, true);
+  assert.equal(h.getEl("welcome").hidden, false);
+  assert.match(h.getEl("login-status").textContent, /expired/);
+  assert.equal(storage.has(sessionKey), false);
+  assert.equal(storage.has(resumeKey), false);
+
+  // Scenario B: Server-side expired/invalid token (401 response from server)
+  const validFormatPayload = Buffer.from(JSON.stringify({ nonce: "test", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+  const serverRejectedToken = `header.${validFormatPayload}.signature`;
+  const storageB = new Map([[sessionKey, serverRejectedToken], [resumeKey, "my-schools"]]);
+  const h2 = setupEnv({ storage: storageB, fetchHandler: (url) => url.includes("/api/config")
+    ? reloadFetch(url)
+    : Promise.resolve(Response.json({ ok: false, code: "INVALID_GOOGLE_TOKEN" }, { status: 401 }))
+  }); t.after(h2.cleanup);
+  await until(() => h2.googleOptions());
+  assert.equal(h2.getEl("workspace").hidden, true);
+  assert.equal(storageB.has(sessionKey), false);
+  assert.equal(storageB.has(resumeKey), false);
+  assert.match(h2.getEl("login-status").textContent, /sign-in couldn’t be verified|sign in again/);
+});
+
+test("revoked restore is rejected by the server (403) and clears all stored session and private data", async (t) => {
+  const tokenPayload = Buffer.from(JSON.stringify({ nonce: "test", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+  const storage = new Map([[sessionKey, `header.${tokenPayload}.signature`], [resumeKey, "home"]]);
+  const h = setupEnv({ storage, fetchHandler: (url) => url.includes("/api/config")
+    ? reloadFetch(url)
+    : Promise.resolve(Response.json({ ok: false, code: "USER_NOT_ALLOWED" }, { status: 403 }))
+  }); t.after(h.cleanup);
+  await until(() => h.googleOptions());
   assert.equal(h.getEl("workspace").hidden, true);
   assert.equal(h.getEl("session-restore").hidden, true);
   assert.equal(h.getEl("home-actions").children.length, 0);
   assert.equal(h.getEl("user-name").textContent, "");
+  assert.equal(storage.has(sessionKey), false);
   assert.equal(storage.has(resumeKey), false);
-  assert.equal(h.googleOptions().auto_select, false);
+  assert.match(h.getEl("login-status").textContent, /doesn’t have access/);
+});
+
+test("manual cancellation on restore screen clears stored session and returns to login", async (t) => {
+  const tokenPayload = Buffer.from(JSON.stringify({ nonce: "test", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+  const storage = new Map([[sessionKey, `header.${tokenPayload}.signature`], [resumeKey, "my-schools"]]);
+  let holdBootstrap;
+  const h = setupEnv({ storage, fetchHandler: (url) => {
+    if (url.includes("/api/config")) return reloadFetch(url);
+    return new Promise((resolve) => { holdBootstrap = resolve; });
+  } }); t.after(h.cleanup);
+  await until(() => holdBootstrap);
+  assert.equal(h.getEl("session-restore").hidden, false);
+  assert.equal(storage.has(sessionKey), true);
+
+  h.getEl("restore-sign-in").click();
+  assert.equal(h.getEl("session-restore").hidden, true);
+  assert.equal(h.getEl("welcome").hidden, false);
+  assert.equal(storage.has(sessionKey), false);
+  assert.equal(storage.has(resumeKey), false);
+  assert.match(h.getEl("login-status").textContent, /Continue with Google/);
+});
+
+test("regression: offline reload with stored session keeps recovery controls visible, and reconnection or retry restores writesEnabled", async (t) => {
+  const tokenPayload = Buffer.from(JSON.stringify({ nonce: "test", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+  const storage = new Map([[sessionKey, `header.${tokenPayload}.signature`], [resumeKey, "my-schools"]]);
+
+  // Start offline
+  const h = setupEnv({ storage, online: false, fetchHandler: reloadFetch }); t.after(h.cleanup);
+
+  // Recovery controls must remain visible: welcome card and retry button are shown, session-restore is hidden
+  assert.equal(h.getEl("session-restore").hidden, true);
+  assert.equal(h.getEl("welcome").hidden, false);
+  assert.equal(h.getEl("workspace").hidden, true);
+  assert.equal(h.getEl("retry").hidden, false);
+  assert.equal(h.getEl("google-button").hidden, true);
+  assert.match(h.getEl("login-status").textContent, /not connected/);
+
+  // Reconnection loads config first and restores workspace with writesEnabled true ("Up to date")
+  h.context.navigator.onLine = true;
+  await h.dispatchWindow("online");
+  await until(() => !h.getEl("workspace").hidden);
+
+  assert.equal(h.getEl("workspace").hidden, false);
+  assert.equal(h.getEl("welcome").hidden, true);
+  assert.equal(h.getEl("session-restore").hidden, true);
+  assert.equal(h.getEl("workspace-status").textContent, "Up to date");
+});
+
+test("regression: initial /api/config failure with stored session keeps recovery controls visible, and Retry loads config before restoring workspace", async (t) => {
+  const tokenPayload = Buffer.from(JSON.stringify({ nonce: "test", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+  const storage = new Map([[sessionKey, `header.${tokenPayload}.signature`], [resumeKey, "my-schools"]]);
+  let configFails = true;
+  let configAttempts = 0;
+
+  const h = setupEnv({ storage, fetchHandler: (url) => {
+    if (url.includes("/api/config")) {
+      configAttempts++;
+      if (configFails) return Promise.resolve(new Response("Config error", { status: 503 }));
+    }
+    return reloadFetch(url);
+  } }); t.after(h.cleanup);
+
+  // Both screens must not be hidden: welcome card is visible, retry button is shown
+  await until(() => h.getEl("session-restore").hidden);
+  assert.equal(h.getEl("welcome").hidden, false);
+  assert.equal(h.getEl("workspace").hidden, true);
+  assert.equal(h.getEl("retry").hidden, false);
+  assert.equal(h.getEl("google-button").hidden, true);
+  assert.match(h.getEl("login-status").textContent, /reach the app|restore your workspace/);
+  assert.equal(configAttempts, 1);
+
+  // When server recovers and user clicks Retry: config must load successfully before refresh()
+  configFails = false;
+  h.getEl("retry").click();
+  await until(() => !h.getEl("workspace").hidden);
+
+  assert.equal(configAttempts, 2);
+  assert.equal(h.getEl("workspace").hidden, false);
+  assert.equal(h.getEl("welcome").hidden, true);
+  assert.equal(h.getEl("session-restore").hidden, true);
+  // Writes must be correctly enabled ("Up to date", not "Up to date · viewing only")
+  assert.equal(h.getEl("workspace-status").textContent, "Up to date");
 });
 
 test("temporary refresh failures keep the signed-in workspace and draft; recovery succeeds and a real 403 clears them", async (t) => {
