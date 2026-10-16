@@ -644,7 +644,6 @@ async function initialize() {
     if (!response.ok) throw new Error();
     config = await response.json();
     el("tab-demo-claim").hidden = config.demoAvailable === false;
-    el("mode-label").textContent = config.writesEnabled ? "Pilot version" : "Read-only preview";
     if (!config.ready) {
       status("Google sign-in hasn’t been connected yet. This preview is ready for your supervisor to finish setup.");
       return;
