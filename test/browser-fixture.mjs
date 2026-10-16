@@ -23,11 +23,20 @@ for (const [number, name, stage, next] of [[101, "Interested Example School", "I
 h.demoSheets.tables = structuredClone(h.tables);
 const fixtureGoogle = `
 window.google = {accounts:{id:{
-  initialize(options){this.options=options}, disableAutoSelect(){},
+  initialize(options){this.options=options},
+  disableAutoSelect(){sessionStorage.removeItem("h4.fixture.actor")},
+  cancel(){},
+  async prompt(notification){
+    const actor=sessionStorage.getItem("h4.fixture.actor");
+    if(!actor){notification({isNotDisplayed:()=>true});return}
+    const options=this.options;
+    const response=await fetch("/fixture/token?actor="+actor+"&nonce="+encodeURIComponent(options.nonce));
+    options.callback(await response.json());
+  },
   renderButton(container){
     for(const [label,actor] of [["Sign in as Alex (fixture)","student"],["Sign in as Morgan (fixture)","supervisor"]]){
       const button=document.createElement("button");button.className="button";button.textContent=label;
-      button.onclick=async()=>{const response=await fetch("/fixture/token?actor="+actor+"&nonce="+encodeURIComponent(this.options.nonce));this.options.callback(await response.json())};
+      button.onclick=async()=>{sessionStorage.setItem("h4.fixture.actor",actor);const response=await fetch("/fixture/token?actor="+actor+"&nonce="+encodeURIComponent(this.options.nonce));this.options.callback(await response.json())};
       container.append(button);
     }
   }

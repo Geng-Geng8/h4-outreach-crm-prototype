@@ -53,8 +53,20 @@ included in dashboard responses. The existing detail API remains owner/superviso
 No extra API call is needed for either role's landing page. Team data loads lazily.
 The existing minute/visibility refresh and confirmed saves update the home view and
 invalidate shared data. Filter predicates follow fresh assignments after refresh.
-Failed reads hide protected content. Sign-out/revocation clear dashboard data,
-and session/sequence checks ignore late responses. Downgrades remove overview data.
+Sign-out/revocation clear dashboard data, and session/sequence checks ignore late
+responses. Downgrades remove overview data. A temporary bootstrap failure keeps the
+current workspace and unsaved draft, with a visible warning that records are stale.
+An initial failed read exposes no records and offers a retry. Shared dashboard
+read failures continue to hide that view's content.
+
+Browser reloads use a tab-scoped navigation hint to attempt Google automatic
+sign-in / One Tap, then fetch freshly authorized records before showing the
+workspace. Only the selected tab name is stored in sessionStorage; credentials,
+accounts, records and drafts remain in memory. Explicit sign-out removes the hint,
+cancels One Tap and disables Google auto-selection. Browser privacy settings or
+Google cooldown may require confirmation using the normal sign-in button. This
+does not promise silent sign-in in every browser, and unsaved drafts do not survive
+a full browser reload. Real token expiry and revoked membership still require login.
 
 ## Verification and release
 

@@ -56,10 +56,43 @@ const detailOnlyFields = ["contactName", "contactRole", "email", "phone", "prior
 let editing = null, editorSeq = 0, editorRead;
 let saveToastTimer;
 const editDrafts = new Map();
+const resumeKey = "h4.crm.resume-view.v1";
+const resumableViews = ["home", "my-schools", "directory", "dashboard"];
+let resumeView = null, resumeTimer;
+function savedView() {
+  try { const view = sessionStorage.getItem(resumeKey); return resumableViews.includes(view) ? view : null; }
+  catch { return null; }
+}
+function rememberView() {
+  // A navigation hint only. Never store tokens, accounts, school data or drafts.
+  if (credential && !el("workspace").hidden && resumableViews.includes(currentTab)) {
+    try { sessionStorage.setItem(resumeKey, currentTab); } catch { /* Storage may be disabled. */ }
+  }
+}
+function finishRestore(message) {
+  clearTimeout(resumeTimer);
+  if (el("session-restore")) el("session-restore").hidden = true;
+  if (!credential) { el("welcome").hidden = false; el("google-button").hidden = false; status(message); }
+}
 
 function status(message) { el("login-status").textContent = message; }
+function refreshFailed(message) {
+  const visibleWorkspace = !el("workspace").hidden;
+  const detail = visibleWorkspace ? `${message} Showing your last loaded records. Your draft is kept; try Refresh again.` : `${message} Choose Try again to load your workspace.`;
+  el("workspace-status").textContent = detail;
+  if (el("home-status")) el("home-status").textContent = detail;
+  if (currentTab === "dashboard" && el("dashboard-status")) el("dashboard-status").textContent = detail;
+  if (!visibleWorkspace) {
+    if (el("session-restore")) el("session-restore").hidden = true;
+    el("welcome").hidden = false; status(detail); el("retry").hidden = false; el("google-button").hidden = false;
+  }
+}
 function forgetSession() {
   sessionVersion++;
+  nonce = ""; resumeView = null; clearTimeout(resumeTimer);
+  window.google?.accounts?.id.cancel?.();
+  try { sessionStorage.removeItem(resumeKey); } catch { /* No persistent credentials to clear. */ }
+  if (el("session-restore")) el("session-restore").hidden = true;
   editorSeq++; editorRead?.abort(); editing = null; editDrafts.clear();
   clearTimeout(saveToastTimer); el("save-toast").hidden = true;
   el("school-editor").close?.();
@@ -88,6 +121,8 @@ function forgetSession() {
     el("dashboard-content").hidden = true;
   }
   clearTimeout(expiryTimer);
+  el("refresh").disabled = false; el("retry").disabled = false;
+  if (el("home-refresh")) el("home-refresh").disabled = false;
   credential = ""; schools = []; directory = []; demoSchools = []; isSupervisor = false;
   pendingClaims.clear();
   el("school-list").replaceChildren(); el("search").value = "";
@@ -120,12 +155,25 @@ async function googleClient() {
   return googleLoading;
 }
 
-async function showGoogleButton() {
+async function showGoogleButton(restore = false) {
   const google = await googleClient();
   nonce = crypto.randomUUID() + crypto.randomUUID();
-  google.initialize({ client_id: config.googleClientId, nonce, auto_select: false, callback: onGoogleSignIn });
+  const callbackNonce = nonce;
+  google.initialize({ client_id: config.googleClientId, nonce, auto_select: restore,
+    callback: (response) => { if (nonce === callbackNonce) return onGoogleSignIn(response); } });
   el("google-button").replaceChildren();
   google.renderButton(el("google-button"), { theme: "outline", size: "large", shape: "pill", text: "continue_with", width: 280 });
+  el("google-button").hidden = false;
+  if (restore) {
+    const fallback = () => {
+      if (!credential && nonce === callbackNonce) finishRestore("Google needs a quick confirmation. Continue below to return to your workspace.");
+    };
+    resumeTimer = setTimeout(fallback, 5000);
+    if (typeof google.prompt === "function") google.prompt((notification) => {
+      if (notification.isNotDisplayed?.() || notification.isSkippedMoment?.()) fallback();
+    });
+    else fallback();
+  }
 }
 
 async function onGoogleSignIn(response) {
@@ -136,12 +184,15 @@ async function onGoogleSignIn(response) {
     const encoded = response.credential.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
     const payload = JSON.parse(atob(encoded));
     if (!nonce || payload.nonce !== nonce) throw new Error();
-    forgetSession(); credential = response.credential;
+    const previousView = resumeView || savedView();
+    forgetSession(); credential = response.credential; resumeView = previousView;
+    if (previousView && el("session-restore")) { el("session-restore").hidden = false; el("welcome").hidden = true; }
     el("google-button").hidden = true;
     await refresh();
   } catch {
     forgetSession(); status("We couldn’t confirm that sign-in. Please try again.");
     el("google-button").hidden = false; el("retry").hidden = false;
+    if (config?.ready) await showGoogleButton().catch(() => {});
   }
 }
 
@@ -326,6 +377,7 @@ async function saveSchoolEdits(event) {
     } else if (response.status === 401 || response.status === 403) {
       forgetSession(); status("Your access changed. Please sign in again.");
       el("google-button").hidden = false;
+      if (config?.ready) await showGoogleButton();
       return;
     } else if (response.status === 409 || response.status === 422 || ["SHEETS_REJECTED", "TEST_SHEET_EDIT_ACCESS_REQUIRED"].includes(data.code)) {
       edit.pending = null;
@@ -358,6 +410,7 @@ function updateWorkspaceHeading() {
 }
 function switchTab(tab) {
   currentTab = tab;
+  rememberView();
   updateWorkspaceHeading();
   el("tab-home")?.classList.toggle("active", tab === "home");
   el("tab-home")?.setAttribute("aria-selected", String(tab === "home"));
@@ -918,6 +971,9 @@ async function refresh() {
   const currentSession = sessionVersion;
   const currentSeq = ++refreshSeq;
   activeRequest?.abort(); activeRequest = new AbortController();
+  const controller = activeRequest;
+  let timedOut = false;
+  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
   el("refresh").disabled = true; el("retry").disabled = true;
   status("Checking your access and loading schools…"); el("workspace-status").textContent = "Refreshing your schools…";
   if (el("home-status")) el("home-status").textContent = "Refreshing your outreach…";
@@ -925,17 +981,19 @@ async function refresh() {
   try {
     const response = await apiFetch("./api/bootstrap", {
       method: "GET", headers: { Authorization: `Bearer ${credential}` },
-      credentials: "omit", cache: "no-store", signal: activeRequest.signal,
+      credentials: "omit", cache: "no-store", signal: controller.signal,
     });
-    const data = await response.json();
+    const data = response.ok ? await response.json() : await response.json().catch(() => ({}));
     // Recheck session AFTER awaiting response.json()
     if (currentSession !== sessionVersion || currentSeq !== refreshSeq || !credential) return;
     if (!response.ok) {
       const message = messages[data.code] ?? "We couldn’t load your schools. Please try again.";
-      // Remove all previously shown school data on any error, including revocation.
-      forgetSession(); status(message); el("retry").hidden = false;
-      el("google-button").hidden = false;
-      if (config?.ready) await showGoogleButton();
+      if (response.status === 401 || response.status === 403) {
+        // Actual expiry/revocation must clear protected records and drafts.
+        forgetSession(); status(message); el("retry").hidden = false;
+        el("google-button").hidden = false;
+        if (config?.ready) await showGoogleButton();
+      } else refreshFailed(message);
       return;
     }
     const firstLoad = el("workspace").hidden;
@@ -955,10 +1013,13 @@ async function refresh() {
     el("user-role").textContent = data.currentUser.role === "Supervisor" ? "Supervisor" : "Student co-op";
     el("avatar").textContent = data.currentUser.name.slice(0, 1).toUpperCase();
     isSupervisor = nextSupervisor;
-    if (firstLoad && el("home-view")) currentTab = "home";
+    if (firstLoad && el("home-view")) currentTab = resumeView || "home";
+    resumeView = null;
     switchTab(currentTab);
     el("workspace-status").textContent = config?.writesEnabled ? "Up to date" : "Up to date · viewing only";
     renderSchools(); renderHome(); el("welcome").hidden = true; el("workspace").hidden = false;
+    if (el("session-restore")) el("session-restore").hidden = true;
+    rememberView();
     el("retry").hidden = true;
     clearTimeout(expiryTimer);
     expiryTimer = setTimeout(() => {
@@ -967,18 +1028,26 @@ async function refresh() {
       showGoogleButton().catch(() => { el("retry").hidden = false; });
     }, Math.max(0, data.sessionExpiresAt * 1000 - Date.now()));
   } catch (error) {
-    if (currentSession !== sessionVersion || currentSeq !== refreshSeq || error.name === "AbortError") return;
-    forgetSession(); status("The connection was interrupted. Sign in again when you’re online.");
-    el("google-button").hidden = false; el("retry").hidden = false;
+    if (currentSession !== sessionVersion || currentSeq !== refreshSeq || (error.name === "AbortError" && !timedOut)) return;
+    refreshFailed(timedOut ? "The refresh timed out." : "The connection was interrupted.");
   } finally {
-    el("refresh").disabled = false; el("retry").disabled = false;
-    if (currentSession === sessionVersion && currentSeq === refreshSeq && el("home-refresh")) el("home-refresh").disabled = false;
+    clearTimeout(timeout);
+    if (currentSession === sessionVersion && currentSeq === refreshSeq) {
+      el("refresh").disabled = false; el("retry").disabled = false;
+      if (el("home-refresh")) el("home-refresh").disabled = false;
+    }
   }
 }
 
 async function initialize() {
   el("retry").hidden = true; el("google-button").hidden = true;
+  resumeView = savedView();
+  if (resumeView && el("session-restore")) {
+    el("session-restore").hidden = false; el("welcome").hidden = true;
+  }
   if (browserOffline()) {
+    finishRestore("You’re not connected. Reconnect, then try again.");
+    el("google-button").hidden = true;
     setConnection(false); status("You’re not connected. Reconnect, then try again."); el("retry").hidden = false;
     return;
   }
@@ -989,13 +1058,16 @@ async function initialize() {
     config = await response.json();
     el("tab-demo-claim").hidden = config.demoAvailable === false;
     if (!config.ready) {
+      finishRestore("Google sign-in hasn’t been connected yet.");
       status("Google sign-in hasn’t been connected yet. This preview is ready for your supervisor to finish setup.");
       return;
     }
     loadingGoogle = true;
-    await showGoogleButton(); el("google-button").hidden = false;
-    status("Only accounts approved by H4 can view schools.");
+    await showGoogleButton(!!resumeView);
+    el("google-button").hidden = false;
+    if (!resumeView && !credential) status("Only accounts approved by H4 can view schools.");
   } catch {
+    finishRestore("We couldn’t restore your workspace. Please try again.");
     status(browserOffline() ? "You’re not connected. Reconnect, then try again."
       : loadingGoogle ? "Google sign-in couldn’t load. Please try again."
       : "We couldn’t reach the app. Please try again.");
@@ -1007,6 +1079,10 @@ el("sign-out").addEventListener("click", () => {
   forgetSession(); window.google?.accounts?.id.disableAutoSelect();
   status("You’re signed out."); el("google-button").hidden = false;
   showGoogleButton().catch(() => { el("retry").hidden = false; });
+});
+el("restore-sign-in")?.addEventListener("click", () => {
+  window.google?.accounts?.id.cancel?.();
+  finishRestore("Continue with Google to return to your workspace.");
 });
 el("editor-form").addEventListener("submit", saveSchoolEdits);
 el("editor-close").addEventListener("click", closeSchoolEditor);
@@ -1020,7 +1096,7 @@ el("home-schools")?.addEventListener("click", () => reviewSchools(null, ""));
 el("home-filter")?.addEventListener("change", () => { homeShowAll = false; renderHome(); });
 el("home-more")?.addEventListener("click", () => { homeShowAll = true; renderHome(); });
 el("schools-scope-clear")?.addEventListener("click", () => reviewSchools(null, ""));
-el("retry").addEventListener("click", initialize);
+el("retry").addEventListener("click", () => credential ? refresh() : initialize());
 el("search").addEventListener("input", renderSchools);
 el("tab-my-schools").addEventListener("click", () => switchTab("my-schools"));
 el("tab-dashboard")?.addEventListener("click", () => switchTab("dashboard"));
