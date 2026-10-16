@@ -639,6 +639,156 @@ test("student-friendly outreach flow: missing contact displays fallback and save
   assert.equal(requests[0].summary, "Left voicemail with school secretary.");
 });
 
+test("contact-editing round trip: add contact before entering text keeps return button, handles unsaved edits, and saves contact without stale outreach draft", async (t) => {
+  let record = { recordId: "00000000-0000-4000-8000-000000000030", schoolName: "Bayview Secondary", schoolBoard: "YRDSB", geographicRegion: "Richmond Hill", stage: "Not Contacted", contactName: "", contactRole: "", lastRequestId: "v1" };
+  const updateRequests = [], activityRequests = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record });
+    if (url.includes("/api/schools/update")) {
+      const body = JSON.parse(init.body);
+      updateRequests.push(body);
+      record = { ...record, ...body.patch, lastRequestId: "v2" };
+      return Response.json({ ok: true, code: "SUCCESS", requestId: "v2", record });
+    }
+    if (url.includes("/api/activities")) {
+      const body = JSON.parse(init.body);
+      activityRequests.push(body);
+      record = { ...record, stage: body.stage || record.stage, lastRequestId: "v3" };
+      return Response.json({ ok: true, code: "SUCCESS", requestId: "v3", record });
+    }
+    return new Response("Not found", { status: 404 });
+  } }); t.after(cleanup);
+  await signIn("alex@example.test");
+
+  // 1. Open outreach with missing contact, enter draft details
+  await context.openSchoolEditor(record.recordId, false, "activity");
+  assert.equal(getEl("log-contact-name").textContent, "Contact not recorded");
+  assert.equal(getEl("log-contact-edit").textContent, "Add contact");
+
+  getEl("log-channel").value = "Phone";
+  getEl("log-activityType").value = "FollowUp";
+  context.applySuggestion("log-outcome", "Introduction sent");
+  getEl("log-summary").value = "Spoke with main office about hip hop education.";
+  getEl("edit-stage").value = "Contacted";
+  context.applySuggestion("edit-nextAction", "Waiting for a reply");
+  getEl("edit-followUpDue").value = "2026-10-30";
+
+  // 2. Click "Add contact" -> switches to details mode
+  getEl("log-contact-edit").click();
+  for (let i = 0; i < 10 && getEl("editor-save").disabled; i++) await new Promise((done) => setTimeout(done, 1));
+  assert.equal(getEl("editor-kind").textContent, "SCHOOL DETAILS");
+  // Regression 1: Return button is visible even if entered before typing or after typing
+  assert.equal(getEl("return-to-activity-container").hidden, false);
+  assert.equal(getEl("editor-save").textContent, "Save contact & return");
+
+  // 3. Regression 2: Unsaved contact edits are not silently discarded on return click
+  getEl("edit-contactName").value = "Dr. Alvarez";
+  getEl("return-to-activity").click();
+  // It warns and requires confirmation instead of silently leaving
+  assert.equal(getEl("editor-kind").textContent, "SCHOOL DETAILS");
+  assert.equal(getEl("return-to-activity").getAttribute("data-confirming"), "true");
+  assert.match(getEl("editor-feedback").textContent, /unsaved contact edits/i);
+
+  // 4. Save contact and return
+  getEl("edit-contactRole").value = "Principal";
+  getEl("save-contact-return").click();
+  for (let i = 0; i < 50 && (getEl("editor-kind").textContent !== "LOG OUTREACH" || getEl("editor-save").disabled); i++) {
+    await new Promise((done) => setTimeout(done, 5));
+  }
+  assert.equal(updateRequests.length, 1);
+  assert.equal(updateRequests[0].patch.contactName, "Dr. Alvarez");
+  assert.equal(updateRequests[0].patch.contactRole, "Principal");
+
+  // 5. Returned automatically to Log Outreach with contact displayed and complete draft intact
+  assert.equal(getEl("editor-kind").textContent, "LOG OUTREACH");
+  assert.equal(getEl("log-contact-name").textContent, "Dr. Alvarez");
+  assert.equal(getEl("log-contact-role").textContent, "· Principal");
+  assert.equal(getEl("log-channel").value, "Phone");
+  assert.equal(getEl("log-activityType").value, "FollowUp");
+  assert.equal(getEl("log-outcome").value, "Introduction sent");
+  assert.equal(getEl("log-summary").value, "Spoke with main office about hip hop education.");
+  assert.equal(getEl("edit-stage").value, "Contacted");
+  assert.equal(getEl("edit-nextAction").value, "Waiting for a reply");
+  assert.equal(getEl("edit-followUpDue").value, "2026-10-30");
+
+  // Regression 3: Outreach draft is NOT marked stale (Save button is enabled, not disabled)
+  assert.equal(getEl("editor-save").disabled, false);
+  assert.equal(getEl("editor-save").textContent, "Save outreach");
+
+  // 6. Complete outreach log save
+  await context.saveSchoolEdits({ preventDefault() {} });
+  assert.equal(activityRequests.length, 1);
+  assert.equal(activityRequests[0].expectedRequestId, "v2", "uses latest version from contact update");
+  assert.equal(activityRequests[0].channel, "Phone");
+  assert.equal(activityRequests[0].activityType, "FollowUp");
+  assert.equal(activityRequests[0].outcome, "Introduction sent");
+  assert.equal(activityRequests[0].summary, "Spoke with main office about hip hop education.");
+  assert.equal(activityRequests[0].nextAction, "Waiting for a reply");
+  assert.equal(activityRequests[0].followUpDue, "2026-10-30");
+  assert.equal(activityRequests[0].stage, "Contacted");
+  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+});
+
+test("contact-editing round trip: add contact on empty outreach form retains return button, and returning preserves full draft across contact editor cancel", async (t) => {
+  let record = { recordId: "00000000-0000-4000-8000-000000000031", schoolName: "Earl Haig SS", schoolBoard: "TDSB", geographicRegion: "North York", stage: "Not Contacted", contactName: "", contactRole: "", lastRequestId: "v10" };
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record });
+    return new Response("Not found", { status: 404 });
+  } }); t.after(cleanup);
+  await signIn("alex@example.test");
+
+  // 1. Immediately click Add contact with zero text entered
+  await context.openSchoolEditor(record.recordId, false, "activity");
+  getEl("log-contact-edit").click();
+  for (let i = 0; i < 10 && getEl("editor-save").disabled; i++) await new Promise((done) => setTimeout(done, 1));
+  assert.equal(getEl("editor-kind").textContent, "SCHOOL DETAILS");
+  // Return button must be visible
+  assert.equal(getEl("return-to-activity-container").hidden, false);
+
+  // Return with no edits returns cleanly to outreach
+  getEl("return-to-activity").click();
+  for (let i = 0; i < 10 && getEl("editor-save").disabled; i++) await new Promise((done) => setTimeout(done, 1));
+  assert.equal(getEl("editor-kind").textContent, "LOG OUTREACH");
+
+  // 2. Draft complete outreach with next action and follow-up date
+  getEl("log-channel").value = "Phone";
+  getEl("log-activityType").value = "Outreach";
+  getEl("log-outcome").value = "Left voicemail";
+  getEl("log-summary").value = "Called guidance department.";
+  getEl("edit-nextAction").value = "Check email next week";
+  getEl("edit-followUpDue").value = "2026-11-05";
+  getEl("edit-stage").value = "Contacted";
+
+  // Switch to contact editor again
+  getEl("log-contact-edit").click();
+  for (let i = 0; i < 10 && getEl("editor-save").disabled; i++) await new Promise((done) => setTimeout(done, 1));
+  assert.equal(getEl("editor-kind").textContent, "SCHOOL DETAILS");
+
+  // Make an unsaved edit, click return -> warns and does not discard
+  getEl("edit-email").value = "guidance@school.test";
+  getEl("return-to-activity").click();
+  assert.equal(getEl("editor-kind").textContent, "SCHOOL DETAILS");
+  assert.equal(getEl("return-to-activity").getAttribute("data-confirming"), "true");
+
+  // Confirm discard to return
+  getEl("return-to-activity").click();
+  for (let i = 0; i < 10 && getEl("editor-save").disabled; i++) await new Promise((done) => setTimeout(done, 1));
+  assert.equal(getEl("editor-kind").textContent, "LOG OUTREACH");
+
+  // Entire outreach draft is completely intact
+  assert.equal(getEl("log-channel").value, "Phone");
+  assert.equal(getEl("log-activityType").value, "Outreach");
+  assert.equal(getEl("log-outcome").value, "Left voicemail");
+  assert.equal(getEl("log-summary").value, "Called guidance department.");
+  assert.equal(getEl("edit-nextAction").value, "Check email next week");
+  assert.equal(getEl("edit-followUpDue").value, "2026-11-05");
+  assert.equal(getEl("edit-stage").value, "Contacted");
+});
+
 test("editor shows Saving immediately, keeps failed drafts open, then closes with Saved only after confirmation", async (t) => {
   let resolveSave;
   const requests = [];
@@ -825,6 +975,7 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       append: (...args) => { children.push(...args); },
       setAttribute: (k, v) => { attrs[k] = String(v); },
       getAttribute: (k) => attrs[k],
+      removeAttribute: (k) => { delete attrs[k]; },
       closest: function (sel) {
         if (sel.startsWith(".")) return this.classList.contains(sel.slice(1)) ? this : null;
         if (sel.startsWith("#")) return this.id === sel.slice(1) ? this : null;
@@ -838,7 +989,8 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       click: function () {
         if (this.disabled) return;
         if (this.onclick) this.onclick();
-        (listeners["click"] || []).forEach((fn) => fn({ target: this }));
+        const ev = { target: this, type: "click", preventDefault() {}, stopPropagation() {} };
+        (listeners["click"] || []).forEach((fn) => fn(ev));
       },
     };
   }

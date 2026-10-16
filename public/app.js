@@ -282,7 +282,7 @@ function editorInputs(disabled) {
   for (const field of editFields) el(`edit-${field}`).disabled = disabled;
   for (const field of outreachFields) el(`log-${field}`).disabled = disabled;
   if (typeof document?.querySelectorAll === "function") {
-    const buttons = document.querySelectorAll(".suggestion-chip, #log-contact-edit, #return-to-activity");
+    const buttons = document.querySelectorAll(".suggestion-chip, #log-contact-edit, #return-to-activity, #save-contact-return");
     for (const btn of buttons) btn.disabled = disabled;
   }
 }
@@ -314,21 +314,54 @@ function editSchoolContact() {
   if (!editing || editing.busy) return;
   const values = editorValues();
   const activity = outreachValues();
-  if (editing.pending || activity.outcome || activity.summary || values.nextAction || values.followUpDue) {
-    editDrafts.set(editorDraftKey(editing), { values, activity, pending: editing.pending, original: editing.original });
-  }
+  // Always preserve the complete outreach draft when entering contact editor
+  editDrafts.set(`activity:${editing.id}`, {
+    values,
+    activity,
+    pending: editing.pending,
+    original: editing.original,
+  });
   openSchoolEditor(editing.id, false, "details");
 }
 
-function returnToActivity() {
+function hasUnsavedContactEdits() {
+  if (!editing || editing.mode !== "details" || !editing.original) return false;
+  const values = editorValues();
+  return editFields.some((key) => values[key] !== String(editing.original[key] ?? ""));
+}
+
+function returnToActivity(force = false) {
   if (!editing || editing.busy) return;
+  if (!force && hasUnsavedContactEdits()) {
+    if (typeof window?.confirm === "function") {
+      if (!window.confirm("You have unsaved contact edits. Discard them and return to Log Outreach?")) return;
+    } else {
+      const btn = el("return-to-activity");
+      if (btn && btn.getAttribute("data-confirming") !== "true") {
+        btn.setAttribute("data-confirming", "true");
+        btn.textContent = "Discard edits & return to Log Outreach";
+        editorFeedback("You have unsaved contact edits. Click again to discard them, or save first.", "error");
+        return;
+      }
+    }
+  }
+  const btn = el("return-to-activity");
+  if (btn) {
+    btn.removeAttribute?.("data-confirming");
+    btn.textContent = "← Return to Log Outreach";
+  }
+  editDrafts.delete(`details:${editing.id}`);
   openSchoolEditor(editing.id, false, "activity");
 }
 
 function editorValues() { return Object.fromEntries(editFields.map((field) => [field, el(`edit-${field}`).value])); }
 function outreachValues() { return Object.fromEntries(outreachFields.map((field) => [field, el(`log-${field}`).value])); }
 function editorDraftKey(edit) { return `${edit.mode ?? "details"}:${edit.id}`; }
-function editorSaveLabel(edit) { return edit.mode === "activity" ? "Save outreach" : "Save changes"; }
+function editorSaveLabel(edit) {
+  if (edit.mode === "activity") return "Save outreach";
+  if (editDrafts.has(`activity:${edit.id}`)) return "Save contact & return";
+  return "Save changes";
+}
 
 function editorFeedback(message, kind = "info") {
   el("editor-status").textContent = message;
@@ -366,6 +399,11 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
   for (const field of detailOnlyFields) el(`field-${field}`).hidden = mode === "activity";
   if (el("activity-step-5-header")) el("activity-step-5-header").hidden = mode !== "activity";
   if (el("return-to-activity-container")) el("return-to-activity-container").hidden = mode !== "details" || !editDrafts.has(`activity:${id}`);
+  const returnBtn = el("return-to-activity");
+  if (returnBtn) {
+    returnBtn.removeAttribute?.("data-confirming");
+    returnBtn.textContent = "← Return to Log Outreach";
+  }
   for (const field of outreachFields) {
     el(`log-${field}`).value = field === "channel" ? "Email" : field === "activityType" ? "Outreach" : "";
     el(`log-${field}`).required = mode === "activity" && ["outcome", "summary"].includes(field);
@@ -437,7 +475,7 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
 }
 
 async function saveSchoolEdits(event) {
-  event.preventDefault();
+  event?.preventDefault?.();
   if (!credential || !editing?.original || editing.busy || editing.stale) return;
   const session = sessionVersion, edit = editing;
   if (!edit.pending) {
@@ -460,7 +498,13 @@ async function saveSchoolEdits(event) {
       };
     } else {
     const patch = Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== String(edit.original[key] ?? "")));
-    if (!Object.keys(patch).length) { closeSchoolEditor(); showSaveToast("No changes to save"); return; }
+    if (!Object.keys(patch).length) {
+      if (edit.mode === "details" && editDrafts.has(`activity:${edit.id}`)) {
+        openSchoolEditor(edit.id, false, "activity");
+        return;
+      }
+      closeSchoolEditor(); showSaveToast("No changes to save"); return;
+    }
     edit.pending = { recordId: edit.id, expectedRequestId: edit.original.lastRequestId, requestId: crypto.randomUUID(), patch };
     }
   }
@@ -478,8 +522,20 @@ async function saveSchoolEdits(event) {
     if (response.ok) {
       edit.original = { ...edit.original, ...edit.pending.patch, lastRequestId: data.record.lastRequestId };
       edit.pending = null; edit.saved = true; editDrafts.delete(editorDraftKey(edit));
-      editorFeedback("Saved to the test spreadsheet.");
+      const outreachDraft = editDrafts.get(`activity:${edit.id}`);
+      if (outreachDraft) {
+        outreachDraft.original = { ...data.record };
+        outreachDraft.values.contactName = data.record.contactName;
+        outreachDraft.values.contactRole = data.record.contactRole;
+      }
       edit.busy = false;
+      if (edit.mode === "details" && outreachDraft) {
+        showSaveToast("✓ Contact saved");
+        await refresh();
+        await openSchoolEditor(edit.id, false, "activity");
+        return;
+      }
+      editorFeedback("Saved to the test spreadsheet.");
       closeSchoolEditor();
       showSaveToast(edit.mode === "activity" ? "✓ Outreach saved" : "✓ Saved");
       await refresh();
@@ -1232,7 +1288,8 @@ el("editor-form").addEventListener("click", (event) => {
 el("log-outcome")?.addEventListener("input", updateSuggestionStates);
 el("edit-nextAction")?.addEventListener("input", updateSuggestionStates);
 el("log-contact-edit")?.addEventListener("click", editSchoolContact);
-el("return-to-activity")?.addEventListener("click", returnToActivity);
+el("return-to-activity")?.addEventListener("click", () => returnToActivity(false));
+el("save-contact-return")?.addEventListener("click", saveSchoolEdits);
 el("refresh").addEventListener("click", refresh);
 el("tab-home")?.addEventListener("click", () => switchTab("home"));
 el("home-refresh")?.addEventListener("click", refresh);

@@ -282,6 +282,26 @@
   flex-shrink: 0;
   white-space: nowrap;
 }
+.contact-return-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #edf5ea;
+  border: 1px solid #d0e2cb;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 4px;
+}
+.contact-return-bar button {
+  min-height: 38px;
+}
+#return-to-activity[data-confirming="true"] {
+  background: #fde8e8;
+  border-color: #f09595;
+  color: #b42318;
+  font-weight: 700;
+}
 
 /* Step 2 Inputs */
 .flow-step-inputs {
