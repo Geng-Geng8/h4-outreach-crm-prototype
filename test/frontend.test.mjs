@@ -6,6 +6,55 @@ import { webcrypto } from "node:crypto";
 
 const appCode = await readFile("public/app.js", "utf8");
 
+test("team dashboard totals, pipeline and combined filters show team status without other-owner actions", async (t) => {
+  const stages = ["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Cold", "Legacy stage"];
+  const records = stages.map((stage, i) => ({ recordId: String(i), schoolName: `School ${i}`, schoolBoard: "BOARD", geographicRegion: "North",
+    assignedTo: i % 2 ? "Sam" : "Alex", stage, lastContacted: "", followUpDue: "2000-01-01", canEdit: i % 2 === 0 }));
+  let unavailable = false;
+  const h = setupEnv({ fetchHandler: async (url) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/dashboard")) return unavailable ? Response.json({ ok: false }, { status: 503 }) : Response.json({ ok: true, schools: records });
+    return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [records[0]], sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+  } }); t.after(h.cleanup);
+  await h.signIn("alex@example.test"); await h.context.switchTab("dashboard");
+  // Tab selection starts a read. Wait on a subsequent read to exercise latest-request handling too.
+  await h.context.loadDashboard();
+  assert.equal(h.getEl("dashboard-view").hidden, false); assert.equal(h.getEl("schools-view").hidden, true);
+  assert.equal(h.getEl("dashboard-rows").children.length, 7);
+  assert.deepEqual(h.getEl("dashboard-metrics").children.map((node) => node.children[0].textContent), ["7", "1", "1", "5"]);
+  assert.equal(h.getEl("dashboard-pipeline").children.length, 7);
+  assert.equal(h.getEl("dashboard-rows").children.find((row) => row.children[0].children[0].textContent === "School 1").children[5].textContent, "View only");
+  assert.equal(h.getEl("dashboard-rows").children[0].children[5].children[0].textContent, "Open school →");
+  h.getEl("dashboard-pipeline").children[4].click();
+  assert.equal(h.getEl("dashboard-count").textContent, "Showing 1 of 7 claimed schools");
+  assert.equal(h.getEl("dashboard-rows").children[0].children[0].children[0].textContent, "School 4");
+  h.getEl("dashboard-owner").value = "Sam"; h.context.renderDashboard();
+  assert.equal(h.getEl("dashboard-rows").children.length, 0); assert.equal(h.getEl("dashboard-empty").hidden, false);
+  h.context.clearDashboardFilters(); h.getEl("dashboard-search").value = "School 3"; h.context.renderDashboard();
+  assert.equal(h.getEl("dashboard-rows").children.length, 1);
+  h.context.clearDashboardFilters(); h.getEl("dashboard-overdue").checked = true; h.context.renderDashboard();
+  assert.equal(h.getEl("dashboard-rows").children.length, 5);
+  assert.equal(h.context.overdueSchool({ stage: "Contacted", followUpDue: "2000-02-31" }), false);
+  assert.equal(h.context.overdueSchool({ stage: "Contacted", followUpDue: "1/2/2000" }), false);
+  unavailable = true; await h.context.loadDashboard();
+  assert.equal(h.getEl("dashboard-content").hidden, true); assert.match(h.getEl("dashboard-status").textContent, /Couldn’t load/);
+  assert.equal(h.getEl("workspace").hidden, false);
+});
+
+test("sign-out clears team data and ignores a dashboard response whose JSON arrives late", async (t) => {
+  let resolveJson;
+  const h = setupEnv({ fetchHandler: async (url) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/dashboard")) return { ok: true, status: 200, json: () => new Promise((resolve) => { resolveJson = resolve; }) };
+    return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [], sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+  } }); t.after(h.cleanup);
+  await h.signIn("alex@example.test"); const pending = h.context.loadDashboard();
+  await new Promise((resolve) => setTimeout(resolve, 1));
+  h.getEl("sign-out").click(); resolveJson({ ok: true, schools: [{ schoolName: "Must never appear" }] }); await pending;
+  assert.equal(h.getEl("dashboard-rows").children.length, 0); assert.equal(h.getEl("dashboard-content").hidden, true);
+  assert.equal(h.getEl("workspace").hidden, true); assert.equal(h.getEl("dashboard-count").textContent, "");
+});
+
 test("connection badge follows server reachability and browser events without clearing an unsaved draft", async (t) => {
   let health = "ok";
   const record = { recordId: "00000000-0000-4000-8000-000000000001", schoolName: "Example School", schoolBoard: "EXAMPLE", geographicRegion: "Example Region", stage: "Contacted", lastRequestId: "00000000-0000-4000-8000-000000000002" };
@@ -31,7 +80,7 @@ test("connection badge follows server reachability and browser events without cl
 
 test("sign-in works with cached HTML missing the optional badge, and recovers from starting offline", async (t) => {
   let requests = 0;
-  const h = setupEnv({ online: false, missingIds: ["mode-label", "connection-badge"], fetchHandler: async (url) => {
+  const h = setupEnv({ online: false, missingIds: ["mode-label", "connection-badge", "dashboard-view", "tab-dashboard", "dashboard-refresh"], fetchHandler: async (url) => {
     requests++;
     if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
     if (url.includes("/api/health")) return Response.json({ ok: true });

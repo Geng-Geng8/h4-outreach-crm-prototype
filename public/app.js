@@ -42,8 +42,13 @@ function checkConnection() {
 let credential = "", schools = [], directory = [], demoSchools = [], config, nonce = "";
 let sessionVersion = 0, refreshSeq = 0, dirSeq = 0, demoSeq = 0;
 let activeRequest, activeDirRequest, activeDemoRequest, expiryTimer;
-let googleLoading, currentTab = "my-schools";
+let googleLoading, currentTab = "my-schools", isSupervisor = false;
 const pendingClaims = new Map(); // osn -> requestId
+let teamSchools = [], dashboardLoaded = false, dashboardSeq = 0, dashboardRequest;
+const pipelineStages = ["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Cold"];
+const otherStage = "Other / not set";
+const stageKey = (school) => pipelineStages.includes(school.stage) ? school.stage : otherStage;
+const assignee = (school) => school.assignedTo?.trim() || "Unassigned";
 const editFields = ["contactName", "contactRole", "email", "phone", "stage", "priority", "outreachGoal", "followUpDue", "nextAction", "notes"];
 const outreachFields = ["channel", "activityType", "outcome", "summary"];
 const detailOnlyFields = ["contactName", "contactRole", "email", "phone", "priority", "outreachGoal", "notes"];
@@ -64,8 +69,17 @@ function forgetSession() {
   activeRequest?.abort();
   activeDirRequest?.abort();
   activeDemoRequest?.abort();
+  dashboardRequest?.abort(); dashboardSeq++; teamSchools = []; dashboardLoaded = false;
+  if (el("dashboard-view")) {
+    for (const id of ["dashboard-metrics", "dashboard-pipeline", "dashboard-team", "dashboard-rows"]) el(id).replaceChildren();
+    for (const id of ["dashboard-search", "dashboard-owner", "dashboard-stage"]) el(id).value = "";
+    el("dashboard-overdue").checked = false;
+    el("dashboard-owner").replaceChildren(); el("dashboard-stage").replaceChildren();
+    el("dashboard-count").textContent = ""; el("dashboard-status").textContent = "";
+    el("dashboard-content").hidden = true;
+  }
   clearTimeout(expiryTimer);
-  credential = ""; schools = []; directory = []; demoSchools = [];
+  credential = ""; schools = []; directory = []; demoSchools = []; isSupervisor = false;
   pendingClaims.clear();
   el("school-list").replaceChildren(); el("search").value = "";
   if (el("dir-list")) {
@@ -316,8 +330,17 @@ async function saveSchoolEdits(event) {
   }
 }
 
+function updateWorkspaceHeading() {
+  el("tab-my-schools").textContent = isSupervisor ? "All schools" : "My schools";
+  el("workspace-heading").textContent = currentTab === "dashboard" ? "Team dashboard." : currentTab === "directory" ? "Find your next school." : isSupervisor ? "School overview." : "Your schools.";
+  el("workspace-description").textContent = currentTab === "dashboard" ? "Our schools. Our progress. Every connection counts." : currentTab === "directory" ? "Browse available schools and start a new connection." : isSupervisor ? "School assignments across H4." : "Your assigned schools, ready for your next connection.";
+}
 function switchTab(tab) {
   currentTab = tab;
+  updateWorkspaceHeading();
+  el("tab-dashboard")?.classList.toggle("active", tab === "dashboard");
+  el("tab-dashboard")?.setAttribute("aria-selected", String(tab === "dashboard"));
+  if (el("dashboard-view")) el("dashboard-view").hidden = tab !== "dashboard";
   el("tab-my-schools").classList.toggle("active", tab === "my-schools");
   el("tab-my-schools").setAttribute("aria-selected", String(tab === "my-schools"));
   el("tab-directory").classList.toggle("active", tab === "directory");
@@ -330,8 +353,131 @@ function switchTab(tab) {
   el("demo-view").hidden = tab !== "demo-claim";
 
   if (tab === "directory" && directory.length === 0) loadDirectory();
+  if (tab === "dashboard" && !dashboardLoaded) loadDashboard();
   // Requirement: Reload synthetic availability when entering the Demo tab (never reuse stale cached state)
   if (tab === "demo-claim") loadDemoSchools();
+}
+
+function dashboardNode(tag, text, className = "") {
+  const node = document.createElement(tag); node.textContent = text; node.className = className; return node;
+}
+function dashboardToday() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+function overdueSchool(school, today = dashboardToday()) {
+  const due = school.followUpDue;
+  // Only unambiguous ISO dates are compared. Preserve other sheet formatting as text.
+  return !["Booked", "Cold"].includes(school.stage) && /^\d{4}-\d{2}-\d{2}$/.test(due)
+    && !Number.isNaN(Date.parse(due)) && new Date(due).toISOString().slice(0, 10) === due && due < today;
+}
+function dashboardOptions(id, allLabel, values) {
+  const select = el(id), previous = select.value;
+  const all = dashboardNode("option", allLabel); all.value = "";
+  select.replaceChildren(all);
+  for (const value of values) {
+    const option = dashboardNode("option", value === "Not Contacted" ? "Claimed / not contacted" : value);
+    option.value = value; select.append(option);
+  }
+  select.value = values.includes(previous) ? previous : "";
+}
+function clearDashboardFilters() {
+  for (const id of ["dashboard-search", "dashboard-owner", "dashboard-stage"]) el(id).value = "";
+  el("dashboard-overdue").checked = false; renderDashboard();
+}
+function renderDashboard() {
+  if (!el("dashboard-view") || !dashboardLoaded) return;
+  const today = dashboardToday(), overdue = (school) => overdueSchool(school, today);
+  const stage = el("dashboard-stage").value, owner = el("dashboard-owner").value;
+  const query = el("dashboard-search").value.trim().toLowerCase();
+  const overdueOnly = el("dashboard-overdue").checked;
+  el("dashboard-metrics").replaceChildren();
+  for (const [label, count] of [
+    ["Schools claimed", teamSchools.length],
+    ["Awaiting first contact", teamSchools.filter((school) => school.stage === "Not Contacted").length],
+    ["Workshops booked", teamSchools.filter((school) => school.stage === "Booked").length],
+    ["Overdue follow-ups", teamSchools.filter(overdue).length],
+  ]) {
+    const metric = dashboardNode("div", "", "dashboard-metric");
+    metric.append(dashboardNode("strong", String(count)), dashboardNode("span", label));
+    el("dashboard-metrics").append(metric);
+  }
+  el("dashboard-pipeline").replaceChildren();
+  const stages = [...pipelineStages, ...(teamSchools.some((school) => stageKey(school) === otherStage) ? [otherStage] : [])];
+  for (const key of stages) {
+    const count = teamSchools.filter((school) => stageKey(school) === key).length;
+    const label = key === "Not Contacted" ? "Claimed / not contacted" : key;
+    const button = dashboardNode("button", "", "pipeline-step"); button.type = "button";
+    button.setAttribute("aria-label", `${label}: ${count} schools`); button.setAttribute("aria-pressed", String(stage === key));
+    button.append(dashboardNode("span", label), dashboardNode("strong", String(count)));
+    button.onclick = () => { el("dashboard-stage").value = stage === key ? "" : key; renderDashboard(); };
+    el("dashboard-pipeline").append(button);
+  }
+  el("dashboard-team").replaceChildren();
+  for (const name of [...new Set(teamSchools.map(assignee))].sort()) {
+    const assigned = teamSchools.filter((school) => assignee(school) === name);
+    const button = dashboardNode("button", "", "team-member"); button.type = "button";
+    button.setAttribute("aria-pressed", String(owner === name));
+    button.append(dashboardNode("strong", name), dashboardNode("span", `${assigned.length} claimed · ${assigned.filter((s) => s.stage === "Booked").length} booked · ${assigned.filter(overdue).length} overdue`));
+    button.onclick = () => { el("dashboard-owner").value = owner === name ? "" : name; renderDashboard(); };
+    el("dashboard-team").append(button);
+  }
+  const visible = teamSchools.filter((school) => (!stage || stageKey(school) === stage) && (!owner || assignee(school) === owner)
+    && (!overdueOnly || overdue(school)) && [school.schoolName, school.schoolBoard, school.geographicRegion].some((text) => (text || "").toLowerCase().includes(query)))
+    .sort((a, b) => Number(overdue(b)) - Number(overdue(a)) || a.schoolName.localeCompare(b.schoolName));
+  el("dashboard-rows").replaceChildren();
+  for (const school of visible) {
+    const row = document.createElement("tr");
+    const cell = (label) => { const td = document.createElement("td"); td.setAttribute("data-label", label); row.append(td); return td; };
+    cell("School").append(dashboardNode("strong", school.schoolName), dashboardNode("span", [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · "), "dashboard-school-meta"));
+    cell("Assigned to").textContent = assignee(school);
+    const badge = dashboardNode("span", school.stage === "Not Contacted" ? "Claimed / not contacted" : school.stage || "Stage not set", "school-stage");
+    if (["Interested", "Engaged"].includes(school.stage)) badge.classList.add("warm");
+    if (school.stage === "Booked") badge.classList.add("booked");
+    if (school.stage === "Cold") badge.classList.add("cold");
+    cell("Stage").append(badge);
+    cell("Last contact").textContent = school.lastContacted || "Not recorded";
+    const due = cell("Follow-up due"); due.textContent = school.followUpDue || "Not scheduled";
+    if (overdue(school)) { due.className = "dashboard-due"; due.append(dashboardNode("span", "Overdue", "dashboard-school-meta")); }
+    const actions = cell("Actions");
+    if (school.canEdit && config?.writesEnabled) {
+      const open = dashboardNode("button", "Open school →", "text-button"); open.type = "button";
+      open.setAttribute("aria-label", `Open ${school.schoolName}`); open.onclick = () => openSchoolEditor(school.recordId);
+      actions.append(open);
+    } else actions.textContent = "View only";
+    el("dashboard-rows").append(row);
+  }
+  el("dashboard-count").textContent = `Showing ${visible.length} of ${teamSchools.length} claimed schools`;
+  el("dashboard-empty").hidden = visible.length > 0;
+}
+async function loadDashboard() {
+  if (!credential || !el("dashboard-view")) return;
+  const session = sessionVersion, seq = ++dashboardSeq;
+  dashboardRequest?.abort(); dashboardRequest = new AbortController();
+  el("dashboard-refresh").disabled = true;
+  el("dashboard-status").textContent = "Loading team progress…";
+  try {
+    const response = await apiFetch("./api/dashboard", { headers: { Authorization: `Bearer ${credential}` }, cache: "no-store", credentials: "omit", signal: dashboardRequest.signal });
+    const data = await response.json();
+    if (session !== sessionVersion || seq !== dashboardSeq || !credential) return;
+    if (response.status === 401 || response.status === 403) {
+      forgetSession(); status(messages[data.code] ?? "Your access was revoked or session expired.");
+      if (config?.ready) await showGoogleButton();
+      el("google-button").hidden = false; return;
+    }
+    if (!response.ok || !data.ok || !Array.isArray(data.schools)) throw new Error();
+    teamSchools = data.schools; dashboardLoaded = true;
+    dashboardOptions("dashboard-owner", "Everyone", [...new Set(teamSchools.map(assignee))].sort());
+    dashboardOptions("dashboard-stage", "All stages", [...pipelineStages, ...(teamSchools.some((s) => stageKey(s) === otherStage) ? [otherStage] : [])]);
+    renderDashboard(); el("dashboard-content").hidden = false;
+    el("dashboard-status").textContent = "Up to date · whole team · dates use Ontario time";
+  } catch (error) {
+    if (session !== sessionVersion || seq !== dashboardSeq || error.name === "AbortError") return;
+    teamSchools = []; dashboardLoaded = false; el("dashboard-content").hidden = true;
+    el("dashboard-rows").replaceChildren();
+    el("dashboard-status").textContent = "Couldn’t load team progress. Choose Refresh dashboard to try again.";
+  } finally {
+    if (session === sessionVersion && seq === dashboardSeq) el("dashboard-refresh").disabled = false;
+  }
 }
 
 function renderDirectory() {
@@ -647,13 +793,13 @@ async function refresh() {
       return;
     }
     schools = data.schools;
+    dashboardLoaded = false;
+    if (currentTab === "dashboard") loadDashboard();
     el("user-name").textContent = data.currentUser.name;
     el("user-email").textContent = data.currentUser.email;
     el("user-role").textContent = data.currentUser.role === "Supervisor" ? "Supervisor" : "Student co-op";
     el("avatar").textContent = data.currentUser.name.slice(0, 1).toUpperCase();
-    const supervisor = data.currentUser.role === "Supervisor";
-    el("workspace-heading").textContent = supervisor ? "School overview." : "Your schools.";
-    el("workspace-description").textContent = supervisor ? "School assignments across H4." : "Your assigned schools, ready for your next connection.";
+    isSupervisor = data.currentUser.role === "Supervisor"; updateWorkspaceHeading();
     el("workspace-status").textContent = config?.writesEnabled ? "Up to date" : "Up to date · viewing only";
     renderSchools(); el("welcome").hidden = true; el("workspace").hidden = false;
     el("retry").hidden = true;
@@ -712,6 +858,11 @@ el("refresh").addEventListener("click", refresh);
 el("retry").addEventListener("click", initialize);
 el("search").addEventListener("input", renderSchools);
 el("tab-my-schools").addEventListener("click", () => switchTab("my-schools"));
+el("tab-dashboard")?.addEventListener("click", () => switchTab("dashboard"));
+el("dashboard-refresh")?.addEventListener("click", loadDashboard);
+el("dashboard-clear")?.addEventListener("click", clearDashboardFilters);
+el("dashboard-search")?.addEventListener("input", renderDashboard);
+for (const id of ["dashboard-owner", "dashboard-stage", "dashboard-overdue"]) el(id)?.addEventListener("change", renderDashboard);
 el("tab-directory").addEventListener("click", () => switchTab("directory"));
 el("tab-demo-claim").addEventListener("click", () => switchTab("demo-claim"));
 el("dir-search").addEventListener("input", renderDirectory);

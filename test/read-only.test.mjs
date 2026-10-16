@@ -5,6 +5,44 @@ import { readHarness, ACTOR, OTHER, SUPERVISOR, CLIENT, SCOPE } from "./read-onl
 const sheetReads = (h) => h.calls.filter((call) => call.host === "sheets.googleapis.com");
 const schoolReads = (h) => sheetReads(h).filter((call) => call.ranges.some((range) => range.startsWith("'Schools'!")));
 
+test("team dashboard shares all progress summaries with students, but no private fields or edit grants", async (t) => {
+  const h = await readHarness(t);
+  h.tables.Schools[1][9] = "2026-10-14"; h.tables.Schools[1][10] = "2026-10-20";
+  h.tables.Schools.find((row) => row[3] === "Sam")[8] = "Booked";
+  const response = await h.request("/api/dashboard", { token: await h.token() });
+  const data = await response.json();
+  assert.equal(response.status, 200); assert.equal(data.schools.length, 2);
+  assert.equal(data.schools[0].lastContacted, "2026-10-14"); assert.equal(data.schools[0].followUpDue, "2026-10-20");
+  assert.equal(data.schools[0].canEdit, true); assert.equal(data.schools[1].canEdit, false);
+  assert.equal(data.schools[1].assignedTo, "Sam"); assert.equal(data.schools[1].stage, "Booked");
+  assert.deepEqual(Object.keys(data.schools[0]).sort(), ["recordId", "schoolName", "schoolBoard", "assignedTo", "stage", "priority", "geographicRegion", "lastContacted", "followUpDue", "canEdit"].sort());
+  assert.doesNotMatch(JSON.stringify(data), /PRIVATE_|@|ownerEmail|notes|activities|contactName|lastRequestId/);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.ok(sheetReads(h).every((call) => call.method === "GET"));
+  assert.deepEqual(schoolReads(h)[0].ranges, ["'Schools'!A1:D1000", "'Schools'!I1:K1000", "'Schools'!M1:M1000", "'Schools'!S1:S1000", "'Schools'!Z1:Z1000"]);
+});
+
+test("dashboard verifies supervisor membership and immediately rejects revocation and unlisted identities", async (t) => {
+  const h = await readHarness(t);
+  const token = await h.token({ email: SUPERVISOR, sub: "fixture-supervisor" });
+  const success = await h.request("/api/dashboard", { token });
+  assert.equal(success.status, 200); assert.ok((await success.json()).schools.every((school) => school.canEdit));
+  const reads = schoolReads(h).length;
+  h.tables["CRM Users"].find((row) => row[0] === SUPERVISOR)[3] = false;
+  assert.equal((await h.request("/api/dashboard", { token })).status, 403);
+  assert.equal((await h.request("/api/dashboard", { token: await h.token({ email: "unlisted@example.test" }) })).status, 403);
+  assert.equal((await h.request("/api/dashboard")).status, 401);
+  assert.equal((await h.request("/api/dashboard", { token, method: "POST", body: "{}" })).status, 405);
+  assert.equal(schoolReads(h).length, reads);
+});
+
+test("dashboard fails closed when progress headers are misaligned", async (t) => {
+  const h = await readHarness(t);
+  h.tables.Schools[0][9] = "Wrong date column";
+  const response = await h.request("/api/dashboard", { token: await h.token() });
+  assert.equal(response.status, 503); assert.equal((await response.json()).code, "SCHEMA_MISMATCH");
+});
+
 test("verified Google identity receives only its assigned school summaries", async (t) => {
   const h = await readHarness(t);
   const result = await h.bootstrap(await h.token());

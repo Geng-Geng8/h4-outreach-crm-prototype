@@ -164,6 +164,35 @@ export class GoogleSheetsReadOnly {
     return summaries;
   }
 
+  async teamSchools(user: CrmUser): Promise<(SchoolSummary & {
+    lastContacted: string; followUpDue: string; canEdit: boolean;
+  })[]> {
+    // Team visibility is limited to progress summaries. Owner email is used
+    // only for the server-computed permission; contacts and notes are not read.
+    const ranges = await this.read([
+      "'Schools'!A1:D1000", "'Schools'!I1:K1000", "'Schools'!M1:M1000",
+      "'Schools'!S1:S1000", "'Schools'!Z1:Z1000",
+    ]);
+    const [base, progress, priorities, regions, owners] = ranges.map((range) => range.values ?? []);
+    checkHeader(base?.[0], HEADERS.Schools.slice(0, 4));
+    checkHeader(progress?.[0], ["Stage", "Last Contacted", "Follow-Up Due"]);
+    checkHeader(priorities?.[0], ["Priority"]);
+    checkHeader(regions?.[0], ["Geographic Region"]); checkHeader(owners?.[0], ["Owner Email"]);
+    const summaries = [];
+    for (let index = 1; index < (base?.length ?? 0); index++) {
+      const row = base![index]!;
+      if (!row[0]) continue;
+      summaries.push({
+        recordId: value(row[0]), schoolName: value(row[1]), schoolBoard: value(row[2]),
+        assignedTo: value(row[3]), stage: value(progress?.[index]?.[0]),
+        lastContacted: value(progress?.[index]?.[1]), followUpDue: value(progress?.[index]?.[2]),
+        priority: value(priorities?.[index]?.[0]), geographicRegion: value(regions?.[index]?.[0]),
+        canEdit: user.role === "Supervisor" || value(owners?.[index]?.[0]).trim().toLowerCase() === user.email,
+      });
+    }
+    return summaries;
+  }
+
   async directory(): Promise<DirectoryEntry[]> {
     const ranges = await this.read([
       "'School Directory'!A:O",

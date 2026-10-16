@@ -49,10 +49,34 @@
       </div>
 
       <nav class="workspace-tabs" role="tablist" aria-label="Workspace views">
+        <button id="tab-dashboard" role="tab" aria-selected="false" aria-controls="dashboard-view" class="tab-btn" type="button">Team dashboard</button>
         <button id="tab-my-schools" role="tab" aria-selected="true" class="tab-btn active" type="button">My schools</button>
         <button id="tab-directory" role="tab" aria-selected="false" class="tab-btn" type="button">Browse directory</button>
         <button id="tab-demo-claim" role="tab" aria-selected="false" class="tab-btn" type="button">🧪 Synthetic claim demo</button>
       </nav>
+
+      <div id="dashboard-view" role="tabpanel" aria-labelledby="tab-dashboard" hidden>
+        <div class="dashboard-heading"><div><h2>The team at a glance.</h2><p>Every claimed school, from first contact to a booked workshop.</p></div><button id="dashboard-refresh" class="button secondary" type="button">Refresh dashboard</button></div>
+        <p id="dashboard-status" class="workspace-status" role="status" aria-live="polite"></p>
+        <div id="dashboard-content" hidden>
+          <div id="dashboard-metrics" class="dashboard-metrics" aria-label="Team totals"></div>
+          <div class="dashboard-section-heading"><h3>Outreach pipeline</h3><p>Choose a stage to see its schools.</p></div>
+          <div id="dashboard-pipeline" class="dashboard-pipeline" aria-label="Filter by outreach stage"></div>
+          <div class="dashboard-section-heading"><h3>Who’s working on what</h3><p>Choose a team member to see their assignments.</p></div>
+          <div id="dashboard-team" class="dashboard-team" aria-label="Filter by team member"></div>
+          <div class="dashboard-section-heading"><h3>School status</h3><button id="dashboard-clear" class="text-button" type="button">Clear filters</button></div>
+          <div class="dashboard-filters">
+            <label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search team schools</span><input id="dashboard-search" type="search" placeholder="Search school, board or region" autocomplete="off"></label>
+            <label>Team member<select id="dashboard-owner"><option value="">Everyone</option></select></label>
+            <label>Stage<select id="dashboard-stage"><option value="">All stages</option></select></label>
+            <label class="dashboard-overdue"><input id="dashboard-overdue" type="checkbox">Overdue follow-ups only</label>
+          </div>
+          <p id="dashboard-count" class="workspace-status" role="status" aria-live="polite"></p>
+          <div class="dashboard-table-wrap"><table class="dashboard-table"><caption class="sr-only">All claimed schools and their current outreach status</caption><thead><tr><th scope="col">School</th><th scope="col">Assigned to</th><th scope="col">Stage</th><th scope="col">Last contact</th><th scope="col">Follow-up due</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="dashboard-rows"></tbody></table></div>
+          <p id="dashboard-empty" class="empty-state" hidden>No schools match these filters. Try another stage or team member.</p>
+          <p class="quiet-note">Team progress is shared with everyone signed in. Contact details, notes and outreach messages are available only to the school’s owner and supervisors. A claimed school starts at “Not Contacted.”</p>
+        </div>
+      </div>
 
       <div id="schools-view">
         <div class="workspace-tools"><div class="count-label"><strong id="school-count">0</strong><span id="school-count-label">schools</span></div><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search schools</span><input id="search" type="search" placeholder="Search by school, board or region" autocomplete="off"></label><button id="refresh" class="button secondary" type="button">Refresh</button></div>
@@ -64,7 +88,7 @@
 
       <div id="directory-view" hidden>
         <div class="workspace-tools"><div class="count-label"><strong id="dir-count">0</strong><span id="dir-count-label">schools</span></div><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search directory</span><input id="dir-search" type="search" placeholder="Search directory by name, board, city or region" autocomplete="off"></label><button id="dir-refresh" class="button secondary" type="button">Refresh directory</button></div>
-        <p class="visibility-note">Claims save to the test spreadsheet. Contact details and other students’ assignments remain hidden.</p>
+        <p class="visibility-note">Claim an available school to start your outreach. See everyone’s assignments and progress in Team dashboard.</p>
         <p id="dir-status" class="workspace-status" role="status" aria-live="polite"></p>
         <p id="dir-feedback" class="demo-feedback" role="status" aria-live="polite"></p>
         <div id="dir-list" class="school-list"></div>

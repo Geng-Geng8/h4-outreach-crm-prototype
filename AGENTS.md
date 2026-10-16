@@ -15,3 +15,8 @@ been verified end to end. Do not expand sharing or target any other workbook.
 Keep Google identity and CRM membership checks, protect formula columns Q/R,
 preserve retry IDs, and use the single coordinator for all claims. Do not put keys
 or tokens in source, chat, logs, or Git. Keep synthetic fixtures separate from Google.
+
+The user approved a team dashboard visible to every active CRM member. Share only
+school identity, assigned display name, stage, priority, region, last-contact and
+follow-up dates. Keep contact details, owner emails, notes and activity messages
+restricted to the owner and supervisors; team visibility does not grant edit rights.

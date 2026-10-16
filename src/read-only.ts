@@ -254,6 +254,19 @@ export default (() => {
               : json(503, { ok: false, code: "GOOGLE_CONNECTION_UNAVAILABLE" });
           }
         }
+        if (url.pathname === "/api/dashboard") {
+          try {
+            if (setup(env).length) throw new ApiError(503, "GOOGLE_SETUP_REQUIRED");
+            const identity = await verifyGoogleIdentity(request, env.GOOGLE_CLIENT_ID!);
+            if (!reader?.matches(env)) reader = new GoogleSheetsReadOnly(env);
+            const user = await reader.authorize(identity.email);
+            return json(200, { ok: true, schools: await reader.teamSchools(user) });
+          } catch (error) {
+            return error instanceof ApiError
+              ? json(error.status, { ok: false, code: error.code })
+              : json(503, { ok: false, code: "GOOGLE_CONNECTION_UNAVAILABLE" });
+          }
+        }
         if (url.pathname !== "/api/bootstrap") return json(404, { ok: false, code: "NOT_FOUND" });
         try {
           if (setup(env).length) throw new ApiError(503, "GOOGLE_SETUP_REQUIRED");
