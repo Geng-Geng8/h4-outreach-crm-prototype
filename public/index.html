@@ -135,23 +135,130 @@
       <form id="editor-form" novalidate>
         <div class="editor-header"><div><p class="eyebrow" id="editor-kind">SCHOOL DETAILS</p><h2 id="editor-title">Edit school</h2><p id="editor-meta"></p></div><button type="button" id="editor-close" class="text-button" aria-label="Close editor">Close</button></div>
         <p id="editor-status"></p>
-        <div id="outreach-fields" class="editor-grid" hidden>
-          <label>Channel<select id="log-channel"><option>Email</option><option>Phone</option><option>Social</option><option>Meeting</option></select></label>
-          <label>Contact type<select id="log-activityType"><option value="Outreach">First contact / other outreach</option><option value="FollowUp">Follow-up</option></select></label>
-          <label class="editor-wide">Outcome<input id="log-outcome" maxlength="300" placeholder="For example: Left a message or Received a reply" required></label>
-          <label class="editor-wide">What happened?<textarea id="log-summary" maxlength="4000" rows="4" placeholder="Briefly describe the conversation or message." required></textarea></label>
-          <p class="editor-wide quiet-note">Log contacts you actually made. A follow-up adds one to the follow-up count. Your summary goes into Activity Log; existing school notes are kept.</p>
+        <div id="outreach-fields" class="editor-grid outreach-flow" hidden>
+          <section class="flow-step editor-wide" id="step-contact">
+            <div class="step-header">
+              <span class="step-num" aria-hidden="true">1</span>
+              <div>
+                <h3 class="step-title">Who did you contact?</h3>
+                <p class="step-sub">School contact person</p>
+              </div>
+            </div>
+            <div id="log-contact-card" class="contact-card">
+              <div class="contact-info">
+                <span class="contact-icon" aria-hidden="true">👤</span>
+                <div class="contact-text">
+                  <strong id="log-contact-name">Loading contact…</strong>
+                  <span id="log-contact-role" class="contact-role"></span>
+                </div>
+              </div>
+              <button type="button" id="log-contact-edit" class="button secondary compact-button" aria-label="Edit school contact details">Edit contact</button>
+            </div>
+            <p class="field-help">Outreach is logged under this school's contact. If you reached someone else or need to record contact details, edit the school contact.</p>
+          </section>
+
+          <section class="flow-step editor-wide" id="step-channel">
+            <div class="step-header">
+              <span class="step-num" aria-hidden="true">2</span>
+              <div>
+                <h3 class="step-title">How did you contact them?</h3>
+                <p class="step-sub">Channel and outreach type</p>
+              </div>
+            </div>
+            <div class="flow-step-inputs">
+              <label>Channel
+                <select id="log-channel">
+                  <option>Email</option>
+                  <option>Phone</option>
+                  <option>Social</option>
+                  <option>Meeting</option>
+                </select>
+                <span class="field-help">How you reached out.</span>
+              </label>
+              <label>Contact type
+                <select id="log-activityType">
+                  <option value="Outreach">First contact / other outreach</option>
+                  <option value="FollowUp">Follow-up</option>
+                </select>
+                <span class="field-help">Follow-up adds one to the follow-up count.</span>
+              </label>
+            </div>
+            <details class="inline-help">
+              <summary>What does this mean?</summary>
+              <div class="help-text">Choose <strong>First contact</strong> for your initial outreach. Choose <strong>Follow-up</strong> when checking back on earlier outreach. A follow-up increments the school's follow-up count.</div>
+            </details>
+          </section>
+
+          <section class="flow-step editor-wide" id="step-outcome">
+            <div class="step-header">
+              <span class="step-num" aria-hidden="true">3</span>
+              <div>
+                <h3 class="step-title">What happened?</h3>
+                <p class="step-sub">Outcome of this contact</p>
+              </div>
+            </div>
+            <label class="editor-wide">Outcome
+              <input id="log-outcome" maxlength="300" placeholder="e.g. Introduction sent or Left voicemail" required>
+              <span class="field-help">Pick a suggestion below or type your own.</span>
+            </label>
+            <div class="suggestion-group editor-wide" role="group" aria-label="Outcome suggestions">
+              <span class="suggestion-label">Suggestions:</span>
+              <div class="suggestion-chips">
+                <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Introduction sent">Introduction sent</button>
+                <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Left voicemail">Left voicemail</button>
+                <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Waiting for a reply">Waiting for a reply</button>
+                <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Received a reply">Received a reply</button>
+                <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Requested a meeting">Requested a meeting</button>
+              </div>
+            </div>
+            <details class="inline-help editor-wide">
+              <summary>What does this mean?</summary>
+              <div class="help-text">The immediate outcome of this contact (e.g. voicemail left or waiting for a reply). Appears in the school's activity log. You can select a suggestion or type your own text.</div>
+            </details>
+          </section>
+
+          <section class="flow-step editor-wide" id="step-summary">
+            <div class="step-header">
+              <span class="step-num" aria-hidden="true">4</span>
+              <div>
+                <h3 class="step-title">Add a short summary</h3>
+                <p class="step-sub">Conversation details for your team</p>
+              </div>
+            </div>
+            <label class="editor-wide">What happened?
+              <textarea id="log-summary" maxlength="4000" rows="3" placeholder="Briefly describe the conversation or message…" required></textarea>
+              <span class="field-help example-help">Example: “Emailed Ms. Patel about a free workshop. She’ll ask the principal. Follow up next Wednesday.”</span>
+            </label>
+            <details class="inline-help editor-wide">
+              <summary>What does this mean?</summary>
+              <div class="help-text">Your summary goes into the shared Activity Log so your team and supervisor know what was discussed. Existing school notes are kept separate. Opening an email composer does not count as sending outreach.</div>
+            </details>
+            <p class="editor-wide quiet-note">Log contacts you actually made. Opening an email composer does not count. Your summary goes into Activity Log; existing school notes are kept.</p>
+          </section>
         </div>
         <div id="editor-fields" class="editor-grid">
+          <div id="return-to-activity-container" class="editor-wide" hidden>
+            <button type="button" id="return-to-activity" class="button secondary compact-button">← Return to Log Outreach</button>
+          </div>
           <label id="field-contactName">Contact name<input id="edit-contactName" maxlength="300" autocomplete="off"></label>
           <label id="field-contactRole">Contact role<input id="edit-contactRole" maxlength="300" autocomplete="off"></label>
           <label id="field-email">Email<input id="edit-email" type="email" maxlength="300" autocomplete="off"></label>
           <label id="field-phone">Phone<input id="edit-phone" type="tel" maxlength="100" autocomplete="off"></label>
-          <label>Stage<select id="edit-stage"><option>Not Contacted</option><option>Contacted</option><option>Interested</option><option>Engaged</option><option>Booked</option><option value="Cold">Cold</option></select></label>
+          <div id="activity-step-5-header" class="editor-wide flow-step" hidden>
+            <div class="step-header">
+              <span class="step-num" aria-hidden="true">5</span>
+              <div>
+                <h3 class="step-title">What happens next?</h3>
+                <p class="step-sub">Next action, follow-up date, and pipeline stage</p>
+              </div>
+            </div>
+            <p class="field-help tip-box">Setting a next action and reminder date keeps active schools moving forward. Reminders appear on your dashboard in the app (the app does not send email or phone notifications).</p>
+          </div>
+          <label id="field-stage">Stage<select id="edit-stage"><option>Not Contacted</option><option>Contacted</option><option>Interested</option><option>Engaged</option><option>Booked</option><option value="Cold">Cold</option></select><span class="field-help">School's current outreach stage.</span></label>
           <label id="field-priority">Priority<select id="edit-priority"><option value="">Not set</option><option>High</option><option>Medium</option><option>Low</option></select></label>
           <label id="field-outreachGoal">Outreach goal<input id="edit-outreachGoal" maxlength="300"></label>
-          <label>Follow-up due<input id="edit-followUpDue" type="date"></label>
-          <label class="editor-wide">Next action<input id="edit-nextAction" maxlength="1000"></label>
+          <label id="field-followUpDue">Follow-up due<input id="edit-followUpDue" type="date"><span class="field-help">When to follow up next. Reminder appears in the app (no notification is sent).</span><details class="inline-help"><summary>What does this mean?</summary><div class="help-text">Target date for your next check-in. When this date arrives or passes, the school is highlighted on your dashboard so you know it's time to check in. Note: This reminder only appears in the app.</div></details></label>
+          <label id="field-nextAction" class="editor-wide">Next action<input id="edit-nextAction" maxlength="1000" placeholder="e.g. Waiting for a reply"><span class="field-help">Next step for this school. Appears on your My Outreach list.</span><div class="suggestion-group"><span class="suggestion-label">Suggestion:</span><div class="suggestion-chips"><button type="button" class="suggestion-chip" data-target="edit-nextAction" data-value="Waiting for a reply">Waiting for a reply</button></div></div><details class="inline-help"><summary>What does this mean?</summary><div class="help-text">A quick note to remind you or your team what needs to happen next, such as waiting for a reply or preparing workshop materials.</div></details></label>
           <label id="field-notes" class="editor-wide">Notes / reply<textarea id="edit-notes" maxlength="4000" rows="5"></textarea></label>
           <p id="cold-warning" class="editor-wide quiet-note"></p>
         </div>
