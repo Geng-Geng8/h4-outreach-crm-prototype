@@ -20,3 +20,8 @@ The user approved a team dashboard visible to every active CRM member. Share onl
 school identity, assigned display name, stage, priority, region, last-contact and
 follow-up dates. Keep contact details, owner emails, notes and activity messages
 restricted to the owner and supervisors; team visibility does not grant edit rights.
+
+The current role-based dashboard task is feature-branch/PR work only: do not deploy
+or push main. Students land on My Outreach, supervisors on H4 Overview, and all
+members can use Team Progress. Individual student breakdowns and roster information
+belong only to H4 Overview. Team Progress must not show individual performance cards.

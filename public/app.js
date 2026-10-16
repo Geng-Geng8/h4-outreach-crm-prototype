@@ -45,6 +45,7 @@ let activeRequest, activeDirRequest, activeDemoRequest, expiryTimer;
 let googleLoading, currentTab = "my-schools", isSupervisor = false;
 const pendingClaims = new Map(); // osn -> requestId
 let teamSchools = [], dashboardLoaded = false, dashboardSeq = 0, dashboardRequest;
+let overviewStudents = [], schoolScopeFilter = null, schoolStageFilter = "", schoolScopeLabel = "", homeShowAll = false;
 const pipelineStages = ["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Cold"];
 const otherStage = "Other / not set";
 const stageKey = (school) => pipelineStages.includes(school.stage) ? school.stage : otherStage;
@@ -70,8 +71,16 @@ function forgetSession() {
   activeDirRequest?.abort();
   activeDemoRequest?.abort();
   dashboardRequest?.abort(); dashboardSeq++; teamSchools = []; dashboardLoaded = false;
+  overviewStudents = []; schoolScopeFilter = null; schoolStageFilter = ""; schoolScopeLabel = ""; homeShowAll = false;
+  if (el("home-view")) {
+    for (const id of ["home-metrics", "home-actions", "overview-pipeline", "overview-students"]) el(id).replaceChildren();
+    el("home-filter").value = ""; el("home-content").hidden = true; el("overview-panel").hidden = true;
+    el("home-status").textContent = ""; el("home-action-count").textContent = "";
+    el("home-message").textContent = ""; el("home-description").textContent = "";
+    el("home-more").textContent = "Show more schools"; el("home-more").hidden = true;
+  }
   if (el("dashboard-view")) {
-    for (const id of ["dashboard-metrics", "dashboard-pipeline", "dashboard-team", "dashboard-rows"]) el(id).replaceChildren();
+    el("dashboard-rows").replaceChildren();
     for (const id of ["dashboard-search", "dashboard-owner", "dashboard-stage"]) el(id).value = "";
     el("dashboard-overdue").checked = false;
     el("dashboard-owner").replaceChildren(); el("dashboard-stage").replaceChildren();
@@ -82,6 +91,8 @@ function forgetSession() {
   credential = ""; schools = []; directory = []; demoSchools = []; isSupervisor = false;
   pendingClaims.clear();
   el("school-list").replaceChildren(); el("search").value = "";
+  el("school-count").textContent = "0"; el("school-count-label").textContent = "schools";
+  if (el("schools-scope")) { el("schools-scope").hidden = true; el("schools-scope-label").textContent = ""; }
   if (el("dir-list")) {
     el("dir-list").replaceChildren(); el("dir-search").value = "";
     const dirFeedback = el("dir-feedback");
@@ -136,20 +147,22 @@ async function onGoogleSignIn(response) {
 
 function renderSchools() {
   const query = el("search").value.trim().toLowerCase();
-  const visible = schools.filter((school) =>
+  const today = dashboardToday();
+  const visible = schools.filter((school) => (!schoolScopeFilter || schoolScopeFilter(school, today)) && (!schoolStageFilter || stageKey(school) === schoolStageFilter) &&
     [school.schoolName, school.schoolBoard, school.geographicRegion].some((value) => value.toLowerCase().includes(query)));
-  el("school-count").textContent = String(schools.length);
-  el("school-count-label").textContent = schools.length === 1 ? "school" : "schools";
+  if (el("schools-scope")) {
+    el("schools-scope").hidden = !schoolScopeFilter && !schoolStageFilter;
+    el("schools-scope-label").textContent = `${schoolScopeLabel || schoolStageFilter} · ${visible.length} ${visible.length === 1 ? "school" : "schools"}`;
+  }
+  el("school-count").textContent = String(visible.length);
+  el("school-count-label").textContent = visible.length !== schools.length ? `of ${schools.length} schools` : schools.length === 1 ? "school" : "schools";
   el("school-list").replaceChildren();
   for (const school of visible) {
     const container = document.createElement("article"); container.className = "school-card";
     const card = document.createElement("button"); card.className = "school-open"; card.type = "button";
     card.setAttribute("aria-label", `Edit ${school.schoolName}`);
     card.onclick = () => openSchoolEditor(school.recordId);
-    const stage = document.createElement("span"); stage.className = "school-stage"; stage.textContent = school.stage || "Stage not set";
-    if (["Interested", "Engaged"].includes(school.stage)) stage.classList.add("warm");
-    if (school.stage === "Booked") stage.classList.add("booked");
-    if (school.stage === "Cold") stage.classList.add("cold");
+    const stage = schoolBadge(school.stage);
     const priority = document.createElement("span"); priority.className = "school-priority"; priority.textContent = school.priority ? `${school.priority} priority` : "";
     const heading = document.createElement("h2"); heading.textContent = school.schoolName;
     const meta = document.createElement("p"); meta.className = "school-meta"; meta.textContent = [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · ") || "Location not listed";
@@ -159,7 +172,8 @@ function renderSchools() {
     log.textContent = "Log outreach"; log.setAttribute("aria-label", `Log outreach for ${school.schoolName}`);
     log.onclick = () => openSchoolEditor(school.recordId, false, "activity");
     log.disabled = config?.writesEnabled !== true;
-    card.append(stage, priority, heading, meta, assignment, editHint); container.append(card, log); el("school-list").append(container);
+    card.append(stage, priority, heading, meta, assignment); appendNextAction(card, school); card.append(editHint);
+    container.append(card, log); el("school-list").append(container);
   }
   el("empty-state").hidden = visible.length > 0;
   el("empty-title").textContent = query ? "No matching schools" : "No schools assigned yet";
@@ -228,6 +242,12 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     });
     const data = await response.json();
     if (session !== sessionVersion || seq !== editorSeq || !credential) return;
+    if (response.status === 401 || (response.status === 403 && data.code !== "NOT_OWNER")) {
+      forgetSession(); status(messages[data.code] ?? "Your access changed. Please sign in again.");
+      el("google-button").hidden = false;
+      if (config?.ready) await showGoogleButton();
+      return;
+    }
     if (!response.ok) throw new Error(data.code === "NOT_OWNER" ? "You can edit only your assigned schools." : "Could not load this school. Close and try again.");
     const draft = reload ? null : editDrafts.get(editorDraftKey(editing));
     editing.original = draft?.original ?? data.record; editing.pending = draft?.pending ?? null;
@@ -331,13 +351,17 @@ async function saveSchoolEdits(event) {
 }
 
 function updateWorkspaceHeading() {
-  el("tab-my-schools").textContent = isSupervisor ? "All schools" : "My schools";
-  el("workspace-heading").textContent = currentTab === "dashboard" ? "Team dashboard." : currentTab === "directory" ? "Find your next school." : isSupervisor ? "School overview." : "Your schools.";
-  el("workspace-description").textContent = currentTab === "dashboard" ? "Our schools. Our progress. Every connection counts." : currentTab === "directory" ? "Browse available schools and start a new connection." : isSupervisor ? "School assignments across H4." : "Your assigned schools, ready for your next connection.";
+  if (el("tab-home")) el("tab-home").textContent = isSupervisor ? "H4 Overview" : "My Outreach";
+  el("tab-my-schools").textContent = isSupervisor ? "Schools" : "My Schools";
+  el("workspace-heading").textContent = currentTab === "home" ? isSupervisor ? "H4 Overview." : "My Outreach." : currentTab === "dashboard" ? "Team Progress." : currentTab === "directory" ? "Find your next school." : isSupervisor ? "School overview." : "Your schools.";
+  el("workspace-description").textContent = currentTab === "home" ? isSupervisor ? "A clear view of the program. A little support where it counts." : "Your next step, without the guesswork." : currentTab === "dashboard" ? "Coordinate your outreach. Make every connection count." : currentTab === "directory" ? "Browse available schools and start a new connection." : isSupervisor ? "School assignments across H4." : "Your assigned schools, ready for your next connection.";
 }
 function switchTab(tab) {
   currentTab = tab;
   updateWorkspaceHeading();
+  el("tab-home")?.classList.toggle("active", tab === "home");
+  el("tab-home")?.setAttribute("aria-selected", String(tab === "home"));
+  if (el("home-view")) el("home-view").hidden = tab !== "home";
   el("tab-dashboard")?.classList.toggle("active", tab === "dashboard");
   el("tab-dashboard")?.setAttribute("aria-selected", String(tab === "dashboard"));
   if (el("dashboard-view")) el("dashboard-view").hidden = tab !== "dashboard";
@@ -361,15 +385,18 @@ function switchTab(tab) {
 function dashboardNode(tag, text, className = "") {
   const node = document.createElement(tag); node.textContent = text; node.className = className; return node;
 }
-function dashboardToday() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+function dashboardToday(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+  return ["year", "month", "day"].map((key) => parts.find((part) => part.type === key).value).join("-");
 }
-function overdueSchool(school, today = dashboardToday()) {
+function dueState(school, today = dashboardToday()) {
   const due = school.followUpDue;
   // Only unambiguous ISO dates are compared. Preserve other sheet formatting as text.
-  return !["Booked", "Cold"].includes(school.stage) && /^\d{4}-\d{2}-\d{2}$/.test(due)
-    && !Number.isNaN(Date.parse(due)) && new Date(due).toISOString().slice(0, 10) === due && due < today;
+  if (["Booked", "Cold"].includes(school.stage) || !/^\d{4}-\d{2}-\d{2}$/.test(due)
+    || Number.isNaN(Date.parse(due)) || new Date(due).toISOString().slice(0, 10) !== due) return "none";
+  return due < today ? "overdue" : due === today ? "today" : "upcoming";
 }
+function overdueSchool(school, today) { return dueState(school, today) === "overdue"; }
 function dashboardOptions(id, allLabel, values) {
   const select = el(id), previous = select.value;
   const all = dashboardNode("option", allLabel); all.value = "";
@@ -384,43 +411,163 @@ function clearDashboardFilters() {
   for (const id of ["dashboard-search", "dashboard-owner", "dashboard-stage"]) el(id).value = "";
   el("dashboard-overdue").checked = false; renderDashboard();
 }
+function renderPipeline(id, records, onSelect) {
+  el(id).replaceChildren();
+  const stages = [...pipelineStages, ...(records.some((school) => stageKey(school) === otherStage) ? [otherStage] : [])];
+  for (const key of stages) {
+    const count = records.filter((school) => stageKey(school) === key).length;
+    const label = key === "Not Contacted" ? "Claimed / not contacted" : key;
+    const button = dashboardNode("button", "", "pipeline-step"); button.type = "button";
+    button.setAttribute("aria-label", `${label}: ${count} ${count === 1 ? "school" : "schools"}`);
+    button.append(dashboardNode("span", label), dashboardNode("strong", String(count)));
+    button.onclick = () => onSelect(key);
+    el(id).append(button);
+  }
+}
+function appendNextAction(card, school) {
+  const suggested = school.stage === "Not Contacted" ? "Make your first contact" : school.stage === "Booked" ? "Confirm workshop details" : school.stage === "Cold" ? "No outreach planned" : "Plan your next follow-up";
+  card.append(dashboardNode("p", school.nextAction?.trim() ? `Next: ${school.nextAction}` : `Suggested: ${suggested}`, "action-next"));
+  const due = dueState(school);
+  card.append(dashboardNode("p", school.followUpDue ? `Follow-up: ${school.followUpDue}${due === "overdue" ? " · Overdue" : due === "today" ? " · Today" : ""}` : "No follow-up reminder set", due === "overdue" ? "action-date dashboard-due" : "action-date"));
+}
+function schoolBadge(stage, label = stage || "Stage not set") {
+  const badge = dashboardNode("span", label, "school-stage");
+  if (["Interested", "Engaged"].includes(stage)) badge.classList.add("warm");
+  if (stage === "Booked") badge.classList.add("booked");
+  if (stage === "Cold") badge.classList.add("cold");
+  return badge;
+}
+async function openAction(id, action = "open") {
+  const session = sessionVersion;
+  await openSchoolEditor(id, false, action === "log" ? "activity" : "details");
+  if (session !== sessionVersion || !editing?.original || editing.id !== id || editing.pending) return;
+  const focus = action === "reminder" ? "edit-followUpDue" : action === "contact" ? "edit-contactName" : null;
+  if (focus) el(focus).focus?.();
+}
+function actionCard(school, reasons = []) {
+  const card = dashboardNode("article", "", "school-card action-card");
+  const badge = schoolBadge(school.stage);
+  card.append(badge, dashboardNode("h3", school.schoolName));
+  if (isSupervisor) card.append(dashboardNode("p", `Assigned to ${assignee(school)}`, "school-meta"));
+  if (reasons.length) card.append(dashboardNode("p", reasons.join(" · "), "attention-reasons"));
+  appendNextAction(card, school);
+  const actions = dashboardNode("div", "", "action-buttons");
+  for (const [label, action, className] of [["Log outreach", "log", "button"], ["Open school", "open", "button secondary"], ["Contact info", "contact", "text-button"], ["Set reminder", "reminder", "text-button"]]) {
+    const button = dashboardNode("button", label, className); button.type = "button";
+    button.setAttribute("aria-label", `${label} for ${school.schoolName}`);
+    button.disabled = config?.writesEnabled !== true;
+    button.onclick = () => openAction(school.recordId, action); actions.append(button);
+  }
+  card.append(actions); return card;
+}
+function renderMetrics(id, entries) {
+  el(id).replaceChildren();
+  for (const [label, count, onSelect] of entries) {
+    const metric = dashboardNode(onSelect ? "button" : "div", "", "dashboard-metric");
+    if (onSelect) { metric.type = "button"; metric.onclick = onSelect; metric.setAttribute("aria-label", `${label}: ${count}`); }
+    metric.append(dashboardNode("strong", String(count)), dashboardNode("span", label)); el(id).append(metric);
+  }
+}
+function reviewSchools(filter, label, stage = "") {
+  schoolScopeFilter = filter;
+  schoolScopeLabel = label; schoolStageFilter = stage; el("search").value = "";
+  renderSchools(); switchTab("my-schools");
+}
+function attentionReasons(school, today = dashboardToday()) {
+  const reasons = [];
+  if (school.assignmentIssue) reasons.push(school.assignmentIssue);
+  if (overdueSchool(school, today)) reasons.push("Overdue follow-up");
+  if (!["Booked", "Cold"].includes(school.stage)) {
+    if (!school.nextAction?.trim()) reasons.push("Next action missing");
+    if (["Contacted", "Interested", "Engaged"].includes(school.stage) && dueState(school, today) === "none") reasons.push("Follow-up date needs setting");
+  }
+  return reasons;
+}
+function priorityOrder(a, b, today) {
+  const rank = (school) => {
+    const due = dueState(school, today);
+    return due === "overdue" ? 0 : due === "today" ? 1 : school.priority === "High" ? 2 : ["Interested", "Engaged"].includes(school.stage) ? 3 : 4;
+  };
+  return rank(a) - rank(b) || (a.followUpDue || "9999").localeCompare(b.followUpDue || "9999") || a.schoolName.localeCompare(b.schoolName);
+}
+function renderHome() {
+  if (!el("home-view") || !credential) return;
+  const today = dashboardToday(), overdue = (s) => overdueSchool(s, today);
+  el("home-view").classList.toggle("student-home", !isSupervisor);
+  const warm = (s) => ["Interested", "Engaged"].includes(s.stage), booked = (s) => s.stage === "Booked";
+  el("overview-panel").hidden = !isSupervisor;
+  el("home-filter-label").hidden = isSupervisor;
+  el("home-message").textContent = isSupervisor ? "The program at a glance." : "Your next connection starts here.";
+  el("home-description").textContent = isSupervisor ? "Track school progress and see where your team needs support." : "Start with today’s follow-ups, then keep your conversations moving.";
+  el("home-actions-title").textContent = isSupervisor ? "Needs your attention" : "What to do next";
+  el("home-actions-description").textContent = isSupervisor ? "Overdue follow-ups, assignment issues and missing next steps." : "Follow-ups first, then your highest-priority schools.";
+  el("home-schools").textContent = isSupervisor ? "View all schools →" : "View my schools →";
+  const choose = (filter) => { el("home-filter").value = filter; homeShowAll = false; renderHome(); };
+  if (isSupervisor) {
+    const contacted = schools.filter((s) => !!s.lastContacted?.trim());
+    renderMetrics("home-metrics", [
+      ["Schools claimed", schools.length, () => reviewSchools(null, "")],
+      ["Schools contacted", contacted.length, () => reviewSchools((school) => !!school.lastContacted?.trim(), "Recorded last contact")],
+      ["Interested / Engaged", schools.filter(warm).length, () => reviewSchools(warm, "Interested / Engaged")],
+      ["Schools booked", schools.filter(booked).length, () => reviewSchools(null, "Booked", "Booked")],
+      ["Overdue follow-ups", schools.filter(overdue).length, () => reviewSchools(overdueSchool, "Overdue follow-ups")],
+    ]);
+    renderPipeline("overview-pipeline", schools, (stage) => reviewSchools(null, stage, stage));
+    el("overview-students").replaceChildren();
+    for (const student of [...overviewStudents].sort((a, b) => a.name.localeCompare(b.name))) {
+      const assigned = schools.filter((school) => school.studentId === student.id);
+      const row = document.createElement("tr");
+      const cell = (label, text = "") => { const td = dashboardNode("td", text); td.setAttribute("data-label", label); row.append(td); return td; };
+      cell("Student").append(dashboardNode("strong", student.name), dashboardNode("span", student.active ? "Student co-op" : "Inactive", "dashboard-school-meta"));
+      cell("Assigned", String(assigned.length));
+      const pipeline = cell("Current pipeline"); pipeline.className = "student-pipeline";
+      for (const stage of [...pipelineStages, ...(assigned.some((s) => stageKey(s) === otherStage) ? [otherStage] : [])]) {
+        pipeline.append(dashboardNode("span", `${stage === "Not Contacted" ? "Not contacted" : stage}: ${assigned.filter((s) => stageKey(s) === stage).length}`));
+      }
+      cell("Booked", String(assigned.filter(booked).length)); cell("Overdue", String(assigned.filter(overdue).length));
+      const button = dashboardNode("button", "Review schools →", "text-button"); button.type = "button";
+      button.setAttribute("aria-label", `Review ${student.name}’s schools`); button.onclick = () => reviewSchools((school) => school.studentId === student.id, student.name);
+      cell("Review").append(button); el("overview-students").append(row);
+    }
+    if (!overviewStudents.length) {
+      const row = document.createElement("tr"), cell = dashboardNode("td", "No student accounts are listed yet.");
+      cell.setAttribute("colspan", "6"); row.append(cell); el("overview-students").append(row);
+    }
+  } else {
+    const due = schools.filter((s) => ["today", "overdue"].includes(dueState(s, today)));
+    renderMetrics("home-metrics", [
+      ["My schools", schools.length, () => reviewSchools(null, "")],
+      ["Due today / overdue", due.length, () => choose("due")],
+      ["Interested / Engaged", schools.filter(warm).length, () => choose("warm")],
+      ["My bookings", schools.filter(booked).length, () => choose("booked")],
+    ]);
+  }
+  const filter = el("home-filter").value;
+  const actions = schools.filter((school) => isSupervisor ? attentionReasons(school, today).length > 0
+    : filter === "due" ? ["today", "overdue"].includes(dueState(school, today)) : filter === "warm" ? warm(school) : filter === "booked" ? booked(school) : !["Booked", "Cold"].includes(school.stage))
+    .sort((a, b) => priorityOrder(a, b, today));
+  const visible = homeShowAll ? actions : actions.slice(0, 6);
+  if (!isSupervisor && actions.length) {
+    const due = schools.filter((s) => ["today", "overdue"].includes(dueState(s, today))).length;
+    el("home-message").textContent = due ? `${due} follow-up${due === 1 ? " needs" : "s need"} you.` : "Start with this school.";
+    const next = actions[0];
+    el("home-description").textContent = `${next.schoolName} · ${(next.nextAction?.trim() || (next.stage === "Not Contacted" ? "Make your first contact" : "Plan your next follow-up")).slice(0, 140)}`;
+  }
+  el("home-actions").replaceChildren(...visible.map((school) => actionCard(school, isSupervisor ? attentionReasons(school, today) : [])));
+  el("home-action-count").textContent = actions.length ? `Showing ${visible.length} of ${actions.length} ${isSupervisor ? "schools needing attention" : "schools"}` : "";
+  el("home-empty").hidden = actions.length > 0;
+  el("home-empty").textContent = isSupervisor ? "No schools need attention right now. Your team is up to date." : !schools.length ? "No schools assigned yet. Choose Find a school to start your outreach." : filter ? "No schools in this group right now. Try another filter." : "No next actions waiting. Check your bookings or find another school.";
+  el("home-more").hidden = visible.length === actions.length;
+  el("home-more").textContent = `Show all ${actions.length} schools`;
+  el("home-content").hidden = false;
+  el("home-status").textContent = "Up to date · follow-up dates use Ontario time";
+}
 function renderDashboard() {
   if (!el("dashboard-view") || !dashboardLoaded) return;
   const today = dashboardToday(), overdue = (school) => overdueSchool(school, today);
   const stage = el("dashboard-stage").value, owner = el("dashboard-owner").value;
   const query = el("dashboard-search").value.trim().toLowerCase();
   const overdueOnly = el("dashboard-overdue").checked;
-  el("dashboard-metrics").replaceChildren();
-  for (const [label, count] of [
-    ["Schools claimed", teamSchools.length],
-    ["Awaiting first contact", teamSchools.filter((school) => school.stage === "Not Contacted").length],
-    ["Workshops booked", teamSchools.filter((school) => school.stage === "Booked").length],
-    ["Overdue follow-ups", teamSchools.filter(overdue).length],
-  ]) {
-    const metric = dashboardNode("div", "", "dashboard-metric");
-    metric.append(dashboardNode("strong", String(count)), dashboardNode("span", label));
-    el("dashboard-metrics").append(metric);
-  }
-  el("dashboard-pipeline").replaceChildren();
-  const stages = [...pipelineStages, ...(teamSchools.some((school) => stageKey(school) === otherStage) ? [otherStage] : [])];
-  for (const key of stages) {
-    const count = teamSchools.filter((school) => stageKey(school) === key).length;
-    const label = key === "Not Contacted" ? "Claimed / not contacted" : key;
-    const button = dashboardNode("button", "", "pipeline-step"); button.type = "button";
-    button.setAttribute("aria-label", `${label}: ${count} schools`); button.setAttribute("aria-pressed", String(stage === key));
-    button.append(dashboardNode("span", label), dashboardNode("strong", String(count)));
-    button.onclick = () => { el("dashboard-stage").value = stage === key ? "" : key; renderDashboard(); };
-    el("dashboard-pipeline").append(button);
-  }
-  el("dashboard-team").replaceChildren();
-  for (const name of [...new Set(teamSchools.map(assignee))].sort()) {
-    const assigned = teamSchools.filter((school) => assignee(school) === name);
-    const button = dashboardNode("button", "", "team-member"); button.type = "button";
-    button.setAttribute("aria-pressed", String(owner === name));
-    button.append(dashboardNode("strong", name), dashboardNode("span", `${assigned.length} claimed · ${assigned.filter((s) => s.stage === "Booked").length} booked · ${assigned.filter(overdue).length} overdue`));
-    button.onclick = () => { el("dashboard-owner").value = owner === name ? "" : name; renderDashboard(); };
-    el("dashboard-team").append(button);
-  }
   const visible = teamSchools.filter((school) => (!stage || stageKey(school) === stage) && (!owner || assignee(school) === owner)
     && (!overdueOnly || overdue(school)) && [school.schoolName, school.schoolBoard, school.geographicRegion].some((text) => (text || "").toLowerCase().includes(query)))
     .sort((a, b) => Number(overdue(b)) - Number(overdue(a)) || a.schoolName.localeCompare(b.schoolName));
@@ -430,10 +577,7 @@ function renderDashboard() {
     const cell = (label) => { const td = document.createElement("td"); td.setAttribute("data-label", label); row.append(td); return td; };
     cell("School").append(dashboardNode("strong", school.schoolName), dashboardNode("span", [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · "), "dashboard-school-meta"));
     cell("Assigned to").textContent = assignee(school);
-    const badge = dashboardNode("span", school.stage === "Not Contacted" ? "Claimed / not contacted" : school.stage || "Stage not set", "school-stage");
-    if (["Interested", "Engaged"].includes(school.stage)) badge.classList.add("warm");
-    if (school.stage === "Booked") badge.classList.add("booked");
-    if (school.stage === "Cold") badge.classList.add("cold");
+    const badge = schoolBadge(school.stage, school.stage === "Not Contacted" ? "Claimed / not contacted" : school.stage || "Stage not set");
     cell("Stage").append(badge);
     cell("Last contact").textContent = school.lastContacted || "Not recorded";
     const due = cell("Follow-up due"); due.textContent = school.followUpDue || "Not scheduled";
@@ -776,6 +920,8 @@ async function refresh() {
   activeRequest?.abort(); activeRequest = new AbortController();
   el("refresh").disabled = true; el("retry").disabled = true;
   status("Checking your access and loading schools…"); el("workspace-status").textContent = "Refreshing your schools…";
+  if (el("home-status")) el("home-status").textContent = "Refreshing your outreach…";
+  if (el("home-refresh")) el("home-refresh").disabled = true;
   try {
     const response = await apiFetch("./api/bootstrap", {
       method: "GET", headers: { Authorization: `Bearer ${credential}` },
@@ -792,16 +938,27 @@ async function refresh() {
       if (config?.ready) await showGoogleButton();
       return;
     }
+    const firstLoad = el("workspace").hidden;
+    const nextSupervisor = data.currentUser.role === "Supervisor";
+    if (isSupervisor !== nextSupervisor) {
+      schoolScopeFilter = null; schoolStageFilter = ""; schoolScopeLabel = "";
+      dashboardRequest?.abort(); dashboardSeq++; teamSchools = [];
+    }
     schools = data.schools;
+    overviewStudents = nextSupervisor ? data.overview?.students ?? [] : [];
+    if (!nextSupervisor && el("home-view")) {
+      el("overview-students").replaceChildren(); el("overview-pipeline").replaceChildren();
+    }
     dashboardLoaded = false;
-    if (currentTab === "dashboard") loadDashboard();
     el("user-name").textContent = data.currentUser.name;
     el("user-email").textContent = data.currentUser.email;
     el("user-role").textContent = data.currentUser.role === "Supervisor" ? "Supervisor" : "Student co-op";
     el("avatar").textContent = data.currentUser.name.slice(0, 1).toUpperCase();
-    isSupervisor = data.currentUser.role === "Supervisor"; updateWorkspaceHeading();
+    isSupervisor = nextSupervisor;
+    if (firstLoad && el("home-view")) currentTab = "home";
+    switchTab(currentTab);
     el("workspace-status").textContent = config?.writesEnabled ? "Up to date" : "Up to date · viewing only";
-    renderSchools(); el("welcome").hidden = true; el("workspace").hidden = false;
+    renderSchools(); renderHome(); el("welcome").hidden = true; el("workspace").hidden = false;
     el("retry").hidden = true;
     clearTimeout(expiryTimer);
     expiryTimer = setTimeout(() => {
@@ -815,6 +972,7 @@ async function refresh() {
     el("google-button").hidden = false; el("retry").hidden = false;
   } finally {
     el("refresh").disabled = false; el("retry").disabled = false;
+    if (currentSession === sessionVersion && currentSeq === refreshSeq && el("home-refresh")) el("home-refresh").disabled = false;
   }
 }
 
@@ -855,6 +1013,13 @@ el("editor-close").addEventListener("click", closeSchoolEditor);
 el("editor-reload").addEventListener("click", () => { if (editing) openSchoolEditor(editing.id, true, editing.mode); });
 el("school-editor").addEventListener("cancel", (event) => { event.preventDefault(); closeSchoolEditor(); });
 el("refresh").addEventListener("click", refresh);
+el("tab-home")?.addEventListener("click", () => switchTab("home"));
+el("home-refresh")?.addEventListener("click", refresh);
+el("home-find")?.addEventListener("click", () => switchTab("directory"));
+el("home-schools")?.addEventListener("click", () => reviewSchools(null, ""));
+el("home-filter")?.addEventListener("change", () => { homeShowAll = false; renderHome(); });
+el("home-more")?.addEventListener("click", () => { homeShowAll = true; renderHome(); });
+el("schools-scope-clear")?.addEventListener("click", () => reviewSchools(null, ""));
 el("retry").addEventListener("click", initialize);
 el("search").addEventListener("input", renderSchools);
 el("tab-my-schools").addEventListener("click", () => switchTab("my-schools"));

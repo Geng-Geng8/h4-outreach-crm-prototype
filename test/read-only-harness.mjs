@@ -72,6 +72,7 @@ export async function readHarness(t, overrides = {}) {
           ["'Schools'!A1:D1000", [0, 1, 2, 3]], ["'Schools'!A:D", [0, 1, 2, 3]],
           ["'Schools'!I1:I1000", [8]], ["'Schools'!I:I", [8]],
           ["'Schools'!I1:K1000", [8, 9, 10]],
+          ["'Schools'!I1:L1000", [8, 9, 10, 11]],
           ["'Schools'!M1:M1000", [12]], ["'Schools'!M:M", [12]],
           ["'Schools'!S1:S1000", [18]], ["'Schools'!S:S", [18]],
           ["'Schools'!Z1:Z1000", [25]], ["'Schools'!Z:Z", [25]],
