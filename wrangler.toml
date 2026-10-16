@@ -7,7 +7,7 @@ preview_urls = false
 [vars]
 PROOF_MODE = "disabled"
 GOOGLE_SHEET_ID = "1QzYTKdeWWa2TpOtGSmJ0NDMeY_U-u3ImeCVdpCmJrH4"
-ALLOWED_ORIGIN = "https://geng-geng8.github.io"
+ALLOWED_ORIGIN = "https://outreach.h4community.ca"
 GOOGLE_CLIENT_ID = "730012675523-e6lt3bljdu9rpa1j15jch5rv3ka4liq6.apps.googleusercontent.com"
 ENABLE_REAL_WRITES = "true"
 
