@@ -17,6 +17,10 @@ const files = new Map([
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
   ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
   ["/editor.css", ["editor.css", "text/css; charset=utf-8"]],
+  ["/assets/H4_Logos_BLACK.png", ["assets/H4_Logos_BLACK.png", "image/png"]],
+  ["/assets/H4_Logos_GOLD.png", ["assets/H4_Logos_GOLD.png", "image/png"]],
+  ["/assets/H4_Logos_ORANGE.png", ["assets/H4_Logos_ORANGE.png", "image/png"]],
+  ["/assets/H4_Logos_SILVER.png", ["assets/H4_Logos_SILVER.png", "image/png"]],
 ]);
 export async function staticAssets(request) {
   if (!["GET", "HEAD"].includes(request.method)) return new Response("Read-only preview", { status: 405 });

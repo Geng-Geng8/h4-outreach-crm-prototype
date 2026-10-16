@@ -44,7 +44,9 @@ const server = createServer(async (request, response) => {
         headers: request.headers,
         body: reqBody,
       });
-      body = await upstream.text(); status = upstream.status; headers = Object.fromEntries(upstream.headers);
+      const isBinary = (upstream.headers.get("content-type") ?? "").startsWith("image/");
+      body = isBinary ? Buffer.from(await upstream.arrayBuffer()) : await upstream.text();
+      status = upstream.status; headers = Object.fromEntries(upstream.headers);
       type = upstream.headers.get("content-type") ?? type;
       if (url.pathname === "/app.js") body = body.replace("https://accounts.google.com/gsi/client", "/fixture/gsi.js");
       if (url.pathname === "/" || url.pathname === "/index.html") {
