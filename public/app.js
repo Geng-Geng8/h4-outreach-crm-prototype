@@ -619,7 +619,7 @@ async function refresh() {
     const supervisor = data.currentUser.role === "Supervisor";
     el("workspace-heading").textContent = supervisor ? "School overview." : "Your schools.";
     el("workspace-description").textContent = supervisor ? "School assignments across H4." : "Your assigned schools, ready for your next connection.";
-    el("workspace-status").textContent = config?.writesEnabled ? "Up to date · test sheet claims enabled" : "Up to date · viewing only";
+    el("workspace-status").textContent = config?.writesEnabled ? "Up to date" : "Up to date · viewing only";
     renderSchools(); el("welcome").hidden = true; el("workspace").hidden = false;
     el("retry").hidden = true;
     clearTimeout(expiryTimer);
@@ -644,7 +644,7 @@ async function initialize() {
     if (!response.ok) throw new Error();
     config = await response.json();
     el("tab-demo-claim").hidden = config.demoAvailable === false;
-    el("mode-label").textContent = config.writesEnabled ? "Test sheet · claims enabled" : "Read-only preview";
+    el("mode-label").textContent = config.writesEnabled ? "Pilot version" : "Read-only preview";
     if (!config.ready) {
       status("Google sign-in hasn’t been connected yet. This preview is ready for your supervisor to finish setup.");
       return;
