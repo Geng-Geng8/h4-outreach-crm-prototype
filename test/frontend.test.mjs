@@ -6,6 +6,43 @@ import { webcrypto } from "node:crypto";
 
 const appCode = await readFile("public/app.js", "utf8");
 
+test("connection badge follows server reachability and browser events without clearing an unsaved draft", async (t) => {
+  let health = "ok";
+  const record = { recordId: "00000000-0000-4000-8000-000000000001", schoolName: "Example School", schoolBoard: "EXAMPLE", geographicRegion: "Example Region", stage: "Contacted", lastRequestId: "00000000-0000-4000-8000-000000000002" };
+  const h = setupEnv({ fetchHandler: async (url) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record });
+    if (health === "network") throw new TypeError("Network unavailable");
+    return Response.json({ ok: health === "ok" }, { status: health === "server" ? 503 : 200 });
+  } }); t.after(h.cleanup);
+  await h.signIn("alex@example.test");
+  assert.equal(h.getEl("mode-label").textContent, "Online");
+  await h.context.openSchoolEditor(record.recordId); h.getEl("edit-notes").value = "Keep this unsaved draft";
+  h.context.navigator.onLine = false; await h.dispatchWindow("offline");
+  assert.equal(h.getEl("mode-label").textContent, "Not connected"); assert.equal(h.getEl("connection-badge").getAttribute("data-state"), "offline");
+  assert.equal(h.getEl("school-editor").open, true); assert.equal(h.getEl("edit-notes").value, "Keep this unsaved draft");
+  h.context.navigator.onLine = true; health = "network";
+  assert.equal(await h.context.checkConnection(), false); assert.equal(h.getEl("mode-label").textContent, "Not connected");
+  health = "server"; assert.equal(await h.context.checkConnection(), false); assert.equal(h.getEl("mode-label").textContent, "Not connected");
+  health = "ok"; await h.dispatchWindow("online"); assert.equal(h.getEl("mode-label").textContent, "Online");
+  assert.equal(h.getEl("edit-notes").value, "Keep this unsaved draft");
+});
+
+test("sign-in works with cached HTML missing the optional badge, and recovers from starting offline", async (t) => {
+  let requests = 0;
+  const h = setupEnv({ online: false, missingIds: ["mode-label", "connection-badge"], fetchHandler: async (url) => {
+    requests++;
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/health")) return Response.json({ ok: true });
+    return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [], sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+  } }); t.after(h.cleanup);
+  assert.equal(requests, 0); assert.match(h.getEl("login-status").textContent, /not connected/);
+  h.context.navigator.onLine = true; await h.dispatchWindow("online");
+  await h.signIn("alex@example.test");
+  assert.equal(h.getEl("workspace").hidden, false); assert.equal(h.getEl("user-name").textContent, "Alex");
+});
+
 test("Log outreach validates required text, locks double taps, retries the same request and confirms only after save", async (t) => {
   const record = { recordId: "00000000-0000-4000-8000-000000000001", schoolName: "Example School", schoolBoard: "EXAMPLE", geographicRegion: "Example Region", stage: "Not Contacted", lastRequestId: "00000000-0000-4000-8000-000000000002", notes: "Keep these notes" };
   const requests = []; let resolveSave;
@@ -177,8 +214,9 @@ test("a definitely rejected directory claim starts a fresh request on retry", as
   assert.equal(getEl("dir-feedback").textContent, "School claimed successfully");
 });
 
-function setupEnv({ fetchHandler, apiOrigin = "" }) {
+function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = [] }) {
   let googleOptions;
+  const windowListeners = new Map();
   const activeTimers = new Set();
   const activeIntervals = new Set();
   const elements = new Map();
@@ -252,14 +290,16 @@ function setupEnv({ fetchHandler, apiOrigin = "" }) {
 
   const document = {
     querySelector: () => ({ content: apiOrigin }),
-    getElementById: (id) => getEl(id),
+    getElementById: (id) => missingIds.includes(id) ? null : getEl(id),
     createElement: (tag) => makeElement("", tag),
     head: makeElement("head", "head"),
     addEventListener: () => {},
     visibilityState: "visible",
   };
   const window = {
-    addEventListener: () => {},
+    addEventListener: (event, callback) => {
+      const handlers = windowListeners.get(event) ?? []; handlers.push(callback); windowListeners.set(event, handlers);
+    },
     google: {
       accounts: {
         id: {
@@ -274,6 +314,7 @@ function setupEnv({ fetchHandler, apiOrigin = "" }) {
   const context = {
     document,
     window,
+    navigator: { onLine: online },
     crypto: webcrypto,
     el: (id) => getEl(id),
     fetch: fetchHandler,
@@ -330,7 +371,9 @@ function setupEnv({ fetchHandler, apiOrigin = "" }) {
     await new Promise((r) => setTimeout(r, 20));
   }
 
-  return { context, getEl, signIn, cleanup };
+  return { context, getEl, signIn, cleanup,
+    dispatchWindow: (event) => Promise.all((windowListeners.get(event) ?? []).map((callback) => callback({}))),
+  };
 }
 
 test("GitHub Pages sends config, sign-in and authenticated API requests to the configured Worker", async (t) => {

@@ -46,6 +46,13 @@ the same spreadsheet concurrently. Avoid direct Sheet sorting/row edits while sa
 
 ## Later releases
 
+Pages builds use content-versioned JavaScript/CSS filenames so new HTML loads its
+matching release. Base filenames remain for previously cached HTML. Optional header
+UI must never block sign-in when missing in an older page. The connection badge
+reports app-server reachability, updates on API requests and browser online/offline
+events, and checks visible signed-out pages once per minute. Its offline pulse
+respects reduced-motion preferences. Online does not mean an unsaved form is saved.
+
 Frontend changes on `main` publish automatically. API changes require
 `npx wrangler deploy` from a signed-in development machine; credentials are not
 copied into GitHub Actions. `npm run check` and `npm test` verify the prototype

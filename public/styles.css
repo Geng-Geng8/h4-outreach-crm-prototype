@@ -881,3 +881,10 @@ footer span span {
     scroll-behavior: auto !important;
   }
 }
+
+/* Connectivity is based on API reachability, separate from save confirmation. */
+.mode-pill[data-state="checking"] > span:first-child{background:#8a8a79}
+.mode-pill[data-state="offline"]{background:#fff2ed;border-color:#d9b5a9;color:#842f20;animation:connection-pulse 1.8s ease-in-out infinite}
+.mode-pill[data-state="offline"] > span:first-child{background:#b4432b;box-shadow:0 0 0 3px #b4432b18}
+@keyframes connection-pulse{0%,100%{opacity:1}50%{opacity:.8}}
+@media(prefers-reduced-motion:reduce){.mode-pill[data-state="offline"]{animation:none}}

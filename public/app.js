@@ -1,8 +1,43 @@
 const el = (id) => document.getElementById(id);
 // Pages supplies a public API origin; the local preview stays on the same origin.
 const apiOrigin = document.querySelector?.('meta[name="h4-api-origin"]')?.content?.trim().replace(/\/$/, "") ?? "";
-function apiFetch(path, options) {
-  return fetch(apiOrigin ? `${apiOrigin}/${path.replace(/^\.\//, "")}` : path, options);
+let connectionAttempt = 0, connectionProbe;
+function browserOffline() { return typeof navigator !== "undefined" && navigator.onLine === false; }
+function setConnection(connected) {
+  const label = el("mode-label"), badge = el("connection-badge");
+  // Older cached HTML may not include the badge. Never let optional UI break login.
+  if (!label || !badge) return;
+  const online = connected && !browserOffline();
+  const message = online ? "Online" : "Not connected";
+  if (label.textContent !== message) label.textContent = message;
+  badge.setAttribute("data-state", online ? "online" : "offline");
+  badge.title = online ? "Connected to the H4 app server. Saves are confirmed separately." : "The app server could not be reached. Reconnect and try again.";
+}
+async function apiFetch(path, options) {
+  const attempt = ++connectionAttempt;
+  try {
+    const response = await fetch(apiOrigin ? `${apiOrigin}/${path.replace(/^\.\//, "")}` : path, options);
+    if (attempt === connectionAttempt) setConnection(response.status < 500);
+    return response;
+  } catch (error) {
+    if (attempt === connectionAttempt && error.name !== "AbortError") setConnection(false);
+    throw error;
+  }
+}
+function checkConnection() {
+  if (browserOffline()) { setConnection(false); return Promise.resolve(false); }
+  connectionProbe ??= (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const attempt = connectionAttempt + 1;
+    try {
+      const response = await apiFetch("./api/health", { cache: "no-store", credentials: "omit", signal: controller.signal });
+      if (!response.ok && attempt === connectionAttempt) setConnection(false);
+      return response.ok;
+    } catch { if (attempt === connectionAttempt) setConnection(false); return false; }
+    finally { clearTimeout(timeout); }
+  })().finally(() => { connectionProbe = undefined; });
+  return connectionProbe;
 }
 let credential = "", schools = [], directory = [], demoSchools = [], config, nonce = "";
 let sessionVersion = 0, refreshSeq = 0, dirSeq = 0, demoSeq = 0;
@@ -639,6 +674,11 @@ async function refresh() {
 
 async function initialize() {
   el("retry").hidden = true; el("google-button").hidden = true;
+  if (browserOffline()) {
+    setConnection(false); status("You’re not connected. Reconnect, then try again."); el("retry").hidden = false;
+    return;
+  }
+  let loadingGoogle = false;
   try {
     const response = await apiFetch("./api/config", { cache: "no-store", credentials: "omit" });
     if (!response.ok) throw new Error();
@@ -648,10 +688,13 @@ async function initialize() {
       status("Google sign-in hasn’t been connected yet. This preview is ready for your supervisor to finish setup.");
       return;
     }
+    loadingGoogle = true;
     await showGoogleButton(); el("google-button").hidden = false;
     status("Only accounts approved by H4 can view schools.");
   } catch {
-    status("We couldn’t connect to sign-in. Check your connection and try again.");
+    status(browserOffline() ? "You’re not connected. Reconnect, then try again."
+      : loadingGoogle ? "Google sign-in couldn’t load. Please try again."
+      : "We couldn’t reach the app. Please try again.");
     el("retry").hidden = false;
   }
 }
@@ -673,10 +716,28 @@ el("tab-directory").addEventListener("click", () => switchTab("directory"));
 el("tab-demo-claim").addEventListener("click", () => switchTab("demo-claim"));
 el("dir-search").addEventListener("input", renderDirectory);
 el("dir-refresh").addEventListener("click", loadDirectory);
-setInterval(() => { if (credential && document.visibilityState === "visible") refresh(); }, 60000);
-document.addEventListener("visibilitychange", () => {
-  if (credential && document.visibilityState === "visible") refresh();
+async function reconnect() {
+  const connected = await checkConnection();
+  if (connected && !credential && el("google-button").hidden && !el("retry").hidden) await initialize();
+}
+window.addEventListener("offline", () => {
+  connectionAttempt++; setConnection(false);
+  if (!credential) {
+    status("You’re not connected. Reconnect, then try again.");
+    el("google-button").hidden = true; el("retry").hidden = false;
+  }
 });
-window.addEventListener("pageshow", (event) => { if (event.persisted && credential) refresh(); });
+window.addEventListener("online", reconnect);
+setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  if (browserOffline()) { setConnection(false); return; }
+  if (credential) refresh(); else reconnect();
+}, 60000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    if (credential && !browserOffline()) refresh(); else reconnect();
+  }
+});
+window.addEventListener("pageshow", (event) => { if (event.persisted && credential && !browserOffline()) refresh(); });
 initialize();
 
