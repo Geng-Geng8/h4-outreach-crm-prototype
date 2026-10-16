@@ -17,6 +17,8 @@ const files = new Map([
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
   ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
   ["/editor.css", ["editor.css", "text/css; charset=utf-8"]],
+  ["/manifest.webmanifest", ["manifest.webmanifest", "application/manifest+json; charset=utf-8"]],
+  ...[48, 180, 192, 512].map((size) => [`/assets/icons/h4-outreach-v1-${size}.png`, [`assets/icons/h4-outreach-v1-${size}.png`, "image/png"]]),
   ["/assets/H4_Logos_BLACK.png", ["assets/H4_Logos_BLACK.png", "image/png"]],
   ["/assets/H4_Logos_GOLD.png", ["assets/H4_Logos_GOLD.png", "image/png"]],
   ["/assets/H4_Logos_ORANGE.png", ["assets/H4_Logos_ORANGE.png", "image/png"]],

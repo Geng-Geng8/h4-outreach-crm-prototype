@@ -30,6 +30,12 @@ for (const file of ["app.js", "styles.css", "editor.css"]) {
 for (const file of ["H4_Logos_BLACK.png", "H4_Logos_GOLD.png", "H4_Logos_ORANGE.png", "H4_Logos_SILVER.png"]) {
   await copyFile(resolve(root, "public/assets", file), resolve(targetAssets, file));
 }
+await mkdir(resolve(targetAssets, "icons"), { recursive: true });
+for (const size of [48, 180, 192, 512]) {
+  const file = `h4-outreach-v1-${size}.png`;
+  await copyFile(resolve(root, "public/assets/icons", file), resolve(targetAssets, "icons", file));
+}
+await copyFile(resolve(root, "public/manifest.webmanifest"), resolve(target, "manifest.webmanifest"));
 await writeFile(resolve(target, "index.html"), html.replace('name="h4-api-origin" content=""', `name="h4-api-origin" content="${origin}"`));
 await writeFile(resolve(target, ".nojekyll"), "");
 console.log("Built static Pages artifact; API origin:", origin);
