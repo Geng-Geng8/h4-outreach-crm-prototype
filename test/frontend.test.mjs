@@ -152,6 +152,68 @@ test("manual cancellation on restore screen clears stored session and returns to
   assert.match(h.getEl("login-status").textContent, /Continue with Google/);
 });
 
+test("regression: offline reload with stored session keeps recovery controls visible, and reconnection or retry restores writesEnabled", async (t) => {
+  const tokenPayload = Buffer.from(JSON.stringify({ nonce: "test", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+  const storage = new Map([[sessionKey, `header.${tokenPayload}.signature`], [resumeKey, "my-schools"]]);
+
+  // Start offline
+  const h = setupEnv({ storage, online: false, fetchHandler: reloadFetch }); t.after(h.cleanup);
+
+  // Recovery controls must remain visible: welcome card and retry button are shown, session-restore is hidden
+  assert.equal(h.getEl("session-restore").hidden, true);
+  assert.equal(h.getEl("welcome").hidden, false);
+  assert.equal(h.getEl("workspace").hidden, true);
+  assert.equal(h.getEl("retry").hidden, false);
+  assert.equal(h.getEl("google-button").hidden, true);
+  assert.match(h.getEl("login-status").textContent, /not connected/);
+
+  // Reconnection loads config first and restores workspace with writesEnabled true ("Up to date")
+  h.context.navigator.onLine = true;
+  await h.dispatchWindow("online");
+  await until(() => !h.getEl("workspace").hidden);
+
+  assert.equal(h.getEl("workspace").hidden, false);
+  assert.equal(h.getEl("welcome").hidden, true);
+  assert.equal(h.getEl("session-restore").hidden, true);
+  assert.equal(h.getEl("workspace-status").textContent, "Up to date");
+});
+
+test("regression: initial /api/config failure with stored session keeps recovery controls visible, and Retry loads config before restoring workspace", async (t) => {
+  const tokenPayload = Buffer.from(JSON.stringify({ nonce: "test", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+  const storage = new Map([[sessionKey, `header.${tokenPayload}.signature`], [resumeKey, "my-schools"]]);
+  let configFails = true;
+  let configAttempts = 0;
+
+  const h = setupEnv({ storage, fetchHandler: (url) => {
+    if (url.includes("/api/config")) {
+      configAttempts++;
+      if (configFails) return Promise.resolve(new Response("Config error", { status: 503 }));
+    }
+    return reloadFetch(url);
+  } }); t.after(h.cleanup);
+
+  // Both screens must not be hidden: welcome card is visible, retry button is shown
+  await until(() => h.getEl("session-restore").hidden);
+  assert.equal(h.getEl("welcome").hidden, false);
+  assert.equal(h.getEl("workspace").hidden, true);
+  assert.equal(h.getEl("retry").hidden, false);
+  assert.equal(h.getEl("google-button").hidden, true);
+  assert.match(h.getEl("login-status").textContent, /reach the app|restore your workspace/);
+  assert.equal(configAttempts, 1);
+
+  // When server recovers and user clicks Retry: config must load successfully before refresh()
+  configFails = false;
+  h.getEl("retry").click();
+  await until(() => !h.getEl("workspace").hidden);
+
+  assert.equal(configAttempts, 2);
+  assert.equal(h.getEl("workspace").hidden, false);
+  assert.equal(h.getEl("welcome").hidden, true);
+  assert.equal(h.getEl("session-restore").hidden, true);
+  // Writes must be correctly enabled ("Up to date", not "Up to date · viewing only")
+  assert.equal(h.getEl("workspace-status").textContent, "Up to date");
+});
+
 test("temporary refresh failures keep the signed-in workspace and draft; recovery succeeds and a real 403 clears them", async (t) => {
   let failure = "";
   const h = setupEnv({ fetchHandler: (url) => {

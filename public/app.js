@@ -117,7 +117,12 @@ function rememberView() {
 
 function finishRestore(message) {
   if (el("session-restore")) el("session-restore").hidden = true;
-  if (!credential) { el("welcome").hidden = false; el("google-button").hidden = false; status(message); }
+  if (el("workspace").hidden) {
+    el("welcome").hidden = false;
+    el("google-button").hidden = !!credential;
+    el("retry").hidden = false;
+    status(message);
+  }
 }
 
 function status(message) { el("login-status").textContent = message; }
@@ -129,8 +134,8 @@ function refreshFailed(message) {
   if (currentTab === "dashboard" && el("dashboard-status")) el("dashboard-status").textContent = detail;
   if (!visibleWorkspace) {
     if (el("session-restore")) el("session-restore").hidden = true;
-    el("welcome").hidden = false; status(detail); el("retry").hidden = false; el("google-button").hidden = false;
-    if (config?.ready) showGoogleButton().catch(() => {});
+    el("welcome").hidden = false; status(detail); el("retry").hidden = false; el("google-button").hidden = !!credential;
+    if (config?.ready && !credential) showGoogleButton().catch(() => {});
   }
 }
 function forgetSession() {
@@ -1007,8 +1012,25 @@ const messages = {
   GOOGLE_READ_LIMIT_REACHED: "The connection is busy. Please wait a moment and try again.",
 };
 
+async function loadConfig() {
+  if (config?.ready) return config;
+  const response = await apiFetch("./api/config", { cache: "no-store", credentials: "omit" });
+  if (!response.ok) throw new Error("Config unavailable");
+  config = await response.json();
+  el("tab-demo-claim").hidden = config.demoAvailable === false;
+  return config;
+}
+
 async function refresh() {
   if (!credential) return;
+  if (!config?.ready) {
+    try {
+      await loadConfig();
+    } catch {
+      refreshFailed(browserOffline() ? "You’re not connected. Reconnect, then try again." : "We couldn’t reach the app. Please try again.");
+      return;
+    }
+  }
   const currentSession = sessionVersion;
   const currentSeq = ++refreshSeq;
   activeRequest?.abort(); activeRequest = new AbortController();
@@ -1094,16 +1116,12 @@ async function initialize() {
   }
   if (browserOffline()) {
     finishRestore("You’re not connected. Reconnect, then try again.");
-    el("google-button").hidden = true;
-    setConnection(false); status("You’re not connected. Reconnect, then try again."); el("retry").hidden = false;
+    setConnection(false);
     return;
   }
   let loadingGoogle = false;
   try {
-    const response = await apiFetch("./api/config", { cache: "no-store", credentials: "omit" });
-    if (!response.ok) throw new Error();
-    config = await response.json();
-    el("tab-demo-claim").hidden = config.demoAvailable === false;
+    await loadConfig();
     if (!config.ready) {
       finishRestore("Google sign-in hasn’t been connected yet.");
       status("Google sign-in hasn’t been connected yet. This preview is ready for your supervisor to finish setup.");
@@ -1124,7 +1142,6 @@ async function initialize() {
     status(browserOffline() ? "You’re not connected. Reconnect, then try again."
       : loadingGoogle ? "Google sign-in couldn’t load. Please try again."
       : "We couldn’t reach the app. Please try again.");
-    el("retry").hidden = false;
   }
 }
 
@@ -1150,7 +1167,7 @@ el("home-schools")?.addEventListener("click", () => reviewSchools(null, ""));
 el("home-filter")?.addEventListener("change", () => { homeShowAll = false; renderHome(); });
 el("home-more")?.addEventListener("click", () => { homeShowAll = true; renderHome(); });
 el("schools-scope-clear")?.addEventListener("click", () => reviewSchools(null, ""));
-el("retry").addEventListener("click", () => credential ? refresh() : initialize());
+el("retry").addEventListener("click", initialize);
 el("search").addEventListener("input", renderSchools);
 el("tab-my-schools").addEventListener("click", () => switchTab("my-schools"));
 el("tab-dashboard")?.addEventListener("click", () => switchTab("dashboard"));
@@ -1164,24 +1181,30 @@ el("dir-search").addEventListener("input", renderDirectory);
 el("dir-refresh").addEventListener("click", loadDirectory);
 async function reconnect() {
   const connected = await checkConnection();
-  if (connected && !credential && el("google-button").hidden && !el("retry").hidden) await initialize();
+  if (!connected) return;
+  if (el("workspace").hidden) {
+    if (!el("retry").hidden) await initialize();
+  } else if (credential) {
+    await refresh();
+  }
 }
 window.addEventListener("offline", () => {
   connectionAttempt++; setConnection(false);
-  if (!credential) {
-    status("You’re not connected. Reconnect, then try again.");
-    el("google-button").hidden = true; el("retry").hidden = false;
+  if (el("workspace").hidden) {
+    finishRestore("You’re not connected. Reconnect, then try again.");
+    setConnection(false);
   }
 });
 window.addEventListener("online", reconnect);
 setInterval(() => {
   if (document.visibilityState !== "visible") return;
   if (browserOffline()) { setConnection(false); return; }
-  if (credential) refresh(); else reconnect();
+  if (!el("workspace").hidden && credential) refresh(); else reconnect();
 }, 60000);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    if (credential && !browserOffline()) refresh(); else reconnect();
+    if (browserOffline()) { setConnection(false); return; }
+    if (!el("workspace").hidden && credential) refresh(); else reconnect();
   }
 });
 window.addEventListener("pageshow", (event) => { if (event.persisted && credential && !browserOffline()) refresh(); });
