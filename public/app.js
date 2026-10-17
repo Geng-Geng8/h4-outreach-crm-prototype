@@ -1065,9 +1065,10 @@ async function executeBulkBatch(isRetry = false) {
           continue;
         }
 
-        const userEmail = currentUser?.email || parseJwtPayload(credential)?.email || "";
-        if (isSupervisor && schoolDetail.ownerEmail && userEmail) {
-          if (schoolDetail.ownerEmail.trim().toLowerCase() !== userEmail.trim().toLowerCase()) {
+        if (isSupervisor) {
+          const authEmail = (currentUser?.email || parseJwtPayload(credential)?.email || "").trim().toLowerCase();
+          const schoolOwnerEmail = (typeof schoolDetail.ownerEmail === "string" ? schoolDetail.ownerEmail : "").trim().toLowerCase();
+          if (!authEmail || !schoolOwnerEmail || authEmail !== schoolOwnerEmail) {
             item.status = "conflict";
             item.error = "Supervisors can only bulk-log schools they personally own.";
             item.code = "NOT_OWNER";

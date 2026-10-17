@@ -2595,4 +2595,143 @@ test("Student bulk outreach: student experience remains unchanged with access fr
   getEl("bulk-dialog-close").click();
 });
 
+test("Supervisor bulk outreach: fails closed if fresh school detail has missing or changed owner email", async (t) => {
+  const supervisorUser = { name: "Morgan", email: "morgan@example.test", role: "Supervisor" };
+
+  const initialSchools = [
+    {
+      recordId: "00000000-0000-4000-8000-000000000501",
+      schoolName: "Missing Owner School",
+      schoolBoard: "TDSB",
+      geographicRegion: "North",
+      assignedTo: "Morgan",
+      stage: "Not Contacted",
+      lastRequestId: "v1",
+      isMySchool: true,
+      canEdit: true,
+      ownerEmail: "morgan@example.test",
+    },
+    {
+      recordId: "00000000-0000-4000-8000-000000000502",
+      schoolName: "Changed Owner School",
+      schoolBoard: "TDSB",
+      geographicRegion: "East",
+      assignedTo: "Morgan",
+      stage: "Not Contacted",
+      lastRequestId: "v2",
+      isMySchool: true,
+      canEdit: true,
+      ownerEmail: "morgan@example.test",
+    },
+    {
+      recordId: "00000000-0000-4000-8000-000000000503",
+      schoolName: "Still Owned School",
+      schoolBoard: "TDSB",
+      geographicRegion: "West",
+      assignedTo: "Morgan",
+      stage: "Not Contacted",
+      lastRequestId: "v3",
+      isMySchool: true,
+      canEdit: true,
+      ownerEmail: "morgan@example.test",
+    },
+  ];
+
+  const freshDetails = {
+    "00000000-0000-4000-8000-000000000501": {
+      recordId: "00000000-0000-4000-8000-000000000501",
+      schoolName: "Missing Owner School",
+      stage: "Not Contacted",
+      ownerEmail: "", // Missing/empty on fresh detail fetch
+      canEdit: true,
+      lastRequestId: "v1",
+    },
+    "00000000-0000-4000-8000-000000000502": {
+      recordId: "00000000-0000-4000-8000-000000000502",
+      schoolName: "Changed Owner School",
+      stage: "Not Contacted",
+      ownerEmail: "reassigned@example.test", // Changed on fresh detail fetch
+      canEdit: true,
+      lastRequestId: "v2",
+    },
+    "00000000-0000-4000-8000-000000000503": {
+      recordId: "00000000-0000-4000-8000-000000000503",
+      schoolName: "Still Owned School",
+      stage: "Not Contacted",
+      ownerEmail: "  morgan@example.test  ", // Exact match after trimming/lowercasing
+      canEdit: true,
+      lastRequestId: "v3",
+    },
+  };
+
+  const activityRequests = [];
+
+  const { context, getEl, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: supervisorUser,
+          schools: initialSchools,
+          overview: { students: [{ id: "alex", name: "Alex", active: true }] },
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/schools/detail")) {
+        const match = url.match(/recordId=([^&]+)/);
+        const record = freshDetails[decodeURIComponent(match[1])];
+        return Response.json({ ok: true, record });
+      }
+      if (url.includes("/api/activities")) {
+        const body = JSON.parse(init.body);
+        activityRequests.push(body);
+        return Response.json({ ok: true, record: { recordId: body.recordId, lastRequestId: crypto.randomUUID() } });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+
+  await signIn("morgan@example.test");
+
+  context.openBulkOutreach(initialSchools.map((s) => s.recordId));
+  assert.equal(getEl("bulk-select-count").textContent, "3 of 20 selected");
+
+  getEl("bulk-to-step2").click();
+  context.applySuggestion("bulk-outcome", "No reply yet");
+  context.applySuggestion("bulk-summary", "Introductory outreach email.");
+  getEl("bulk-to-step3").click();
+  getEl("bulk-confirm-sent").click();
+  getEl("bulk-submit-save").click();
+
+  for (let i = 0; i < 50 && activityRequests.length < 1; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+
+  // Only the school with exact trimmed/lowercased matching ownerEmail is saved!
+  assert.equal(activityRequests.length, 1);
+  assert.equal(activityRequests[0].recordId, initialSchools[2].recordId);
+
+  // Results show 1 saved, 2 conflicts
+  assert.match(getEl("bulk-final-summary").textContent, /Finished with 1 saved, 2 conflicts/);
+
+  const pills = Array.from(getEl("bulk-results-list").children).map((row) => {
+    const schoolName = row.children[0]?.children[0]?.textContent;
+    const descText = row.children[0]?.children[1]?.textContent;
+    const pillText = row.children[1]?.textContent;
+    return { schoolName, pillText, descText };
+  });
+
+  const rowMissing = pills.find((p) => p.schoolName === "Missing Owner School");
+  assert.equal(rowMissing.pillText, "⚠ Conflict");
+  assert.match(rowMissing.descText, /Supervisors can only bulk-log schools they personally own/);
+
+  const rowChanged = pills.find((p) => p.schoolName === "Changed Owner School");
+  assert.equal(rowChanged.pillText, "⚠ Conflict");
+  assert.match(rowChanged.descText, /Supervisors can only bulk-log schools they personally own/);
+
+  const rowSaved = pills.find((p) => p.schoolName === "Still Owned School");
+  assert.equal(rowSaved.pillText, "✓ Saved");
+});
+
 
