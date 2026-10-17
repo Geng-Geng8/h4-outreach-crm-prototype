@@ -66,7 +66,7 @@
       </nav>
 
       <div id="home-view" role="tabpanel" aria-labelledby="tab-home" hidden>
-        <div class="dashboard-heading"><div><h2 id="home-message">Your next connection starts here.</h2><p id="home-description">Start with today’s follow-ups, then keep your conversations moving.</p></div><button id="home-refresh" class="button secondary" type="button">Refresh</button></div>
+        <div class="dashboard-heading"><div><h2 id="home-message">Your next connection starts here.</h2><p id="home-description">Start with today’s follow-ups, then keep your conversations moving.</p></div><div class="heading-actions"><button id="home-bulk-log" class="button secondary" type="button">Bulk log outreach</button><button id="home-refresh" class="button secondary" type="button">Refresh</button></div></div>
         <p id="home-status" class="workspace-status" role="status" aria-live="polite"></p>
         <div id="home-content" hidden>
           <div id="home-metrics" class="dashboard-metrics" aria-label="Outreach totals"></div>
@@ -107,7 +107,7 @@
 
       <div id="schools-view" role="tabpanel" aria-labelledby="tab-my-schools" hidden>
         <div id="schools-scope" class="visibility-note" hidden><span id="schools-scope-label"></span><button id="schools-scope-clear" class="text-button" type="button">Show all schools</button></div>
-        <div class="workspace-tools"><div class="count-label"><strong id="school-count">0</strong><span id="school-count-label">schools</span></div><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search schools</span><input id="search" type="search" placeholder="Search by school, board or region" autocomplete="off"></label><button id="refresh" class="button secondary" type="button">Refresh</button></div>
+        <div class="workspace-tools"><div class="count-label"><strong id="school-count">0</strong><span id="school-count-label">schools</span></div><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search schools</span><input id="search" type="search" placeholder="Search by school, board or region" autocomplete="off"></label><button id="schools-bulk-log" class="button secondary" type="button">Bulk log outreach</button><button id="refresh" class="button secondary" type="button">Refresh</button></div>
         <p class="visibility-note">Select a school to edit details, or choose Log outreach to record a contact or follow-up. Students can update only their own schools.</p>
         <p id="workspace-status" class="workspace-status" role="status" aria-live="polite"></p>
         <div id="school-list" class="school-list"></div>
@@ -288,6 +288,222 @@
         </div>
         <div class="editor-actions"><p id="editor-feedback" class="editor-feedback" role="status" aria-live="polite"></p><button type="button" id="editor-reload" class="button secondary">Reload saved values</button><button type="submit" id="editor-save" class="button">Save changes</button></div>
       </form>
+    </dialog>
+
+    <dialog id="bulk-outreach-dialog" class="editor-dialog bulk-dialog" aria-labelledby="bulk-dialog-title">
+      <div class="editor-header">
+        <div class="editor-title-wrap">
+          <span class="eyebrow" id="bulk-step-eyebrow">STEP 1 OF 3 · SELECT SCHOOLS</span>
+          <h2 id="bulk-dialog-title">Bulk log email outreach</h2>
+          <p id="bulk-dialog-sub" class="editor-meta">Record the same completed email outreach for multiple assigned schools.</p>
+        </div>
+        <button type="button" id="bulk-dialog-close" class="editor-close" aria-label="Close bulk outreach">✕</button>
+      </div>
+
+      <!-- STEP 1: SELECT SCHOOLS -->
+      <div id="bulk-step-1" class="bulk-step-panel">
+        <div id="bulk-unresolved-banner" class="demo-feedback error-feedback" style="margin-bottom: 14px;" hidden>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+            <span><strong>Unresolved saves:</strong> <span id="bulk-unresolved-text"></span></span>
+            <button type="button" id="bulk-resume-unresolved" class="button secondary small">Review & retry</button>
+          </div>
+        </div>
+        <div class="bulk-toolbar">
+          <label class="search bulk-search">
+            <span aria-hidden="true">⌕</span>
+            <span class="sr-only">Search your schools</span>
+            <input id="bulk-search" type="search" placeholder="Filter assigned schools…" autocomplete="off">
+          </label>
+          <div class="bulk-select-summary">
+            <span id="bulk-select-count" class="bulk-counter-pill">0 of 20 selected</span>
+            <button type="button" id="bulk-clear-selected" class="text-button">Clear</button>
+          </div>
+        </div>
+        <p id="bulk-select-note" class="quiet-note">Select up to 20 schools you emailed. Booked and Cold schools are excluded by default.</p>
+        <div id="bulk-school-list" class="bulk-school-picker" role="group" aria-label="Select schools for outreach">
+          <!-- Filled dynamically by renderBulkStep1() -->
+        </div>
+        <p id="bulk-empty-selectable" class="empty-state" hidden>No eligible schools found.</p>
+        <div class="editor-actions">
+          <p id="bulk-step1-feedback" class="editor-feedback" role="status" aria-live="polite"></p>
+          <button type="button" id="bulk-cancel-step1" class="button secondary">Cancel</button>
+          <button type="button" id="bulk-to-step2" class="button" disabled>Next: Log activity →</button>
+        </div>
+      </div>
+
+      <!-- STEP 2: LOG ACTIVITY -->
+      <div id="bulk-step-2" class="bulk-step-panel" hidden>
+        <div class="bulk-selection-recap">
+          <span id="bulk-recap-count" class="badge-neutral">0 schools selected</span>
+          <button type="button" id="bulk-back-to-step1-link" class="text-button">Review or change selection</button>
+        </div>
+
+        <section class="flow-step editor-wide">
+          <div class="step-header">
+            <span class="step-num" aria-hidden="true">1</span>
+            <div>
+              <h3 class="step-title">Contact type</h3>
+              <p class="step-sub">First contact or routine follow-up</p>
+            </div>
+          </div>
+          <div class="flow-step-inputs">
+            <label>Activity type
+              <select id="bulk-activityType">
+                <option value="Outreach">First contact (Initial outreach)</option>
+                <option value="FollowUp">Follow-up (Subsequent email)</option>
+              </select>
+              <span id="bulk-activityType-help" class="field-help">First contact moves "Not Contacted" schools to Contacted. Follow-up adds 1 to the school's follow-up count.</span>
+            </label>
+          </div>
+          <div id="bulk-qualification-notice" class="demo-feedback error-feedback" style="margin-top: 10px;" hidden>
+            <p id="bulk-qualification-text" style="margin: 0;"></p>
+            <button type="button" id="bulk-deselect-ineligible" class="button secondary small" style="margin-top: 8px;" hidden></button>
+          </div>
+        </section>
+
+        <section class="flow-step editor-wide">
+          <div class="step-header">
+            <span class="step-num" aria-hidden="true">2</span>
+            <div>
+              <h3 class="step-title">What was the result?</h3>
+              <p class="step-sub">Outcome of the outreach</p>
+            </div>
+          </div>
+          <label class="editor-wide">Outcome
+            <input id="bulk-outcome" maxlength="300" placeholder="e.g. No reply yet or Asked for more information" required>
+          </label>
+          <div class="suggestion-group editor-wide" role="group" aria-label="Outcome suggestions">
+            <span class="suggestion-label">Suggestions:</span>
+            <div class="suggestion-chips">
+              <button type="button" class="suggestion-chip" data-target="bulk-outcome" data-value="No reply yet">No reply yet</button>
+              <button type="button" class="suggestion-chip" data-target="bulk-outcome" data-value="Asked for more information">Asked for more information</button>
+              <button type="button" class="suggestion-chip" data-target="bulk-outcome" data-value="Interested">Interested</button>
+              <button type="button" class="suggestion-chip" data-target="bulk-outcome" data-value="Not interested">Not interested</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="flow-step editor-wide">
+          <div class="step-header">
+            <span class="step-num" aria-hidden="true">3</span>
+            <div>
+              <h3 class="step-title">What did you send?</h3>
+              <p class="step-sub">A brief note for your team</p>
+            </div>
+          </div>
+          <label class="editor-wide">Summary
+            <textarea id="bulk-summary" maxlength="4000" rows="3" placeholder="Briefly describe what you emailed." required></textarea>
+          </label>
+          <div class="suggestion-group editor-wide" role="group" aria-label="Summary suggestions">
+            <span class="suggestion-label">Suggestions:</span>
+            <div id="bulk-summary-suggestion-chips" class="suggestion-chips">
+              <!-- Filled dynamically by renderBulkSummarySuggestions() -->
+            </div>
+          </div>
+        </section>
+
+        <section class="flow-step editor-wide">
+          <div class="step-header">
+            <span class="step-num" aria-hidden="true">4</span>
+            <div>
+              <h3 class="step-title">Next step & reminder</h3>
+              <p class="step-sub">Next action and follow-up date</p>
+            </div>
+          </div>
+          <div class="step-five-fields">
+            <label class="editor-wide">Next action
+              <input id="bulk-nextAction" maxlength="1000" placeholder="e.g. Follow up if no reply">
+              <span class="field-help">Next step for these schools on your My Outreach list.</span>
+              <div class="suggestion-group">
+                <span class="suggestion-label">Suggestion:</span>
+                <div class="suggestion-chips">
+                  <button type="button" class="suggestion-chip" data-target="bulk-nextAction" data-value="Follow up if no reply">Follow up if no reply</button>
+                </div>
+              </div>
+            </label>
+            <label>Follow-up date
+              <input id="bulk-followUpDue" type="date">
+              <span class="field-help">When to follow up next (Ontario date).</span>
+            </label>
+            <label id="bulk-overwrite-wrap" class="bulk-overwrite-label editor-wide">
+              <input id="bulk-overwrite-next-steps" type="checkbox">
+              <span id="bulk-overwrite-text">Overwrite existing Next Action and Follow-Up Date on schools that already have them</span>
+            </label>
+            <p id="bulk-preserve-note" class="quiet-note editor-wide">Unchecked by default: schools that already have a Next Action or Follow-Up Date will keep their existing values.</p>
+          </div>
+        </section>
+
+        <div class="editor-actions">
+          <p id="bulk-step2-feedback" class="editor-feedback" role="status" aria-live="polite"></p>
+          <button type="button" id="bulk-back-to-step1" class="button secondary">← Back to schools</button>
+          <button type="button" id="bulk-to-step3" class="button">Next: Review & confirm →</button>
+        </div>
+      </div>
+
+      <!-- STEP 3: REVIEW & CONFIRM -->
+      <div id="bulk-step-3" class="bulk-step-panel" hidden>
+        <div class="bulk-review-summary-card">
+          <h3 class="review-card-title">Activity summary</h3>
+          <dl class="review-dl">
+            <div><dt>Channel</dt><dd>Email</dd></div>
+            <div><dt>Activity type</dt><dd id="bulk-rev-type"></dd></div>
+            <div><dt>Outcome</dt><dd id="bulk-rev-outcome"></dd></div>
+            <div><dt>Summary</dt><dd id="bulk-rev-summary"></dd></div>
+            <div><dt>Next action</dt><dd id="bulk-rev-action"></dd></div>
+            <div><dt>Follow-up date</dt><dd id="bulk-rev-due"></dd></div>
+          </dl>
+        </div>
+
+        <div class="bulk-review-schools-section">
+          <h3>Selected schools (<span id="bulk-rev-count">0</span>)</h3>
+          <p class="field-help">Review each school and how its record will update.</p>
+          <div id="bulk-review-schools-list" class="bulk-review-list">
+            <!-- Filled dynamically by renderBulkStep3() -->
+          </div>
+        </div>
+
+        <div class="bulk-confirm-box">
+          <label class="bulk-confirm-label">
+            <input id="bulk-confirm-sent" type="checkbox">
+            <strong>I confirm that these emails were already sent from my email account.</strong>
+          </label>
+          <p class="field-help quiet-note">Opening an email composer does not count as sending outreach. Only log outreach you have already completed.</p>
+        </div>
+
+        <div class="editor-actions">
+          <p id="bulk-step3-feedback" class="editor-feedback" role="status" aria-live="polite"></p>
+          <button type="button" id="bulk-back-to-step2" class="button secondary">← Back to edit</button>
+          <button type="button" id="bulk-submit-save" class="button" disabled>Log outreach for selected schools</button>
+        </div>
+      </div>
+
+      <!-- PROGRESS & RESULTS VIEW -->
+      <div id="bulk-step-progress" class="bulk-step-panel" hidden>
+        <div class="bulk-progress-header">
+          <h3 id="bulk-progress-title">Saving outreach…</h3>
+          <p id="bulk-progress-subtitle" class="quiet-note">Please keep this tab open while saving. Completed records are saved permanently to Google Sheets.</p>
+          <progress id="bulk-progress-bar" value="0" max="100"></progress>
+          <p id="bulk-progress-status" class="workspace-status" role="status" aria-live="polite">Saving 1 of X…</p>
+        </div>
+
+        <div id="bulk-blocked-alert" class="demo-feedback error-feedback" hidden>
+          <strong>Saving stopped:</strong> <span id="bulk-blocked-message"></span>
+        </div>
+
+        <div class="bulk-results-container">
+          <div id="bulk-results-list" class="bulk-results-list" role="status">
+            <!-- Filled dynamically by updateBulkProgressUI() -->
+          </div>
+        </div>
+
+        <p id="bulk-reload-note" class="quiet-note editor-wide" style="margin-top: 12px;"><strong>Session & reload limit:</strong> Retry tracking is maintained in memory during your active browser session. If you reload this page or your session expires, in-flight retry tracking cannot be recovered.</p>
+
+        <div class="editor-actions">
+          <p id="bulk-final-summary" class="editor-feedback" role="status" aria-live="polite"></p>
+          <button type="button" id="bulk-retry-failed" class="button secondary" hidden>Retry failed saves</button>
+          <button type="button" id="bulk-finish-done" class="button" hidden>Done</button>
+        </div>
+      </div>
     </dialog>
   </main>
   <div id="save-toast" class="save-toast" role="status" aria-live="polite" hidden></div>

@@ -697,3 +697,372 @@
   }
 }
 
+/* Bulk Outreach Dialog & 3-Step Flow */
+.heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#bulk-outreach-dialog {
+  width: min(740px, calc(100% - 32px));
+  max-height: calc(100dvh - 36px);
+  padding: 0;
+  border: 1px solid #cad5c6;
+  border-radius: 16px;
+  color: #14201a;
+  background: #fafaf7;
+  box-shadow: 0 24px 64px -12px rgba(18, 34, 27, 0.38), 0 4px 16px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+#bulk-outreach-dialog::backdrop {
+  background: rgba(14, 30, 23, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+#bulk-outreach-dialog .editor-header {
+  padding: 24px 28px 12px;
+  margin-bottom: 0;
+  border-bottom: 1px solid #e5ebe2;
+  background: #fafaf7;
+}
+.bulk-step-panel {
+  padding: 20px 28px 24px;
+  max-height: calc(100dvh - 140px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Step 1: Select Schools */
+.bulk-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.bulk-search {
+  flex: 1;
+  min-width: 220px;
+}
+.bulk-select-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bulk-counter-pill {
+  font-size: 12px;
+  font-weight: 750;
+  background: #eaf1e7;
+  color: #153528;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid #c7d8c3;
+}
+.bulk-school-picker {
+  max-height: 330px;
+  overflow-y: auto;
+  border: 1px solid #cad5c6;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bulk-school-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  min-height: 48px;
+  transition: background 0.15s ease;
+  user-select: none;
+}
+.bulk-school-item:hover {
+  background: #f3f7f0;
+}
+.bulk-school-item.selected {
+  background: #eaf1e7;
+}
+.bulk-school-item input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: #153528;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.bulk-school-item-info {
+  flex: 1;
+  min-width: 0;
+}
+.bulk-school-item-info strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: #14201a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bulk-school-item-info .school-meta {
+  font-size: 12px;
+  color: #5a665e;
+  margin: 2px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Step 2: Log Activity */
+.bulk-selection-recap {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f3f7f0;
+  border: 1px solid #cad7c5;
+  padding: 8px 14px;
+  border-radius: 8px;
+}
+.badge-neutral {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #153528;
+}
+.bulk-overwrite-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #14201a;
+  cursor: pointer;
+  margin-top: 6px;
+}
+.bulk-overwrite-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #153528;
+  cursor: pointer;
+}
+
+/* Step 3: Review & Confirm */
+.bulk-review-summary-card {
+  background: #ffffff;
+  border: 1px solid #cad5c6;
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+.review-card-title {
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #385945;
+  margin: 0 0 12px;
+}
+.review-dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.review-dl dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6b776f;
+  margin: 0 0 2px;
+  font-weight: 650;
+}
+.review-dl dd {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #14201a;
+  margin: 0;
+  word-break: break-word;
+}
+.bulk-review-schools-section {
+  margin-top: 4px;
+}
+.bulk-review-schools-section h3 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+.bulk-review-list {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid #cad5c6;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.bulk-review-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eef2ec;
+}
+.bulk-review-item:last-child {
+  border-bottom: none;
+}
+.bulk-review-school-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #14201a;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bulk-review-school-name .school-meta {
+  font-size: 11.5px;
+  color: #6b776f;
+  font-weight: 500;
+}
+.bulk-review-transition {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.bulk-review-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #eaf1e7;
+  color: #153528;
+}
+.bulk-review-preserved {
+  background: #f0f3ee;
+  color: #556259;
+}
+.bulk-confirm-box {
+  background: #fdfae9;
+  border: 1.5px solid #dcd4b0;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-top: 8px;
+}
+.bulk-confirm-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #1b261d;
+  line-height: 1.4;
+}
+.bulk-confirm-label input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  accent-color: #153528;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* Step Progress & Results View */
+.bulk-progress-header {
+  text-align: center;
+  padding: 6px 0 12px;
+}
+.bulk-progress-header h3 {
+  font-size: 18px;
+  font-weight: 750;
+  margin: 0 0 6px;
+}
+#bulk-progress-bar {
+  width: 100%;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  accent-color: #153528;
+  margin: 12px 0 8px;
+}
+.bulk-results-container {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid #cad5c6;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 4px;
+}
+.bulk-results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bulk-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eef2ec;
+}
+.bulk-result-row:last-child {
+  border-bottom: none;
+}
+.bulk-result-school {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: #14201a;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.bulk-result-desc {
+  font-size: 11.5px;
+  color: #6b776f;
+  font-weight: 500;
+}
+.bulk-status-pill {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.status-saving {
+  background: #eef2ec;
+  color: #455048;
+}
+.status-success {
+  background: #d7edd9;
+  color: #155724;
+}
+.status-conflict {
+  background: #fff3cd;
+  color: #856404;
+}
+.status-uncertain,
+.status-blocked,
+.status-failed {
+  background: #f8d7da;
+  color: #721c24;
+}
+.error-feedback {
+  background: #fdf0f0;
+  border: 1px solid #f2c7c7;
+  color: #8c2828;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
