@@ -69,8 +69,9 @@ test("verified Google identity receives only its assigned school summaries", asy
   assert.equal(result.body.writesEnabled, false);
   assert.equal(result.body.visibility.scope, "assigned-school-summaries");
   assert.deepEqual(Object.keys(result.body.schools[0]).sort(), [
-    "recordId", "schoolName", "schoolBoard", "assignedTo", "stage", "priority", "geographicRegion", "lastContacted", "followUpDue", "nextAction",
+    "recordId", "schoolName", "schoolBoard", "assignedTo", "stage", "priority", "geographicRegion", "lastContacted", "followUpDue", "nextAction", "isMySchool",
   ].sort());
+  assert.equal(result.body.schools[0].isMySchool, true);
   assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_|Other Student School|sam@example\.test/);
   assert.equal(result.headers.get("cache-control"), "no-store");
 });
@@ -116,11 +117,34 @@ test("Supervisor overview includes zero-assignment students and joins schools by
 
 test("Supervisor can read all summaries, without contact details, notes, users or activities", async (t) => {
   const h = await readHarness(t);
+  // Add a school owned by supervisor but with non-matching display name
+  const ownSchool = structuredClone(h.tables.Schools[1]);
+  ownSchool[0] = "00000000-0000-4000-8000-000000000101";
+  ownSchool[1] = "Supervisor Owned School";
+  ownSchool[3] = "Other Assigned Name";
+  ownSchool[25] = SUPERVISOR;
+  h.tables.Schools.push(ownSchool);
+
+  // Add a school owned by student Sam, but with display name matching supervisor
+  const samSchool = structuredClone(h.tables.Schools[1]);
+  samSchool[0] = "00000000-0000-4000-8000-000000000102";
+  samSchool[1] = "Sam School With Supervisor Name";
+  samSchool[3] = "Morgan"; // Supervisor's display name
+  samSchool[25] = OTHER;
+  h.tables.Schools.push(samSchool);
+
   const result = await h.bootstrap(await h.token({ email: SUPERVISOR, sub: "fixture-supervisor" }));
-  assert.equal(result.status, 200); assert.equal(result.body.schools.length, 2);
+  assert.equal(result.status, 200); assert.equal(result.body.schools.length, 4);
   assert.equal(result.body.visibility.scope, "all-school-summaries");
   assert.equal(result.body.activities, undefined); assert.equal(result.body.users, undefined);
   assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_/);
+  assert.doesNotMatch(JSON.stringify(result.body.schools), /ownerEmail|@/);
+
+  const mySchool = result.body.schools.find((s) => s.recordId === "00000000-0000-4000-8000-000000000101");
+  assert.equal(mySchool.isMySchool, true, "School owned by supervisor email has isMySchool = true");
+
+  const otherSchool = result.body.schools.find((s) => s.recordId === "00000000-0000-4000-8000-000000000102");
+  assert.equal(otherSchool.isMySchool, false, "School owned by another email with supervisor display name has isMySchool = false");
 });
 
 test("unlisted users are denied before any school range is fetched", async (t) => {
