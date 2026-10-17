@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   ApiError, C, ContactCol, padded, record, editableRecord, contactRecord, schoolWrites,
+  assertStudentPrivacy,
   type Batch, type Row, type Snapshot, type ValueRange,
 } from "./schema";
 import { SyntheticSheets } from "./sheets";
@@ -426,6 +427,7 @@ export class SheetCoordinator extends DurableObject<Env> {
     let channel = "App";
     let outcome = "Updated";
     let summary = "";
+    const contactRanges: ValueRange[] = [];
     const day = today(this.env);
     if (path === "/api/schools/claim") {
       onlyKeys(input, ["requestId", "osn"]);
@@ -485,6 +487,55 @@ export class SheetCoordinator extends DurableObject<Env> {
           if (key === "priority" && !["High", "Medium", "Low", ""].includes(String(value))) throw new ApiError(422, "INVALID_PRIORITY");
           row[columns[key]!] = key === "followUpDue" ? date(value) : text(value);
         }
+
+        // Enforce one source of truth: synchronize Contacts when contact fields are patched
+        const contactFieldKeys = ["contactName", "contactRole", "email", "phone"] as const;
+        const touchesContacts = contactFieldKeys.some((k) => k in patch);
+        if (touchesContacts && snapshot.Contacts) {
+          const schoolContacts = snapshot.Contacts.slice(1).map((cRow, index) => ({
+            rowNumber: index + 2,
+            row: [...cRow],
+            contact: contactRecord(cRow),
+          })).filter((c) => c.contact.recordId === input.recordId);
+
+          const currentPrimary = schoolContacts.find((c) => c.contact.active && c.contact.isPrimary);
+          if (currentPrimary) {
+            const updated = [...currentPrimary.row];
+            if (patch.contactName !== undefined) updated[ContactCol.name] = text(patch.contactName, 300).trim();
+            if (patch.contactRole !== undefined) updated[ContactCol.role] = text(patch.contactRole, 300).trim();
+            if (patch.email !== undefined) updated[ContactCol.email] = text(patch.email, 300).trim();
+            if (patch.phone !== undefined) updated[ContactCol.phone] = text(patch.phone, 100).trim();
+            updated[ContactCol.updatedAt] = day;
+
+            assertStudentPrivacy(
+              String(updated[ContactCol.category] ?? ""),
+              String(updated[ContactCol.email] ?? ""),
+              String(updated[ContactCol.phone] ?? ""),
+            );
+
+            row[C.contactName] = updated[ContactCol.name] ?? "";
+            row[C.contactRole] = updated[ContactCol.role] ?? "";
+            row[C.email] = updated[ContactCol.email] ?? "";
+            row[C.phone] = updated[ContactCol.phone] ?? "";
+
+            contactRanges.push({ range: `'Contacts'!A${currentPrimary.rowNumber}:N${currentPrimary.rowNumber}`, values: [updated] });
+          } else if (String(row[C.contactName] ?? "").trim() || String(row[C.email] ?? "").trim()) {
+            const newName = String(row[C.contactName] ?? "").trim() || "School Representative";
+            const newRole = String(row[C.contactRole] ?? "").trim() || "Contact";
+            const newEmail = String(row[C.email] ?? "").trim();
+            const newPhone = String(row[C.phone] ?? "").trim();
+
+            let newRowNumber = 2;
+            while ((snapshot.Contacts?.[newRowNumber - 1] ?? []).some((cell) => cell !== "")) newRowNumber++;
+
+            const newContactRow: Row = [
+              crypto.randomUUID(), row[C.id]!, row[C.name]!, newName, newRole,
+              "Administration", "", "Main Office", newEmail, newPhone,
+              "Created via school update", "TRUE", "TRUE", day,
+            ];
+            contactRanges.push({ range: `'Contacts'!A${newRowNumber}:N${newRowNumber}`, values: [newContactRow] });
+          }
+        }
         activityType = outcome = "Updated";
       } else if (path === "/api/schools/contacts") {
         onlyKeys(input, ["requestId", "recordId", "expectedRequestId", "action", "contactId", "contact"]);
@@ -498,7 +549,6 @@ export class SheetCoordinator extends DurableObject<Env> {
         })).filter((c) => c.contact.recordId === input.recordId);
 
         const currentPrimary = schoolContacts.find((c) => c.contact.active && c.contact.isPrimary);
-        const contactRanges: ValueRange[] = [];
         let contactResult: ReturnType<typeof contactRecord> | null = null;
 
         if (action === "create") {
@@ -517,6 +567,7 @@ export class SheetCoordinator extends DurableObject<Env> {
           const notes = text(cData.notes ?? "", 4000);
           const activeCount = schoolContacts.filter((c) => c.contact.active).length;
           const willBePrimary = Boolean(cData.isPrimary) || activeCount === 0;
+          assertStudentPrivacy(category, email, phone);
 
           const contactId = crypto.randomUUID();
           let newRowNumber = 2;
@@ -609,6 +660,12 @@ export class SheetCoordinator extends DurableObject<Env> {
               throw new ApiError(422, "CONTACT_DETAILS_REQUIRED");
             }
             updated[ContactCol.updatedAt] = day;
+
+            assertStudentPrivacy(
+              String(updated[ContactCol.category] ?? ""),
+              String(updated[ContactCol.email] ?? ""),
+              String(updated[ContactCol.phone] ?? ""),
+            );
 
             const wasPrimary = target.contact.isPrimary;
             const willBePrimary = cData.isPrimary !== undefined ? Boolean(cData.isPrimary) : wasPrimary;
@@ -704,6 +761,7 @@ export class SheetCoordinator extends DurableObject<Env> {
     return {
       batch: { valueInputOption: "RAW", data: [
         ...schoolWrites(rowNumber, row),
+        ...contactRanges,
         { range: `'Activity Log'!A${activityNumber}:O${activityNumber}`, values: [activity] },
       ] },
       result: { status: 200, body: { ok: true, code: "SUCCESS", requestId, record: record(row) } },

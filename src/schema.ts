@@ -67,6 +67,32 @@ export function contactRecord(row: Row) {
   };
 }
 
+export const CONSUMER_EMAIL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "rocketmail.com",
+  "hotmail.com", "outlook.com", "live.com", "msn.com",
+  "icloud.com", "me.com", "mac.com", "aol.com", "aim.com",
+  "proton.me", "protonmail.com", "zoho.com", "yandex.com", "gmx.com", "mail.com",
+]);
+
+export function assertStudentPrivacy(category: string, email: string, phone: string) {
+  if (category !== "Student") return;
+  if (phone.trim()) {
+    throw new ApiError(422, "STUDENT_PHONE_FORBIDDEN", {
+      message: "Personal phone numbers cannot be stored for student contacts under student privacy rules.",
+    });
+  }
+  const trimmedEmail = email.trim().toLowerCase();
+  if (trimmedEmail) {
+    const at = trimmedEmail.lastIndexOf("@");
+    const domain = at !== -1 ? trimmedEmail.slice(at + 1) : "";
+    if (CONSUMER_EMAIL_DOMAINS.has(domain)) {
+      throw new ApiError(422, "STUDENT_PERSONAL_EMAIL_FORBIDDEN", {
+        message: "Consumer email addresses (such as Gmail, Yahoo, Hotmail, iCloud) cannot be stored for student contacts. Only school-affiliated email addresses are permitted.",
+      });
+    }
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;

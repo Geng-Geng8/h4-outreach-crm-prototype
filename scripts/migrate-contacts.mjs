@@ -8,7 +8,7 @@ export async function planMigration(snapshot) {
   const existingContacts = snapshot.Contacts?.slice(1) ?? [];
   const existingByRecordId = new Set(
     existingContacts
-      .filter((c) => String(c[ContactCol.active]).trim().toUpperCase() === "TRUE")
+      .filter((c) => c[ContactCol.recordId] && String(c[ContactCol.recordId]).trim())
       .map((c) => String(c[ContactCol.recordId])),
   );
 

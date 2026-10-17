@@ -305,3 +305,280 @@ test("operator recovery: contacts write committed with lost ack reconciles with 
   assert.equal(replay.body.contact.name, "Recovery Contact");
 });
 
+test("one source of truth: /api/schools/update synchronizes primary Contacts record and preserves non-contact edits", async (t) => {
+  const h = await harness(t);
+
+  // 1. Initial primary contact in Contacts table
+  const contactsBefore = h.sheets.tables.Contacts.slice(1);
+  const primaryBefore = contactsBefore.find((c) => c[ContactCol.recordId] === RECORD && c[ContactCol.isPrimary] === "TRUE");
+  assert.ok(primaryBefore);
+  assert.equal(primaryBefore[ContactCol.name], "Jane Smith");
+  assert.equal(primaryBefore[ContactCol.role], "Principal");
+
+  // 2. Patch primary contact fields via /api/schools/update
+  const updateReqId = randomUUID();
+  const updateRes = await h.post("/api/schools/update", {
+    requestId: updateReqId,
+    recordId: RECORD,
+    expectedRequestId: VERSION,
+    patch: {
+      contactName: "Dr. Evelyn Reed",
+      contactRole: "Principal Lead",
+      email: "ereed@example.test",
+      phone: "416-555-4321",
+      notes: "Updated school notes",
+    },
+  }, ACTOR);
+
+  assert.equal(updateRes.status, 200);
+  assert.equal(updateRes.body.ok, true);
+
+  // Verify Schools row projection E/F/G/O
+  const schoolRow = h.sheets.tables.Schools.slice(1).find((r) => r[C.id] === RECORD);
+  assert.equal(schoolRow[C.contactName], "Dr. Evelyn Reed");
+  assert.equal(schoolRow[C.contactRole], "Principal Lead");
+  assert.equal(schoolRow[C.email], "ereed@example.test");
+  assert.equal(schoolRow[C.phone], "416-555-4321");
+  assert.equal(schoolRow[C.notes], "Updated school notes");
+
+  // Verify Contacts table synchronized the primary record
+  const contactsAfter = h.sheets.tables.Contacts.slice(1);
+  const primaryAfter = contactsAfter.find((c) => c[ContactCol.recordId] === RECORD && c[ContactCol.isPrimary] === "TRUE");
+  assert.ok(primaryAfter);
+  assert.equal(primaryAfter[ContactCol.id], primaryBefore[ContactCol.id], "Contact ID preserved");
+  assert.equal(primaryAfter[ContactCol.name], "Dr. Evelyn Reed");
+  assert.equal(primaryAfter[ContactCol.role], "Principal Lead");
+  assert.equal(primaryAfter[ContactCol.email], "ereed@example.test");
+  assert.equal(primaryAfter[ContactCol.phone], "416-555-4321");
+
+  // 3. Non-contact update: changing priority and notes does not alter Contacts
+  const nonContactReqId = randomUUID();
+  const nonContactRes = await h.post("/api/schools/update", {
+    requestId: nonContactReqId,
+    recordId: RECORD,
+    expectedRequestId: updateReqId,
+    patch: {
+      priority: "High",
+      notes: "High priority follow-up needed",
+    },
+  }, ACTOR);
+
+  assert.equal(nonContactRes.status, 200);
+  const contactsAfterNonContact = h.sheets.tables.Contacts.slice(1);
+  const primaryUnchanged = contactsAfterNonContact.find((c) => c[ContactCol.recordId] === RECORD && c[ContactCol.isPrimary] === "TRUE");
+  assert.deepEqual(primaryUnchanged, primaryAfter, "Contacts record untouched by non-contact school edit");
+});
+
+test("student privacy: server strictly prohibits personal phone and consumer email for Student category", async (t) => {
+  const h = await harness(t);
+
+  // 1. Create student with phone -> rejected with 422 STUDENT_PHONE_FORBIDDEN
+  const phoneRes = await h.post(CONTACTS_URL, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: VERSION,
+    action: "create",
+    contact: {
+      name: "Taylor Student",
+      role: "Student Council Rep",
+      category: "Student",
+      phone: "416-555-0199",
+      email: "taylor@schoolboard.ca",
+    },
+  }, ACTOR);
+  assert.equal(phoneRes.status, 422);
+  assert.equal(phoneRes.body.code, "STUDENT_PHONE_FORBIDDEN");
+
+  // 2. Create student with consumer emails -> rejected with 422 STUDENT_PERSONAL_EMAIL_FORBIDDEN
+  for (const personalEmail of ["taylor@gmail.com", "taylor@yahoo.com", "taylor@hotmail.com", "taylor@icloud.com", "taylor@proton.me"]) {
+    const emailRes = await h.post(CONTACTS_URL, {
+      requestId: randomUUID(),
+      recordId: RECORD,
+      expectedRequestId: VERSION,
+      action: "create",
+      contact: {
+        name: "Taylor Student",
+        role: "Student Council Rep",
+        category: "Student",
+        phone: "",
+        email: personalEmail,
+      },
+    }, ACTOR);
+    assert.equal(emailRes.status, 422);
+    assert.equal(emailRes.body.code, "STUDENT_PERSONAL_EMAIL_FORBIDDEN");
+  }
+
+  // 3. Create student with valid school/board email and no phone -> 200 SUCCESS
+  const validStudentReqId = randomUUID();
+  const validStudentRes = await h.post(CONTACTS_URL, {
+    requestId: validStudentReqId,
+    recordId: RECORD,
+    expectedRequestId: VERSION,
+    action: "create",
+    contact: {
+      name: "Taylor Student",
+      role: "Student Council Rep",
+      category: "Student",
+      phone: "",
+      email: "taylor@tdsb.on.ca",
+      isPrimary: false,
+    },
+  }, ACTOR);
+  assert.equal(validStudentRes.status, 200);
+  const studentContactId = validStudentRes.body.contact.contactId;
+
+  // 4. Update student to add phone -> rejected
+  const addPhoneRes = await h.post(CONTACTS_URL, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: validStudentReqId,
+    action: "update",
+    contactId: studentContactId,
+    contact: {
+      phone: "416-555-9988",
+    },
+  }, ACTOR);
+  assert.equal(addPhoneRes.status, 422);
+  assert.equal(addPhoneRes.body.code, "STUDENT_PHONE_FORBIDDEN");
+
+  // 5. Update student to add consumer email -> rejected
+  const addConsumerEmailRes = await h.post(CONTACTS_URL, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: validStudentReqId,
+    action: "update",
+    contactId: studentContactId,
+    contact: {
+      email: "taylor.personal@gmail.com",
+    },
+  }, ACTOR);
+  assert.equal(addConsumerEmailRes.status, 422);
+  assert.equal(addConsumerEmailRes.body.code, "STUDENT_PERSONAL_EMAIL_FORBIDDEN");
+
+  // 6. Create teacher with phone and switch category to Student -> rejected
+  const teacherReqId = randomUUID();
+  const teacherRes = await h.post(CONTACTS_URL, {
+    requestId: teacherReqId,
+    recordId: RECORD,
+    expectedRequestId: validStudentReqId,
+    action: "create",
+    contact: {
+      name: "Mr. Davis",
+      role: "Music Teacher",
+      category: "Teacher",
+      phone: "416-555-3322",
+      email: "davis@schoolboard.ca",
+      isPrimary: false,
+    },
+  }, ACTOR);
+  assert.equal(teacherRes.status, 200);
+  const teacherContactId = teacherRes.body.contact.contactId;
+
+  // Changing category to Student while retaining teacher's phone fails
+  const switchCategoryRes = await h.post(CONTACTS_URL, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: teacherReqId,
+    action: "update",
+    contactId: teacherContactId,
+    contact: {
+      category: "Student",
+    },
+  }, ACTOR);
+  assert.equal(switchCategoryRes.status, 422);
+  assert.equal(switchCategoryRes.body.code, "STUDENT_PHONE_FORBIDDEN");
+
+  // 7. /api/schools/update enforces student privacy when primary contact is Student
+  // Set Taylor Student as primary
+  const setPrimaryReqId = randomUUID();
+  const setPrimaryRes = await h.post(CONTACTS_URL, {
+    requestId: setPrimaryReqId,
+    recordId: RECORD,
+    expectedRequestId: teacherReqId,
+    action: "set_primary",
+    contactId: studentContactId,
+  }, ACTOR);
+  assert.equal(setPrimaryRes.status, 200);
+
+  // Updating primary student contact with phone via /api/schools/update fails
+  const schoolUpdatePhoneRes = await h.post("/api/schools/update", {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: setPrimaryReqId,
+    patch: {
+      phone: "416-555-7777",
+    },
+  }, ACTOR);
+  assert.equal(schoolUpdatePhoneRes.status, 422);
+  assert.equal(schoolUpdatePhoneRes.body.code, "STUDENT_PHONE_FORBIDDEN");
+
+  // Updating primary student contact with consumer email via /api/schools/update fails
+  const schoolUpdateEmailRes = await h.post("/api/schools/update", {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: setPrimaryReqId,
+    patch: {
+      email: "taylor@gmail.com",
+    },
+  }, ACTOR);
+  assert.equal(schoolUpdateEmailRes.status, 422);
+  assert.equal(schoolUpdateEmailRes.body.code, "STUDENT_PERSONAL_EMAIL_FORBIDDEN");
+});
+
+test("uncertain-write retry: contact operations retain same request ID and payload across uncertain failures", async (t) => {
+  const h = await harness(t);
+
+  // Set simulated fault: write committed upstream but ack lost
+  h.sheets.fault = "lost-ack-unreconciled";
+  const reqId = randomUUID();
+  const payload = {
+    requestId: reqId,
+    recordId: RECORD,
+    expectedRequestId: VERSION,
+    action: "create",
+    contact: {
+      name: "Uncertain Contact",
+      role: "Lab Tech",
+      category: "Staff",
+      email: "lab@example.test",
+      phone: "416-555-8888",
+      isPrimary: false,
+    },
+  };
+
+  // 1. Initial attempt fails with 503 COMMIT_UNCERTAIN
+  const res1 = await h.post(CONTACTS_URL, payload, ACTOR);
+  assert.equal(res1.status, 503);
+  assert.equal(res1.body.code, "COMMIT_UNCERTAIN");
+
+  // 2. While blocked, a new operation with a DIFFERENT request ID is rejected
+  const differentOp = await h.post(CONTACTS_URL, {
+    ...payload,
+    requestId: randomUUID(),
+  }, ACTOR);
+  assert.equal(differentOp.status, 503);
+  assert.equal(differentOp.body.code, "WORKBOOK_BLOCKED");
+
+  // 3. Supervisor reconciles the uncertain write
+  const recon = await h.post("/api/operator/recovery", { requestId: reqId, action: "reconcile" }, SUPERVISOR);
+  assert.equal(recon.status, 200);
+
+  // 4. Safe retry with identical requestId and payload replays cleanly
+  const retryRes = await h.post(CONTACTS_URL, payload, ACTOR);
+  assert.equal(retryRes.status, 200);
+  assert.equal(retryRes.body.requestId, reqId);
+  assert.equal(retryRes.body.contact.name, "Uncertain Contact");
+
+  // Contacts table contains exactly 1 row for Uncertain Contact (no duplicate)
+  const matchingContacts = h.sheets.tables.Contacts.slice(1).filter((c) => c[ContactCol.name] === "Uncertain Contact");
+  assert.equal(matchingContacts.length, 1);
+
+  // 5. Reusing the resolved requestId with an altered payload is rejected
+  const alteredRes = await h.post(CONTACTS_URL, {
+    ...payload,
+    contact: { ...payload.contact, name: "Altered Name" },
+  }, ACTOR);
+  assert.equal(alteredRes.status, 409);
+  assert.equal(alteredRes.body.code, "REQUEST_ID_REUSED");
+});
+

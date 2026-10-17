@@ -654,18 +654,44 @@ function openContactForm(contactToEdit = null) {
   el("cform-name").focus();
 }
 
-function closeContactForm() {
+const CONSUMER_EMAIL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "rocketmail.com",
+  "hotmail.com", "outlook.com", "live.com", "msn.com",
+  "icloud.com", "me.com", "mac.com", "aol.com", "aim.com",
+  "proton.me", "protonmail.com", "zoho.com", "yandex.com", "gmx.com", "mail.com",
+]);
+
+function closeContactForm(force = false) {
+  if (editing?.pendingContactOp && !force) {
+    editorFeedback("An uncertain contact save is pending. Use Retry save or reload school values to discard.", "error");
+    return;
+  }
   const panel = el("contact-form-panel");
   const addBtn = el("contact-add-btn");
   if (panel) panel.hidden = true;
   if (addBtn) addBtn.hidden = false;
   editingContactId = null;
+  if (editing) editing.pendingContactOp = null;
+  const saveBtn = el("cform-save-btn");
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save contact"; }
 }
 
 function updateStudentPrivacyCallout() {
   const cat = el("cform-category")?.value;
   const note = el("student-privacy-note");
-  if (note) note.hidden = cat !== "Student";
+  const phoneInput = el("cform-phone");
+  const isStudent = cat === "Student";
+  if (note) note.hidden = !isStudent;
+  if (phoneInput) {
+    if (isStudent) {
+      phoneInput.value = "";
+      phoneInput.disabled = true;
+      phoneInput.placeholder = "Not permitted for students";
+    } else {
+      phoneInput.disabled = false;
+      phoneInput.placeholder = "e.g., 416-555-0123";
+    }
+  }
 }
 
 async function saveContactFromForm() {
@@ -687,19 +713,38 @@ async function saveContactFromForm() {
   const notes = el("cform-notes")?.value.trim() || "";
   const isPrimary = el("cform-isPrimary")?.checked || false;
 
+  // Client-side student privacy enforcement
+  if (category === "Student") {
+    if (phone) {
+      editorFeedback("Personal phone numbers cannot be stored for student contacts.", "error");
+      el("cform-phone")?.focus();
+      return;
+    }
+    const at = email.lastIndexOf("@");
+    const domain = at !== -1 ? email.slice(at + 1).toLowerCase() : "";
+    if (CONSUMER_EMAIL_DOMAINS.has(domain)) {
+      editorFeedback("Consumer email addresses (such as Gmail, Yahoo, Hotmail) cannot be stored for student contacts. Please use an official school email.", "error");
+      el("cform-email")?.focus();
+      return;
+    }
+  }
+
   const saveBtn = el("cform-save-btn");
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
   editorFeedback("Saving contact…");
 
   const action = editingContactId ? "update" : "create";
-  const payload = {
-    requestId: crypto.randomUUID(),
-    recordId: editing.id,
-    expectedRequestId: editing.original.lastRequestId,
-    action,
-    contactId: editingContactId || undefined,
-    contact: { name, role, category, gradeRange, programGroup, email, phone, notes, isPrimary },
-  };
+  if (!editing.pendingContactOp) {
+    editing.pendingContactOp = {
+      requestId: crypto.randomUUID(),
+      recordId: editing.id,
+      expectedRequestId: editing.original.lastRequestId,
+      action,
+      contactId: editingContactId || undefined,
+      contact: { name, role, category, gradeRange, programGroup, email, phone, notes, isPrimary },
+    };
+  }
+  const payload = editing.pendingContactOp;
 
   try {
     const res = await apiFetch("./api/schools/contacts", {
@@ -711,13 +756,25 @@ async function saveContactFromForm() {
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 409 && data.code === "CONFLICT_STALE_VERSION") {
-        editorFeedback("School was modified elsewhere. Reload saved values before continuing.", "error");
+        editing.pendingContactOp = null;
+        editing.stale = true;
+        editorFeedback("School was modified elsewhere. Your draft is kept; reload saved values before saving.", "error");
+      } else if (res.status === 401 || res.status === 403) {
+        editing.pendingContactOp = null;
+        forgetSession(); status("Your access changed. Please sign in again.");
+        el("google-button").hidden = false;
+        if (config?.ready) await showGoogleButton();
+        return;
+      } else if (res.status === 422 || res.status === 404 || res.status === 409) {
+        editing.pendingContactOp = null;
+        editorFeedback(data.message || "Failed to save contact. Please check the fields and try again.", "error");
       } else {
-        editorFeedback(data.message || "Failed to save contact. Please try again.", "error");
+        editorFeedback("Save status is uncertain. Use Retry save to check safely; your draft is kept.", "error");
       }
       return;
     }
 
+    editing.pendingContactOp = null;
     editing.original.lastRequestId = data.record.lastRequestId;
     editing.original.contactName = data.record.contactName;
     editing.original.contactRole = data.record.contactRole;
@@ -728,12 +785,12 @@ async function saveContactFromForm() {
     if (el("edit-email")) el("edit-email").value = data.record.email || "";
     if (el("edit-phone")) el("edit-phone").value = data.record.phone || "";
 
-    if (action === "create" && data.contact) {
+    if (payload.action === "create" && data.contact) {
       if (data.contact.isPrimary) {
         editing.contacts.forEach((c) => { c.isPrimary = false; });
       }
       editing.contacts.push(data.contact);
-    } else if (action === "update" && data.contact) {
+    } else if (payload.action === "update" && data.contact) {
       const idx = editing.contacts.findIndex((c) => c.contactId === data.contact.contactId);
       if (data.contact.isPrimary) {
         editing.contacts.forEach((c) => { c.isPrimary = false; });
@@ -742,27 +799,36 @@ async function saveContactFromForm() {
     }
 
     renderSchoolContacts(editing.contacts);
-    closeContactForm();
+    closeContactForm(true);
     editorFeedback("Contact saved to the test spreadsheet.");
     showSaveToast("✓ Contact saved");
     await refresh();
   } catch (err) {
-    editorFeedback("Save failed. Check network and try again.", "error");
+    editorFeedback("Connection interrupted. Use Retry save; your draft is kept.", "error");
   } finally {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save contact"; }
+    if (saveBtn) {
+      saveBtn.disabled = !!editing.stale;
+      saveBtn.textContent = editing.pendingContactOp ? "Retry save" : "Save contact";
+    }
+    if (el("editor-reload")) {
+      el("editor-reload").disabled = Boolean(editing.pendingContactOp || editing.pending);
+    }
   }
 }
 
 async function setPrimaryContact(contactId) {
   if (!editing || !credential || editing.busy) return;
   editorFeedback("Setting primary contact…");
-  const payload = {
-    requestId: crypto.randomUUID(),
-    recordId: editing.id,
-    expectedRequestId: editing.original.lastRequestId,
-    action: "set_primary",
-    contactId,
-  };
+  if (!editing.pendingContactOp || editing.pendingContactOp.action !== "set_primary" || editing.pendingContactOp.contactId !== contactId) {
+    editing.pendingContactOp = {
+      requestId: crypto.randomUUID(),
+      recordId: editing.id,
+      expectedRequestId: editing.original.lastRequestId,
+      action: "set_primary",
+      contactId,
+    };
+  }
+  const payload = editing.pendingContactOp;
 
   try {
     const res = await apiFetch("./api/schools/contacts", {
@@ -773,10 +839,14 @@ async function setPrimaryContact(contactId) {
     });
     const data = await res.json();
     if (!res.ok) {
+      if (res.status === 409 || res.status === 422 || res.status === 404 || res.status === 401 || res.status === 403) {
+        editing.pendingContactOp = null;
+      }
       editorFeedback(data.message || "Failed to set primary contact.", "error");
       return;
     }
 
+    editing.pendingContactOp = null;
     editing.original.lastRequestId = data.record.lastRequestId;
     editing.original.contactName = data.record.contactName;
     editing.original.contactRole = data.record.contactRole;
@@ -793,20 +863,25 @@ async function setPrimaryContact(contactId) {
     showSaveToast("✓ Primary contact updated");
     await refresh();
   } catch (err) {
-    editorFeedback("Failed to set primary contact.", "error");
+    editorFeedback("Connection interrupted. Retry setting primary contact; your action is kept.", "error");
+  } finally {
+    if (el("editor-reload")) el("editor-reload").disabled = Boolean(editing.pendingContactOp || editing.pending);
   }
 }
 
 async function deactivateContact(contactId) {
   if (!editing || !credential || editing.busy) return;
   editorFeedback("Deactivating contact…");
-  const payload = {
-    requestId: crypto.randomUUID(),
-    recordId: editing.id,
-    expectedRequestId: editing.original.lastRequestId,
-    action: "deactivate",
-    contactId,
-  };
+  if (!editing.pendingContactOp || editing.pendingContactOp.action !== "deactivate" || editing.pendingContactOp.contactId !== contactId) {
+    editing.pendingContactOp = {
+      requestId: crypto.randomUUID(),
+      recordId: editing.id,
+      expectedRequestId: editing.original.lastRequestId,
+      action: "deactivate",
+      contactId,
+    };
+  }
+  const payload = editing.pendingContactOp;
 
   try {
     const res = await apiFetch("./api/schools/contacts", {
@@ -817,10 +892,14 @@ async function deactivateContact(contactId) {
     });
     const data = await res.json();
     if (!res.ok) {
+      if (res.status === 409 || res.status === 422 || res.status === 404 || res.status === 401 || res.status === 403) {
+        editing.pendingContactOp = null;
+      }
       editorFeedback(data.message || "Failed to deactivate contact.", "error");
       return;
     }
 
+    editing.pendingContactOp = null;
     editing.original.lastRequestId = data.record.lastRequestId;
     editing.original.contactName = data.record.contactName;
     editing.original.contactRole = data.record.contactRole;
@@ -842,7 +921,9 @@ async function deactivateContact(contactId) {
     showSaveToast("✓ Contact deactivated");
     await refresh();
   } catch (err) {
-    editorFeedback("Failed to deactivate contact.", "error");
+    editorFeedback("Connection interrupted. Retry deactivating contact; your action is kept.", "error");
+  } finally {
+    if (el("editor-reload")) el("editor-reload").disabled = Boolean(editing.pendingContactOp || editing.pending);
   }
 }
 
@@ -851,7 +932,7 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
   const retainedActivity = reload && mode === "activity" && editing?.id === id ? outreachValues() : null;
   const session = sessionVersion, seq = ++editorSeq;
   editorRead?.abort(); editorRead = new AbortController();
-  editing = { id, mode, original: null, pending: null, busy: false };
+  editing = { id, mode, original: null, pending: null, busy: false, pendingContactOp: null };
   el("editor-kind").textContent = mode === "activity" ? "LOG OUTREACH" : "SCHOOL DETAILS";
   el("outreach-fields").hidden = mode !== "activity";
   for (const field of detailOnlyFields) el(`field-${field}`).hidden = mode === "activity";
@@ -933,7 +1014,7 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     renderSummarySuggestions();
     updateSuggestionStates();
     el("editor-save").disabled = !!staleDraft; el("editor-save").textContent = editing.pending ? "Retry save" : editorSaveLabel(editing);
-    el("editor-reload").disabled = !!editing.pending;
+    el("editor-reload").disabled = Boolean(editing.pending || editing.pendingContactOp);
   } catch (error) {
     if (session !== sessionVersion || seq !== editorSeq || error.name === "AbortError") return;
     editorFeedback(error.message, "error");
