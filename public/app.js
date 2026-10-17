@@ -252,6 +252,10 @@ function renderSchools() {
     el("schools-scope").hidden = !schoolScopeFilter && !schoolStageFilter;
     el("schools-scope-label").textContent = `${schoolScopeLabel || schoolStageFilter} · ${visible.length} ${visible.length === 1 ? "school" : "schools"}`;
   }
+  if (el("schools-bulk-log")) {
+    el("schools-bulk-log").disabled = config?.writesEnabled !== true;
+    el("schools-bulk-log").hidden = isSupervisor;
+  }
   el("school-count").textContent = String(visible.length);
   el("school-count-label").textContent = visible.length !== schools.length ? `of ${schools.length} schools` : schools.length === 1 ? "school" : "schools";
   el("school-list").replaceChildren();
@@ -640,6 +644,495 @@ async function saveSchoolEdits(event) {
   }
 }
 
+let bulkSelectedIds = new Set();
+let bulkStep = 1;
+let bulkBatch = null;
+
+function getEligibleBulkSchools() {
+  return schools.filter((school) => {
+    if (school.canEdit === false) return false;
+    if (["Booked", "Cold"].includes(school.stage)) return false;
+    return true;
+  });
+}
+
+function openBulkOutreach(preSelected = []) {
+  if (!credential || config?.writesEnabled !== true) return;
+  const eligible = getEligibleBulkSchools();
+  bulkSelectedIds = new Set(preSelected.filter((id) => eligible.some((s) => s.recordId === id)).slice(0, 20));
+  bulkBatch = null;
+  if (el("bulk-search")) el("bulk-search").value = "";
+  if (el("bulk-activityType")) el("bulk-activityType").value = "Outreach";
+  if (el("bulk-outcome")) el("bulk-outcome").value = "No reply yet";
+  if (el("bulk-summary")) el("bulk-summary").value = "";
+  if (el("bulk-nextAction")) el("bulk-nextAction").value = "Follow up if no reply";
+  if (el("bulk-followUpDue")) {
+    const nextWeek = new Date(Date.now() + 7 * 86400000);
+    const dayParts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(nextWeek);
+    el("bulk-followUpDue").value = ["year", "month", "day"].map((k) => dayParts.find((p) => p.type === k)?.value).join("-");
+  }
+  if (el("bulk-overwrite-next-steps")) el("bulk-overwrite-next-steps").checked = false;
+  if (el("bulk-confirm-sent")) el("bulk-confirm-sent").checked = false;
+  setBulkStep(1);
+  renderBulkStep1();
+  const dialog = el("bulk-outreach-dialog");
+  if (dialog && !dialog.open) dialog.showModal();
+}
+
+function closeBulkOutreach() {
+  if (bulkBatch?.inProgress) return;
+  const dialog = el("bulk-outreach-dialog");
+  if (dialog?.open) dialog.close();
+  bulkBatch = null;
+}
+
+function setBulkStep(step) {
+  bulkStep = step;
+  if (el("bulk-step-1")) el("bulk-step-1").hidden = step !== 1;
+  if (el("bulk-step-2")) el("bulk-step-2").hidden = step !== 2;
+  if (el("bulk-step-3")) el("bulk-step-3").hidden = step !== 3;
+  if (el("bulk-step-progress")) el("bulk-step-progress").hidden = step !== 4;
+  if (el("bulk-dialog-close")) el("bulk-dialog-close").disabled = (step === 4 && !!bulkBatch?.inProgress);
+  if (el("bulk-step-eyebrow")) {
+    el("bulk-step-eyebrow").textContent = step === 1 ? "STEP 1 OF 3 · SELECT SCHOOLS"
+      : step === 2 ? "STEP 2 OF 3 · LOG ACTIVITY"
+      : step === 3 ? "STEP 3 OF 3 · REVIEW & CONFIRM"
+      : bulkBatch?.inProgress ? "SAVING OUTREACH" : "OUTREACH RESULTS";
+  }
+}
+
+function toggleBulkSchoolSelection(recordId, shouldSelect) {
+  if (shouldSelect) {
+    if (bulkSelectedIds.size >= 20) {
+      if (el("bulk-step1-feedback")) {
+        el("bulk-step1-feedback").textContent = "Maximum 20 schools can be selected at once.";
+        el("bulk-step1-feedback").className = "editor-feedback error";
+      }
+      renderBulkStep1();
+      return;
+    }
+    bulkSelectedIds.add(recordId);
+  } else {
+    bulkSelectedIds.delete(recordId);
+  }
+  if (el("bulk-step1-feedback")) {
+    el("bulk-step1-feedback").textContent = "";
+    el("bulk-step1-feedback").className = "editor-feedback";
+  }
+  renderBulkStep1();
+}
+
+function updateBulkSelectionHeader() {
+  const count = bulkSelectedIds.size;
+  if (el("bulk-select-count")) el("bulk-select-count").textContent = `${count} of 20 selected`;
+  if (el("bulk-to-step2")) el("bulk-to-step2").disabled = count === 0;
+}
+
+function renderBulkStep1() {
+  const query = (el("bulk-search")?.value || "").trim().toLowerCase();
+  const eligible = getEligibleBulkSchools();
+  const visible = eligible.filter((s) =>
+    [s.schoolName, s.schoolBoard, s.geographicRegion].some((t) => (t || "").toLowerCase().includes(query))
+  );
+
+  const list = el("bulk-school-list");
+  if (list) {
+    list.replaceChildren();
+    for (const school of visible) {
+      const isSelected = bulkSelectedIds.has(school.recordId);
+      const row = document.createElement("label");
+      row.className = `bulk-school-item${isSelected ? " selected" : ""}`;
+      row.setAttribute("data-id", school.recordId);
+
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.checked = isSelected;
+      check.setAttribute("aria-label", `Select ${school.schoolName}`);
+      check.onchange = (e) => {
+        e.stopPropagation();
+        toggleBulkSchoolSelection(school.recordId, check.checked);
+      };
+
+      const info = document.createElement("div");
+      info.className = "bulk-school-item-info";
+      const title = document.createElement("strong");
+      title.textContent = school.schoolName;
+      const meta = document.createElement("p");
+      meta.className = "school-meta";
+      meta.textContent = [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · ") || "Location not listed";
+      info.append(title, meta);
+
+      const badge = schoolBadge(school.stage, school.stage === "Not Contacted" ? "Claimed / not contacted" : school.stage);
+
+      row.append(check, info, badge);
+      list.append(row);
+    }
+  }
+
+  if (el("bulk-empty-selectable")) el("bulk-empty-selectable").hidden = visible.length > 0;
+  updateBulkSelectionHeader();
+}
+
+function renderBulkSummarySuggestions() {
+  const container = el("bulk-summary-suggestion-chips");
+  if (!container) return;
+  const activityType = el("bulk-activityType")?.value || "Outreach";
+  const suggestions = getSummarySuggestions("Email", activityType);
+  container.replaceChildren();
+  for (const item of suggestions) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "suggestion-chip";
+    chip.setAttribute("data-target", "bulk-summary");
+    chip.setAttribute("data-value", item.value);
+    chip.textContent = item.label;
+    chip.onclick = () => {
+      applySuggestion("bulk-summary", item.value);
+      updateBulkSuggestionStates();
+    };
+    container.append(chip);
+  }
+  updateBulkSuggestionStates();
+}
+
+function updateBulkSuggestionStates() {
+  if (typeof document?.querySelectorAll !== "function") return;
+  const chips = document.querySelectorAll("#bulk-outreach-dialog .suggestion-chip");
+  for (const chip of chips) {
+    const targetId = chip.getAttribute?.("data-target");
+    const value = chip.getAttribute?.("data-value");
+    const input = el(targetId);
+    const isMatch = Boolean(input && value && input.value.trim().toLowerCase() === value.trim().toLowerCase());
+    chip.classList?.toggle("selected", isMatch);
+    chip.setAttribute?.("aria-pressed", String(isMatch));
+  }
+}
+
+function prepareBulkStep2() {
+  const count = bulkSelectedIds.size;
+  if (el("bulk-recap-count")) el("bulk-recap-count").textContent = `${count} ${count === 1 ? "school" : "schools"} selected`;
+
+  const selectedSchools = schools.filter((s) => bulkSelectedIds.has(s.recordId));
+  const notContactedCount = selectedSchools.filter((s) => s.stage === "Not Contacted").length;
+  const contactedCount = selectedSchools.length - notContactedCount;
+  const activityType = el("bulk-activityType")?.value || "Outreach";
+
+  const notice = el("bulk-qualification-notice");
+  if (notice) {
+    if (activityType === "Outreach" && contactedCount > 0) {
+      notice.hidden = false;
+      notice.textContent = `Notice: ${contactedCount} of your selected schools were already contacted previously. Choose Follow-Up if you are sending a subsequent email.`;
+    } else if (activityType === "FollowUp" && notContactedCount > 0) {
+      notice.hidden = false;
+      notice.textContent = `Notice: ${notContactedCount} of your selected schools are still "Not Contacted". Choose First Contact if this is your first outreach to them.`;
+    } else {
+      notice.hidden = true;
+      notice.textContent = "";
+    }
+  }
+
+  const existingPlansCount = selectedSchools.filter((s) => Boolean(s.nextAction?.trim() || s.followUpDue?.trim())).length;
+  const overwriteSpan = el("bulk-overwrite-text");
+  if (overwriteSpan) {
+    overwriteSpan.textContent = existingPlansCount > 0
+      ? `Overwrite existing Next Action and Follow-Up Date on schools that already have them (${existingPlansCount} of ${count} schools have existing plans)`
+      : `Overwrite existing Next Action and Follow-Up Date on schools that already have them (0 schools currently have plans)`;
+  }
+
+  renderBulkSummarySuggestions();
+}
+
+function prepareBulkStep3() {
+  const activityType = el("bulk-activityType")?.value || "Outreach";
+  const outcome = el("bulk-outcome")?.value?.trim() || "";
+  const summary = el("bulk-summary")?.value?.trim() || "";
+  const nextAction = el("bulk-nextAction")?.value?.trim() || "";
+  const followUpDue = el("bulk-followUpDue")?.value?.trim() || "";
+  const overwrite = Boolean(el("bulk-overwrite-next-steps")?.checked);
+
+  if (el("bulk-rev-type")) el("bulk-rev-type").textContent = activityType === "FollowUp" ? "Follow-up (Adds 1 to count)" : "First contact (Initial outreach)";
+  if (el("bulk-rev-outcome")) el("bulk-rev-outcome").textContent = outcome;
+  if (el("bulk-rev-summary")) el("bulk-rev-summary").textContent = summary;
+  if (el("bulk-rev-action")) el("bulk-rev-action").textContent = nextAction || "None specified";
+  if (el("bulk-rev-due")) el("bulk-rev-due").textContent = followUpDue || "None scheduled";
+  if (el("bulk-rev-count")) el("bulk-rev-count").textContent = String(bulkSelectedIds.size);
+
+  const list = el("bulk-review-schools-list");
+  if (list) {
+    list.replaceChildren();
+    const selectedSchools = schools.filter((s) => bulkSelectedIds.has(s.recordId));
+    for (const school of selectedSchools) {
+      const item = document.createElement("div");
+      item.className = "bulk-review-item";
+
+      const nameWrap = document.createElement("div");
+      nameWrap.className = "bulk-review-school-name";
+      const name = document.createElement("span");
+      name.textContent = school.schoolName;
+      const meta = document.createElement("span");
+      meta.className = "school-meta";
+      meta.textContent = [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · ");
+      nameWrap.append(name, meta);
+
+      const trans = document.createElement("div");
+      trans.className = "bulk-review-transition";
+
+      const stageTag = document.createElement("span");
+      if (school.stage === "Not Contacted") {
+        stageTag.className = "bulk-review-tag";
+        stageTag.textContent = "Not Contacted → Contacted";
+      } else {
+        stageTag.className = "bulk-review-tag bulk-review-preserved";
+        stageTag.textContent = `${school.stage} (Preserved)`;
+      }
+
+      const countTag = document.createElement("span");
+      countTag.className = "bulk-review-tag bulk-review-preserved";
+      countTag.textContent = activityType === "FollowUp" ? "Count +1" : "Count unchanged";
+
+      const hasPlan = Boolean(school.nextAction?.trim() || school.followUpDue?.trim());
+      const planTag = document.createElement("span");
+      planTag.className = "bulk-review-tag bulk-review-preserved";
+      if (hasPlan && !overwrite) {
+        planTag.textContent = "Existing plan kept";
+      } else if (nextAction || followUpDue) {
+        planTag.textContent = "Plan will update";
+      } else {
+        planTag.textContent = "No plan change";
+      }
+
+      trans.append(stageTag, countTag, planTag);
+      item.append(nameWrap, trans);
+      list.append(item);
+    }
+  }
+
+  if (el("bulk-confirm-sent")) el("bulk-confirm-sent").checked = false;
+  if (el("bulk-submit-save")) {
+    el("bulk-submit-save").disabled = true;
+    el("bulk-submit-save").textContent = `Send & log outreach (${bulkSelectedIds.size} ${bulkSelectedIds.size === 1 ? "school" : "schools"})`;
+  }
+  if (el("bulk-step3-feedback")) el("bulk-step3-feedback").textContent = "";
+}
+
+async function executeBulkBatch(isRetry = false) {
+  if (!credential || !bulkBatch || bulkBatch.inProgress) return;
+  bulkBatch.inProgress = true;
+  bulkBatch.stopped = false;
+  bulkBatch.stopReason = "";
+  setBulkStep(4);
+  updateBulkProgressUI();
+
+  const items = bulkBatch.items;
+  const progressBar = el("bulk-progress-bar");
+  if (progressBar) {
+    progressBar.max = items.length;
+    progressBar.value = items.filter((it) => it.status === "success").length;
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.status === "success" || (isRetry && item.status === "conflict")) continue;
+
+    item.status = "saving";
+    updateBulkProgressUI(i);
+
+    try {
+      if (!item.payload) {
+        let schoolDetail = item.school;
+        try {
+          const detailRes = await apiFetch(`./api/schools/detail?recordId=${encodeURIComponent(item.school.recordId)}`, {
+            headers: { Authorization: `Bearer ${credential}` }, credentials: "omit", cache: "no-store",
+          });
+          const detailData = await detailRes.json();
+          if (detailRes.ok && detailData.record) {
+            schoolDetail = detailData.record;
+          }
+        } catch {
+          // Fallback to cached school summary
+        }
+
+        const payload = {
+          recordId: item.school.recordId,
+          expectedRequestId: schoolDetail.lastRequestId || item.school.lastRequestId || crypto.randomUUID(),
+          requestId: item.requestId,
+          channel: "Email",
+          activityType: bulkBatch.activityType,
+          outcome: bulkBatch.outcome,
+          summary: bulkBatch.summary,
+        };
+
+        if (schoolDetail.stage === "Not Contacted") {
+          payload.stage = "Contacted";
+        }
+
+        const hasExistingAction = Boolean(schoolDetail.nextAction?.trim());
+        const hasExistingDue = Boolean(schoolDetail.followUpDue?.trim());
+
+        if (bulkBatch.overwriteExisting || !hasExistingAction) {
+          if (bulkBatch.nextAction) payload.nextAction = bulkBatch.nextAction;
+        }
+        if (bulkBatch.overwriteExisting || !hasExistingDue) {
+          if (bulkBatch.followUpDue) payload.followUpDue = bulkBatch.followUpDue;
+        }
+
+        item.payload = payload;
+      }
+
+      const response = await apiFetch("./api/activities", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
+        credentials: "omit", cache: "no-store",
+        body: JSON.stringify(item.payload),
+      });
+      const data = await response.json();
+
+      if (response.ok) {
+        item.status = "success";
+        item.error = "";
+        item.code = "SUCCESS";
+      } else if (response.status === 409 && data.code === "CONFLICT_STALE_VERSION") {
+        item.status = "conflict";
+        item.error = "School was updated elsewhere. Changes not applied.";
+        item.code = "CONFLICT_STALE_VERSION";
+      } else if (response.status === 503 && ["WORKBOOK_BLOCKED", "COMMIT_UNCERTAIN"].includes(data.code)) {
+        item.status = data.code === "COMMIT_UNCERTAIN" ? "uncertain" : "blocked";
+        item.error = data.code === "COMMIT_UNCERTAIN"
+          ? "Save status uncertain upstream. Batch stopped to protect workbook."
+          : "Workbook is blocked by coordinator. Batch stopped for safety.";
+        item.code = data.code;
+        bulkBatch.stopped = true;
+        bulkBatch.stopReason = data.message || `Coordinator reported ${data.code}. Batch stopped safely.`;
+        updateBulkProgressUI();
+        break;
+      } else if (response.status === 401 || response.status === 403) {
+        if (data.code === "NOT_OWNER") {
+          item.status = "conflict";
+          item.error = "You can only edit schools assigned to you.";
+          item.code = "NOT_OWNER";
+        } else {
+          item.status = "failed";
+          item.error = "Session expired or access revoked.";
+          item.code = data.code || "AUTH_FAILED";
+          bulkBatch.stopped = true;
+          bulkBatch.stopReason = "Your session expired. Please sign in again.";
+          updateBulkProgressUI();
+          break;
+        }
+      } else {
+        item.status = "failed";
+        item.error = data.message || "Spreadsheet rejected save.";
+        item.code = data.code || "FAILED";
+      }
+    } catch {
+      item.status = "uncertain";
+      item.error = "Connection interrupted during save.";
+      item.code = "CONNECTION_ERROR";
+    }
+
+    if (progressBar) progressBar.value = items.filter((it) => it.status === "success").length;
+    updateBulkProgressUI();
+  }
+
+  bulkBatch.inProgress = false;
+  finalizeBulkBatch();
+}
+
+function updateBulkProgressUI(currentIndex = -1) {
+  if (!bulkBatch) return;
+  const items = bulkBatch.items;
+  const successCount = items.filter((it) => it.status === "success").length;
+  const total = items.length;
+
+  if (el("bulk-progress-status")) {
+    if (bulkBatch.inProgress && currentIndex >= 0 && currentIndex < total) {
+      el("bulk-progress-status").textContent = `Saving ${currentIndex + 1} of ${total}: ${items[currentIndex].school.schoolName}…`;
+    } else if (bulkBatch.inProgress) {
+      el("bulk-progress-status").textContent = `Saving outreach… (${successCount} of ${total} completed)`;
+    } else {
+      el("bulk-progress-status").textContent = `Batch complete: ${successCount} of ${total} schools saved.`;
+    }
+  }
+
+  const list = el("bulk-results-list");
+  if (list) {
+    list.replaceChildren();
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "bulk-result-row";
+
+      const schoolInfo = document.createElement("div");
+      schoolInfo.className = "bulk-result-school";
+      const name = document.createElement("span");
+      name.textContent = item.school.schoolName;
+      const desc = document.createElement("span");
+      desc.className = "bulk-result-desc";
+      desc.textContent = item.status === "saving" ? "Saving outreach to spreadsheet…"
+        : item.status === "success" ? "Outreach recorded in Activity Log"
+        : item.error || "Waiting in queue…";
+      schoolInfo.append(name, desc);
+
+      const pill = document.createElement("span");
+      pill.className = `bulk-status-pill status-${item.status}`;
+      pill.textContent = item.status === "saving" ? "Saving…"
+        : item.status === "success" ? "✓ Saved"
+        : item.status === "conflict" ? "⚠ Conflict"
+        : item.status === "uncertain" ? "⚠ Uncertain"
+        : item.status === "blocked" ? "🛑 Blocked"
+        : item.status === "failed" ? "✕ Failed"
+        : "Pending";
+
+      row.append(schoolInfo, pill);
+      list.append(row);
+    }
+  }
+}
+
+function finalizeBulkBatch() {
+  if (!bulkBatch) return;
+  const items = bulkBatch.items;
+  const successCount = items.filter((it) => it.status === "success").length;
+  const conflictCount = items.filter((it) => it.status === "conflict").length;
+  const retryableCount = items.filter((it) => ["failed", "uncertain", "blocked"].includes(it.status)).length;
+  const total = items.length;
+
+  setBulkStep(4);
+
+  if (bulkBatch.stopped) {
+    if (el("bulk-blocked-alert")) {
+      el("bulk-blocked-alert").hidden = false;
+      if (el("bulk-blocked-message")) el("bulk-blocked-message").textContent = bulkBatch.stopReason || "Batch stopped safely.";
+    }
+  } else {
+    if (el("bulk-blocked-alert")) el("bulk-blocked-alert").hidden = true;
+  }
+
+  if (el("bulk-final-summary")) {
+    if (successCount === total) {
+      el("bulk-final-summary").textContent = `✓ All ${total} schools were saved successfully to Google Sheets.`;
+      el("bulk-final-summary").className = "editor-feedback";
+    } else {
+      el("bulk-final-summary").textContent = `Finished with ${successCount} saved, ${conflictCount} conflicts, and ${retryableCount} failed.`;
+      el("bulk-final-summary").className = retryableCount > 0 ? "editor-feedback error" : "editor-feedback";
+    }
+  }
+
+  if (el("bulk-retry-failed")) {
+    el("bulk-retry-failed").hidden = retryableCount === 0;
+    el("bulk-retry-failed").textContent = `Retry failed saves (${retryableCount})`;
+  }
+
+  if (el("bulk-finish-done")) {
+    el("bulk-finish-done").hidden = false;
+    el("bulk-finish-done").textContent = successCount === total ? "Done" : "Done with remaining";
+  }
+
+  if (successCount > 0) {
+    showSaveToast(`✓ Logged outreach for ${successCount} ${successCount === 1 ? "school" : "schools"}`);
+    refresh();
+  }
+}
+
 function updateWorkspaceHeading() {
   if (el("tab-home")) el("tab-home").textContent = isSupervisor ? "H4 Overview" : "My Outreach";
   el("tab-my-schools").textContent = isSupervisor ? "Schools" : "My Schools";
@@ -788,6 +1281,10 @@ function renderHome() {
   const warm = (s) => ["Interested", "Engaged"].includes(s.stage), booked = (s) => s.stage === "Booked";
   el("overview-panel").hidden = !isSupervisor;
   el("home-filter-label").hidden = isSupervisor;
+  if (el("home-bulk-log")) {
+    el("home-bulk-log").disabled = config?.writesEnabled !== true;
+    el("home-bulk-log").hidden = isSupervisor;
+  }
   el("home-message").textContent = isSupervisor ? "The program at a glance." : "Your next connection starts here.";
   el("home-description").textContent = isSupervisor ? "Track school progress and see where your team needs support." : "Start with today’s follow-ups, then keep your conversations moving.";
   el("home-actions-title").textContent = isSupervisor ? "Needs your attention" : "What to do next";
@@ -1373,6 +1870,84 @@ el("edit-stage")?.addEventListener("change", updateColdWarning);
 el("log-contact-edit")?.addEventListener("click", editSchoolContact);
 el("return-to-activity")?.addEventListener("click", () => returnToActivity(false));
 el("save-contact-return")?.addEventListener("click", saveSchoolEdits);
+el("home-bulk-log")?.addEventListener("click", () => openBulkOutreach());
+el("schools-bulk-log")?.addEventListener("click", () => openBulkOutreach());
+el("bulk-dialog-close")?.addEventListener("click", closeBulkOutreach);
+el("bulk-outreach-dialog")?.addEventListener("cancel", (event) => { event.preventDefault(); closeBulkOutreach(); });
+el("bulk-outreach-dialog")?.addEventListener("click", (event) => {
+  const chip = event.target.closest?.(".suggestion-chip");
+  if (!chip) return;
+  const targetId = chip.getAttribute("data-target");
+  const value = chip.getAttribute("data-value");
+  if (targetId && value) {
+    applySuggestion(targetId, value);
+    updateBulkSuggestionStates();
+  }
+});
+el("bulk-search")?.addEventListener("input", renderBulkStep1);
+el("bulk-clear-selected")?.addEventListener("click", () => { bulkSelectedIds.clear(); renderBulkStep1(); });
+el("bulk-cancel-step1")?.addEventListener("click", closeBulkOutreach);
+el("bulk-to-step2")?.addEventListener("click", () => {
+  if (bulkSelectedIds.size === 0) return;
+  prepareBulkStep2();
+  setBulkStep(2);
+});
+el("bulk-back-to-step1-link")?.addEventListener("click", () => { setBulkStep(1); renderBulkStep1(); });
+el("bulk-back-to-step1")?.addEventListener("click", () => { setBulkStep(1); renderBulkStep1(); });
+el("bulk-activityType")?.addEventListener("change", () => {
+  renderBulkSummarySuggestions();
+  prepareBulkStep2();
+});
+el("bulk-outcome")?.addEventListener("input", updateBulkSuggestionStates);
+el("bulk-summary")?.addEventListener("input", updateBulkSuggestionStates);
+el("bulk-nextAction")?.addEventListener("input", updateBulkSuggestionStates);
+el("bulk-to-step3")?.addEventListener("click", () => {
+  const outcome = el("bulk-outcome")?.value?.trim() || "";
+  const summary = el("bulk-summary")?.value?.trim() || "";
+  if (!outcome || !summary) {
+    if (el("bulk-step2-feedback")) {
+      el("bulk-step2-feedback").textContent = "Add an outcome and a short description before continuing.";
+      el("bulk-step2-feedback").className = "editor-feedback error";
+    }
+    return;
+  }
+  if (el("bulk-step2-feedback")) el("bulk-step2-feedback").textContent = "";
+  prepareBulkStep3();
+  setBulkStep(3);
+});
+el("bulk-back-to-step2")?.addEventListener("click", () => setBulkStep(2));
+function onBulkConfirmUpdate(e) {
+  const isChecked = Boolean(e?.target?.checked ?? el("bulk-confirm-sent")?.checked);
+  if (el("bulk-submit-save")) el("bulk-submit-save").disabled = !isChecked;
+}
+el("bulk-confirm-sent")?.addEventListener("change", onBulkConfirmUpdate);
+el("bulk-confirm-sent")?.addEventListener("click", onBulkConfirmUpdate);
+el("bulk-submit-save")?.addEventListener("click", () => {
+  if (!el("bulk-confirm-sent")?.checked) return;
+  const selectedSchools = schools.filter((s) => bulkSelectedIds.has(s.recordId));
+  bulkBatch = {
+    inProgress: false,
+    stopped: false,
+    stopReason: "",
+    activityType: el("bulk-activityType")?.value || "Outreach",
+    outcome: el("bulk-outcome")?.value?.trim() || "",
+    summary: el("bulk-summary")?.value?.trim() || "",
+    nextAction: el("bulk-nextAction")?.value?.trim() || "",
+    followUpDue: el("bulk-followUpDue")?.value?.trim() || "",
+    overwriteExisting: Boolean(el("bulk-overwrite-next-steps")?.checked),
+    items: selectedSchools.map((school) => ({
+      school,
+      requestId: crypto.randomUUID(),
+      status: "pending",
+      error: "",
+      code: "",
+      payload: null,
+    })),
+  };
+  executeBulkBatch(false);
+});
+el("bulk-retry-failed")?.addEventListener("click", () => executeBulkBatch(true));
+el("bulk-finish-done")?.addEventListener("click", closeBulkOutreach);
 el("refresh").addEventListener("click", refresh);
 el("tab-home")?.addEventListener("click", () => switchTab("home"));
 el("home-refresh")?.addEventListener("click", refresh);
