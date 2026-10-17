@@ -35,6 +35,41 @@ test("outreach API: verified ownership, atomic activity, safe retry, stale prote
   assert.equal(outreach.status, 200); assert.equal(h.demoSheets.tables.Schools[1][26], initialCount + 1);
 });
 
+test("outreach API: accepts all channels (Email, Text, Phone, Visit, Meeting, Social) and rejects invalid channel", async (t) => {
+  const h = await readHarness(t, { ENABLE_REAL_WRITES: "true", GOOGLE_ADAPTER_TEST: "true" });
+  const row = h.demoSheets.tables.Schools[1], token = await h.token();
+  let expectedVersion = row[27];
+  const save = async (body, bearer = token) => {
+    const response = await h.request("/api/activities", { method: "POST", token: bearer, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  };
+
+  // Invalid channel is rejected with 422 INVALID_CHANNEL
+  const invalid = await save({
+    recordId: row[0], expectedRequestId: expectedVersion, requestId: crypto.randomUUID(),
+    channel: "CarrierPigeon", activityType: "FollowUp", outcome: "Sent bird", summary: "Flew over school",
+  });
+  assert.equal(invalid.status, 422);
+  assert.equal(invalid.body.code, "INVALID_CHANNEL");
+
+  // All valid channels are accepted and stored correctly in Activity Log column E (index 4)
+  const channels = ["Text", "Visit", "Meeting", "Social", "Email", "Phone"];
+  for (const ch of channels) {
+    const reqId = crypto.randomUUID();
+    const res = await save({
+      recordId: row[0], expectedRequestId: expectedVersion, requestId: reqId,
+      channel: ch, activityType: "FollowUp", outcome: `Completed ${ch}`, summary: `Outreach via ${ch}`,
+    });
+    assert.equal(res.status, 200, `Expected 200 for channel ${ch}, got ${res.status}`);
+    expectedVersion = reqId;
+
+    const activity = h.demoSheets.tables["Activity Log"].find((item) => item[11] === reqId);
+    assert.ok(activity, `Activity Log entry found for ${ch}`);
+    assert.equal(activity[4], ch, `Channel in Activity Log must be ${ch}`);
+    assert.equal(activity[13], "FollowUp");
+  }
+});
+
 test("school editor: own details, other-student denial and Supervisor access", async (t) => {
   const h = await readHarness(t, { ENABLE_REAL_WRITES: "true", GOOGLE_ADAPTER_TEST: "true" });
   const school = h.demoSheets.tables.Schools[1];

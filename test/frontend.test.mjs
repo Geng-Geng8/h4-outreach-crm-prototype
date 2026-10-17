@@ -1529,40 +1529,46 @@ test("quick summary suggestions: provides Grade 9 Email First Contact pills, sup
   getEl("log-channel").dispatchEvent(new Event("change", { bubbles: true }));
   // Text preserved across channel switch
   assert.equal(getEl("log-summary").value, "Requested an update.");
-  assert.equal(chipsContainer.children.length, 3);
-  assert.equal(chipsContainer.children[0].textContent, "Called the school");
-  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Called the school.");
-  assert.equal(chipsContainer.children[1].textContent, "Left voicemail");
-  assert.equal(chipsContainer.children[1].getAttribute("data-value"), "Left voicemail.");
-  assert.equal(chipsContainer.children[2].textContent, "Discussed workshop opportunities");
-  assert.equal(chipsContainer.children[2].getAttribute("data-value"), "Discussed workshop opportunities.");
+  assert.equal(chipsContainer.children.length, 4);
+  assert.equal(chipsContainer.children[0].textContent, "Called school office");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Called school office.");
+  assert.equal(chipsContainer.children[1].textContent, "Called the school");
+  assert.equal(chipsContainer.children[1].getAttribute("data-value"), "Called the school.");
+  assert.equal(chipsContainer.children[2].textContent, "Left voicemail");
+  assert.equal(chipsContainer.children[2].getAttribute("data-value"), "Left voicemail.");
+  assert.equal(chipsContainer.children[3].textContent, "Discussed workshop opportunities");
+  assert.equal(chipsContainer.children[3].getAttribute("data-value"), "Discussed workshop opportunities.");
 
   // Context-aware update: Switch to Social
   getEl("log-channel").value = "Social";
   getEl("log-channel").dispatchEvent(new Event("change", { bubbles: true }));
   assert.equal(getEl("log-summary").value, "Requested an update.");
-  assert.equal(chipsContainer.children.length, 2);
-  assert.equal(chipsContainer.children[0].textContent, "Sent introductory message");
-  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Sent introductory message.");
-  assert.equal(chipsContainer.children[1].textContent, "Followed up through social media");
-  assert.equal(chipsContainer.children[1].getAttribute("data-value"), "Followed up through social media.");
+  assert.equal(chipsContainer.children.length, 3);
+  assert.equal(chipsContainer.children[0].textContent, "Sent direct message");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Sent direct message.");
+  assert.equal(chipsContainer.children[1].textContent, "Sent introductory message");
+  assert.equal(chipsContainer.children[1].getAttribute("data-value"), "Sent introductory message.");
+  assert.equal(chipsContainer.children[2].textContent, "Followed up through social media");
+  assert.equal(chipsContainer.children[2].getAttribute("data-value"), "Followed up through social media.");
 
   // Context-aware update: Switch to Meeting
   getEl("log-channel").value = "Meeting";
   getEl("log-channel").dispatchEvent(new Event("change", { bubbles: true }));
   assert.equal(getEl("log-summary").value, "Requested an update.");
-  assert.equal(chipsContainer.children.length, 3);
-  assert.equal(chipsContainer.children[0].textContent, "Discussed workshop plans");
-  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Discussed workshop plans.");
-  assert.equal(chipsContainer.children[1].textContent, "Discussed scheduling");
-  assert.equal(chipsContainer.children[1].getAttribute("data-value"), "Discussed scheduling.");
-  assert.equal(chipsContainer.children[2].textContent, "Agreed on next steps");
-  assert.equal(chipsContainer.children[2].getAttribute("data-value"), "Agreed on next steps.");
+  assert.equal(chipsContainer.children.length, 4);
+  assert.equal(chipsContainer.children[0].textContent, "Discussed program delivery");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Discussed program delivery.");
+  assert.equal(chipsContainer.children[1].textContent, "Discussed workshop plans");
+  assert.equal(chipsContainer.children[1].getAttribute("data-value"), "Discussed workshop plans.");
+  assert.equal(chipsContainer.children[2].textContent, "Discussed scheduling");
+  assert.equal(chipsContainer.children[2].getAttribute("data-value"), "Discussed scheduling.");
+  assert.equal(chipsContainer.children[3].textContent, "Agreed on next steps");
+  assert.equal(chipsContainer.children[3].getAttribute("data-value"), "Agreed on next steps.");
 
   // Tapping Meeting pill fills summary
-  chipsContainer.children[2].click();
+  chipsContainer.children[3].click();
   assert.equal(getEl("log-summary").value, "Agreed on next steps.");
-  assert.equal(chipsContainer.children[2].classList.contains("selected"), true);
+  assert.equal(chipsContainer.children[3].classList.contains("selected"), true);
 });
 
 test("Scenario: Grade 9 first email outreach using quick summary suggestion pill saves end-to-end", async (t) => {
@@ -2733,5 +2739,245 @@ test("Supervisor bulk outreach: fails closed if fresh school detail has missing 
   const rowSaved = pills.find((p) => p.schoolName === "Still Owned School");
   assert.equal(rowSaved.pillText, "✓ Saved");
 });
+
+test("Multi-Channel Bulk Outreach: channel selector in Step 2 supports all 6 channels and dynamically updates summary suggestions", async (t) => {
+  const records = [
+    { recordId: "00000000-0000-4000-8000-000000000051", schoolName: "Channel School 1", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v1", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000052", schoolName: "Channel School 2", schoolBoard: "TDSB", geographicRegion: "East", stage: "Contacted", lastRequestId: "v2", canEdit: true },
+  ];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: records, sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  context.openBulkOutreach([records[0].recordId]);
+  getEl("bulk-to-step2").click();
+
+  // Channel defaults to Email
+  const channelSelect = getEl("bulk-channel");
+  assert.equal(channelSelect.value, "Email");
+
+  const chipsContainer = getEl("bulk-summary-suggestion-chips");
+
+  // Verify Email suggestions (Outreach)
+  assert.ok(chipsContainer.children.length > 0);
+  assert.equal(chipsContainer.children[0].textContent, "Introduced H4");
+
+  // Switch to Text
+  channelSelect.value = "Text";
+  channelSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(chipsContainer.children.length, 3);
+  assert.equal(chipsContainer.children[0].textContent, "Texted about workshop opportunities");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Texted about workshop opportunities.");
+  chipsContainer.children[0].click();
+  assert.equal(getEl("bulk-summary").value, "Texted about workshop opportunities.");
+
+  // Switch to Phone
+  channelSelect.value = "Phone";
+  channelSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(chipsContainer.children.length, 4);
+  assert.equal(chipsContainer.children[0].textContent, "Called school office");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Called school office.");
+  chipsContainer.children[0].click();
+  assert.equal(getEl("bulk-summary").value, "Called school office.");
+
+  // Switch to Visit
+  channelSelect.value = "Visit";
+  channelSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(chipsContainer.children.length, 3);
+  assert.equal(chipsContainer.children[0].textContent, "Visited school to introduce H4");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Visited school to introduce H4.");
+  chipsContainer.children[0].click();
+  assert.equal(getEl("bulk-summary").value, "Visited school to introduce H4.");
+
+  // Switch to Meeting
+  channelSelect.value = "Meeting";
+  channelSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(chipsContainer.children.length, 4);
+  assert.equal(chipsContainer.children[0].textContent, "Discussed program delivery");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Discussed program delivery.");
+  chipsContainer.children[0].click();
+  assert.equal(getEl("bulk-summary").value, "Discussed program delivery.");
+
+  // Switch to Social
+  channelSelect.value = "Social";
+  channelSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(chipsContainer.children.length, 3);
+  assert.equal(chipsContainer.children[0].textContent, "Sent direct message");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Sent direct message.");
+  chipsContainer.children[0].click();
+  assert.equal(getEl("bulk-summary").value, "Sent direct message.");
+
+  // Switch to Follow-Up
+  getEl("bulk-activityType").value = "FollowUp";
+  getEl("bulk-activityType").dispatchEvent(new Event("change", { bubbles: true }));
+
+  // Social Follow-Up
+  assert.equal(chipsContainer.children[2].textContent, "Followed up through social media");
+
+  // Text Follow-Up
+  channelSelect.value = "Text";
+  channelSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(chipsContainer.children.length, 2);
+  assert.equal(chipsContainer.children[0].textContent, "Followed up via text");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Followed up via text about workshop opportunities.");
+
+  // Visit Follow-Up
+  channelSelect.value = "Visit";
+  channelSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(chipsContainer.children.length, 2);
+  assert.equal(chipsContainer.children[0].textContent, "Follow-up visit");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Followed up with an in-person school visit.");
+});
+
+test("Multi-Channel Bulk Outreach: saves records with selected channel and validates stage and follow-up invariants", async (t) => {
+  const notContactedRecords = [
+    { recordId: "00000000-0000-4000-8000-000000000061", schoolName: "NC School 1", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v1", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000062", schoolName: "NC School 2", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v2", canEdit: true },
+  ];
+  const contactedRecords = [
+    { recordId: "00000000-0000-4000-8000-000000000063", schoolName: "Contacted School 1", schoolBoard: "TDSB", geographicRegion: "South", stage: "Contacted", followUpCount: 1, lastRequestId: "v3", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000064", schoolName: "Contacted School 2", schoolBoard: "TDSB", geographicRegion: "South", stage: "Interested", followUpCount: 0, lastRequestId: "v4", canEdit: true },
+  ];
+  const allSchools = [...notContactedRecords, ...contactedRecords];
+
+  const activityRequests = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: allSchools, sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) {
+      const match = allSchools.find((s) => url.includes(encodeURIComponent(s.recordId)));
+      return Response.json({ ok: true, record: match || allSchools[0] });
+    }
+    if (url.includes("/api/activities")) {
+      const parsed = JSON.parse(init.body);
+      activityRequests.push(parsed);
+      const match = allSchools.find((s) => s.recordId === parsed.recordId);
+      return Response.json({ ok: true, record: { ...(match || allSchools[0]), lastRequestId: crypto.randomUUID() } });
+    }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  // Part 1: Bulk First Contact via Text Message
+  context.openBulkOutreach(notContactedRecords.map((s) => s.recordId));
+  getEl("bulk-to-step2").click();
+
+  getEl("bulk-channel").value = "Text";
+  getEl("bulk-channel").dispatchEvent(new Event("change", { bubbles: true }));
+  context.applySuggestion("bulk-outcome", "No reply yet");
+  context.applySuggestion("bulk-summary", "Texted about workshop opportunities.");
+
+  getEl("bulk-to-step3").click();
+
+  // Step 3 Activity summary shows Channel "Text Message"
+  assert.equal(getEl("bulk-rev-channel").textContent, "Text Message");
+  assert.equal(getEl("bulk-rev-type").textContent, "First contact (Initial outreach)");
+  assert.equal(getEl("bulk-rev-summary").textContent, "Texted about workshop opportunities.");
+
+  // Confirmation box wording
+  getEl("bulk-confirm-sent").click();
+  getEl("bulk-submit-save").click();
+
+  for (let i = 0; i < 50 && activityRequests.length < 2; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+  assert.equal(activityRequests.length, 2);
+  assert.equal(activityRequests[0].channel, "Text");
+  assert.equal(activityRequests[0].activityType, "Outreach");
+  assert.equal(activityRequests[0].stage, "Contacted");
+  assert.equal(activityRequests[1].channel, "Text");
+  assert.equal(activityRequests[1].stage, "Contacted");
+
+  // Part 2: Bulk Follow-Up via School Visit
+  activityRequests.length = 0;
+  context.openBulkOutreach(contactedRecords.map((s) => s.recordId));
+  getEl("bulk-to-step2").click();
+
+  getEl("bulk-channel").value = "Visit";
+  getEl("bulk-channel").dispatchEvent(new Event("change", { bubbles: true }));
+  getEl("bulk-activityType").value = "FollowUp";
+  getEl("bulk-activityType").dispatchEvent(new Event("change", { bubbles: true }));
+  context.applySuggestion("bulk-outcome", "Spoke with principal");
+  context.applySuggestion("bulk-summary", "Followed up with an in-person school visit.");
+
+  getEl("bulk-to-step3").click();
+
+  // Step 3 Activity summary shows Channel "School Visit"
+  assert.equal(getEl("bulk-rev-channel").textContent, "School Visit");
+  assert.equal(getEl("bulk-rev-type").textContent, "Follow-up (Adds 1 to count)");
+
+  getEl("bulk-confirm-sent").click();
+  getEl("bulk-submit-save").click();
+
+  for (let i = 0; i < 50 && activityRequests.length < 2; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+  assert.equal(activityRequests.length, 2);
+  assert.equal(activityRequests[0].channel, "Visit");
+  assert.equal(activityRequests[0].activityType, "FollowUp");
+  assert.equal(activityRequests[0].stage, undefined, "FollowUp on already contacted school does not force Contacted stage");
+  assert.equal(activityRequests[1].channel, "Visit");
+  assert.equal(activityRequests[1].activityType, "FollowUp");
+});
+
+test("Individual Log Outreach: supports new channels Text and Visit with adaptive suggestions and saves correct payload", async (t) => {
+  const record = { recordId: "00000000-0000-4000-8000-000000000071", schoolName: "Individual School", schoolBoard: "TDSB", geographicRegion: "Central", stage: "Not Contacted", lastRequestId: "v1", canEdit: true };
+  const requests = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ ok: true, record });
+    if (url.includes("/api/activities")) {
+      requests.push(JSON.parse(init.body));
+      return Response.json({ ok: true, record: { ...record, lastRequestId: crypto.randomUUID() } });
+    }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  await context.openSchoolEditor(record.recordId, false, "activity");
+
+  // Verify Text channel suggestions and save
+  getEl("log-channel").value = "Text";
+  getEl("log-channel").dispatchEvent(new Event("change", { bubbles: true }));
+
+  const chipsContainer = getEl("summary-suggestion-chips");
+  assert.equal(chipsContainer.children.length, 3);
+  assert.equal(chipsContainer.children[0].textContent, "Texted about workshop opportunities");
+  chipsContainer.children[0].click();
+  assert.equal(getEl("log-summary").value, "Texted about workshop opportunities.");
+
+  getEl("log-outcome").value = "Waiting on response";
+  await context.saveSchoolEdits({ preventDefault() {} });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].channel, "Text");
+  assert.equal(requests[0].summary, "Texted about workshop opportunities.");
+
+  // Verify Visit channel suggestions and save
+  requests.length = 0;
+  await context.openSchoolEditor(record.recordId, false, "activity");
+  getEl("log-channel").value = "Visit";
+  getEl("log-channel").dispatchEvent(new Event("change", { bubbles: true }));
+
+  assert.equal(chipsContainer.children.length, 3);
+  assert.equal(chipsContainer.children[0].textContent, "Visited school to introduce H4");
+  chipsContainer.children[0].click();
+  assert.equal(getEl("log-summary").value, "Visited school to introduce H4.");
+
+  getEl("log-outcome").value = "Spoke with secretary";
+  await context.saveSchoolEdits({ preventDefault() {} });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].channel, "Visit");
+  assert.equal(requests[0].summary, "Visited school to introduce H4.");
+});
+
 
 

@@ -482,7 +482,7 @@ export class SheetCoordinator extends DurableObject<Env> {
       } else {
         onlyKeys(input, ["requestId", "recordId", "expectedRequestId", "channel", "activityType", "outcome", "summary", "stage", "followUpDue", "nextAction"]);
         channel = text(input.channel, 30);
-        if (!["Email", "Phone", "Follow-Up", "Social", "Meeting", "Reply", "App"].includes(channel)) throw new ApiError(422, "INVALID_CHANNEL");
+        if (!["Email", "Phone", "Follow-Up", "Social", "Meeting", "Reply", "App", "Text", "Visit"].includes(channel)) throw new ApiError(422, "INVALID_CHANNEL");
         activityType = text(input.activityType, 30);
         if (!["Outreach", "FollowUp"].includes(activityType)) throw new ApiError(422, "INVALID_ACTIVITY_TYPE");
         outcome = text(input.outcome, 300); summary = text(input.summary);
