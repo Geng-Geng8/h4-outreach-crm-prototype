@@ -328,19 +328,44 @@ const summarySuggestions = {
       { label: "Requested an update", value: "Requested an update." },
     ],
   },
+  Text: {
+    Outreach: [
+      { label: "Texted about workshop opportunities", value: "Texted about workshop opportunities." },
+      { label: "Introduced H4 via text", value: "Texted to introduce H4 and free dance programs." },
+      { label: "Asked for contact", value: "Texted to ask for the right contact for student programs." },
+    ],
+    FollowUp: [
+      { label: "Followed up via text", value: "Followed up via text about workshop opportunities." },
+      { label: "Checked in", value: "Sent a text check-in regarding our previous message." },
+    ],
+  },
   Phone: [
+    { label: "Called school office", value: "Called school office." },
     { label: "Called the school", value: "Called the school." },
     { label: "Left voicemail", value: "Left voicemail." },
     { label: "Discussed workshop opportunities", value: "Discussed workshop opportunities." },
   ],
-  Social: [
-    { label: "Sent introductory message", value: "Sent introductory message." },
-    { label: "Followed up through social media", value: "Followed up through social media." },
-  ],
+  Visit: {
+    Outreach: [
+      { label: "Visited school to introduce H4", value: "Visited school to introduce H4." },
+      { label: "Dropped off materials", value: "Dropped off H4 introductory materials at the school office." },
+      { label: "Met with office staff", value: "Spoke with front office staff to introduce H4 programs." },
+    ],
+    FollowUp: [
+      { label: "Follow-up visit", value: "Followed up with an in-person school visit." },
+      { label: "Checked in with office", value: "Checked in with school office regarding program delivery." },
+    ],
+  },
   Meeting: [
+    { label: "Discussed program delivery", value: "Discussed program delivery." },
     { label: "Discussed workshop plans", value: "Discussed workshop plans." },
     { label: "Discussed scheduling", value: "Discussed scheduling." },
     { label: "Agreed on next steps", value: "Agreed on next steps." },
+  ],
+  Social: [
+    { label: "Sent direct message", value: "Sent direct message." },
+    { label: "Sent introductory message", value: "Sent introductory message." },
+    { label: "Followed up through social media", value: "Followed up through social media." },
   ],
 };
 
@@ -689,6 +714,7 @@ function openBulkOutreach(preSelected = []) {
   }
 
   if (el("bulk-search")) el("bulk-search").value = "";
+  if (el("bulk-channel")) el("bulk-channel").value = "Email";
   if (el("bulk-activityType")) el("bulk-activityType").value = "Outreach";
   if (el("bulk-outcome")) el("bulk-outcome").value = "No reply yet";
   if (el("bulk-summary")) el("bulk-summary").value = "";
@@ -816,8 +842,9 @@ function renderBulkStep1() {
 function renderBulkSummarySuggestions() {
   const container = el("bulk-summary-suggestion-chips");
   if (!container) return;
+  const channel = el("bulk-channel")?.value || "Email";
   const activityType = el("bulk-activityType")?.value || "Outreach";
-  const suggestions = getSummarySuggestions("Email", activityType);
+  const suggestions = getSummarySuggestions(channel, activityType);
   container.replaceChildren();
   for (const item of suggestions) {
     const chip = document.createElement("button");
@@ -926,6 +953,16 @@ function prepareBulkStep3() {
   const followUpDue = el("bulk-followUpDue")?.value?.trim() || "";
   const overwrite = Boolean(el("bulk-overwrite-next-steps")?.checked);
 
+  const channel = el("bulk-channel")?.value || "Email";
+  const channelLabels = {
+    Email: "Email",
+    Text: "Text Message",
+    Phone: "Phone Call",
+    Visit: "School Visit",
+    Meeting: "Meeting",
+    Social: "Social Media",
+  };
+  if (el("bulk-rev-channel")) el("bulk-rev-channel").textContent = channelLabels[channel] || channel;
   if (el("bulk-rev-type")) el("bulk-rev-type").textContent = activityType === "FollowUp" ? "Follow-up (Adds 1 to count)" : "First contact (Initial outreach)";
   if (el("bulk-rev-outcome")) el("bulk-rev-outcome").textContent = outcome;
   if (el("bulk-rev-summary")) el("bulk-rev-summary").textContent = summary;
@@ -1116,7 +1153,7 @@ async function executeBulkBatch(isRetry = false) {
           recordId: item.school.recordId,
           expectedRequestId: schoolDetail.lastRequestId || item.school.lastRequestId || crypto.randomUUID(),
           requestId: item.requestId,
-          channel: "Email",
+          channel: bulkBatch.channel || "Email",
           activityType: bulkBatch.activityType,
           outcome: bulkBatch.outcome,
           summary: bulkBatch.summary,
@@ -2124,6 +2161,9 @@ el("bulk-to-step2")?.addEventListener("click", () => {
 });
 el("bulk-back-to-step1-link")?.addEventListener("click", () => { setBulkStep(1); renderBulkStep1(); });
 el("bulk-back-to-step1")?.addEventListener("click", () => { setBulkStep(1); renderBulkStep1(); });
+el("bulk-channel")?.addEventListener("change", () => {
+  renderBulkSummarySuggestions();
+});
 el("bulk-activityType")?.addEventListener("change", () => {
   renderBulkSummarySuggestions();
   prepareBulkStep2();
@@ -2192,6 +2232,7 @@ el("bulk-submit-save")?.addEventListener("click", () => {
     inProgress: false,
     stopped: false,
     stopReason: "",
+    channel: el("bulk-channel")?.value || "Email",
     activityType: el("bulk-activityType")?.value || "Outreach",
     outcome: el("bulk-outcome")?.value?.trim() || "",
     summary: el("bulk-summary")?.value?.trim() || "",

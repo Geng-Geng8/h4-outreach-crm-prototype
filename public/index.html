@@ -168,10 +168,12 @@
             <div class="flow-step-inputs">
               <label>Channel
                 <select id="log-channel">
-                  <option>Email</option>
-                  <option>Phone</option>
-                  <option>Social</option>
-                  <option>Meeting</option>
+                  <option value="Email">Email</option>
+                  <option value="Text">Text Message</option>
+                  <option value="Phone">Phone Call</option>
+                  <option value="Visit">School Visit</option>
+                  <option value="Meeting">Meeting</option>
+                  <option value="Social">Social Media</option>
                 </select>
                 <span class="field-help">How you reached out.</span>
               </label>
@@ -294,8 +296,8 @@
       <div class="editor-header">
         <div class="editor-title-wrap">
           <span class="eyebrow" id="bulk-step-eyebrow">STEP 1 OF 3 · SELECT SCHOOLS</span>
-          <h2 id="bulk-dialog-title">Bulk log email outreach</h2>
-          <p id="bulk-dialog-sub" class="editor-meta">Record the same completed email outreach for multiple assigned schools.</p>
+          <h2 id="bulk-dialog-title">Bulk log outreach</h2>
+          <p id="bulk-dialog-sub" class="editor-meta">Record the same completed outreach for multiple assigned schools.</p>
         </div>
         <button type="button" id="bulk-dialog-close" class="editor-close" aria-label="Close bulk outreach">✕</button>
       </div>
@@ -319,7 +321,7 @@
             <button type="button" id="bulk-clear-selected" class="text-button">Clear</button>
           </div>
         </div>
-        <p id="bulk-select-note" class="quiet-note">Select up to 20 schools you emailed. Booked and Cold schools are excluded by default.</p>
+        <p id="bulk-select-note" class="quiet-note">Select up to 20 schools you contacted. Booked and Cold schools are excluded by default.</p>
         <div id="bulk-school-list" class="bulk-school-picker" role="group" aria-label="Select schools for outreach">
           <!-- Filled dynamically by renderBulkStep1() -->
         </div>
@@ -342,15 +344,26 @@
           <div class="step-header">
             <span class="step-num" aria-hidden="true">1</span>
             <div>
-              <h3 class="step-title">Contact type</h3>
-              <p class="step-sub">First contact or routine follow-up</p>
+              <h3 class="step-title">How did you contact them?</h3>
+              <p class="step-sub">Channel and contact type</p>
             </div>
           </div>
           <div class="flow-step-inputs">
-            <label>Activity type
+            <label>Channel
+              <select id="bulk-channel">
+                <option value="Email">Email</option>
+                <option value="Text">Text Message</option>
+                <option value="Phone">Phone Call</option>
+                <option value="Visit">School Visit</option>
+                <option value="Meeting">Meeting</option>
+                <option value="Social">Social Media</option>
+              </select>
+              <span class="field-help">How you reached out.</span>
+            </label>
+            <label>Contact type
               <select id="bulk-activityType">
                 <option value="Outreach">First contact (Initial outreach)</option>
-                <option value="FollowUp">Follow-up (Subsequent email)</option>
+                <option value="FollowUp">Follow-up (Subsequent contact)</option>
               </select>
               <span id="bulk-activityType-help" class="field-help">First contact moves "Not Contacted" schools to Contacted. Follow-up adds 1 to the school's follow-up count.</span>
             </label>
@@ -387,12 +400,12 @@
           <div class="step-header">
             <span class="step-num" aria-hidden="true">3</span>
             <div>
-              <h3 class="step-title">What did you send?</h3>
+              <h3 class="step-title">What did you do or discuss?</h3>
               <p class="step-sub">A brief note for your team</p>
             </div>
           </div>
           <label class="editor-wide">Summary
-            <textarea id="bulk-summary" maxlength="4000" rows="3" placeholder="Briefly describe what you emailed." required></textarea>
+            <textarea id="bulk-summary" maxlength="4000" rows="3" placeholder="Briefly describe what you did or discussed." required></textarea>
           </label>
           <div class="suggestion-group editor-wide" role="group" aria-label="Summary suggestions">
             <span class="suggestion-label">Suggestions:</span>
@@ -445,7 +458,7 @@
         <div class="bulk-review-summary-card">
           <h3 class="review-card-title">Activity summary</h3>
           <dl class="review-dl">
-            <div><dt>Channel</dt><dd>Email</dd></div>
+            <div><dt>Channel</dt><dd id="bulk-rev-channel">Email</dd></div>
             <div><dt>Activity type</dt><dd id="bulk-rev-type"></dd></div>
             <div><dt>Outcome</dt><dd id="bulk-rev-outcome"></dd></div>
             <div><dt>Summary</dt><dd id="bulk-rev-summary"></dd></div>
@@ -465,9 +478,9 @@
         <div class="bulk-confirm-box">
           <label class="bulk-confirm-label">
             <input id="bulk-confirm-sent" type="checkbox">
-            <strong>I confirm that these emails were already sent from my email account.</strong>
+            <strong>I confirm these outreach activities were completed.</strong>
           </label>
-          <p class="field-help quiet-note">Opening an email composer does not count as sending outreach. Only log outreach you have already completed.</p>
+          <p class="field-help quiet-note">The CRM records completed activities. It does not send messages or schedule visits. Only log outreach you have already completed.</p>
         </div>
 
         <div class="editor-actions">
