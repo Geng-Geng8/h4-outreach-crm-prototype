@@ -508,7 +508,8 @@ function renderSchoolContacts(contacts = []) {
     const card = document.createElement("div");
     card.className = `contact-item-card${c.isPrimary ? " is-primary" : ""}`;
     card.setAttribute("role", "listitem");
-    card.dataset.contactId = c.contactId;
+    card.setAttribute("data-contact-id", c.contactId);
+    if (card.dataset) card.dataset.contactId = c.contactId;
 
     const main = document.createElement("div");
     main.className = "contact-main";
@@ -626,31 +627,55 @@ function renderSchoolContacts(contacts = []) {
   }
 }
 
+let unresolvedContactOp = null;
+
 function openContactForm(contactToEdit = null) {
+  if (unresolvedContactOp) {
+    if (unresolvedContactOp.recordId !== editing?.id) {
+      editorFeedback(`A contact save for "${unresolvedContactOp.schoolName || "another school"}" is pending verification. Please resolve or retry that operation first.`, "error");
+      return;
+    }
+    const isSameTarget = (
+      (unresolvedContactOp.action === "update" && contactToEdit && unresolvedContactOp.contactId === contactToEdit.contactId) ||
+      (unresolvedContactOp.action === "create" && !contactToEdit)
+    );
+    if (!isSameTarget) {
+      editorFeedback("An uncertain contact save is already pending verification. Please retry or resolve the pending operation first.", "error");
+      return;
+    }
+  }
+
   const panel = el("contact-form-panel");
   const addBtn = el("contact-add-btn");
   if (!panel) return;
   panel.hidden = false;
   if (addBtn) addBtn.hidden = true;
 
-  editingContactId = contactToEdit ? contactToEdit.contactId : null;
-  el("contact-form-heading").textContent = contactToEdit ? "Edit contact" : "Add contact";
+  editingContactId = contactToEdit ? contactToEdit.contactId : (unresolvedContactOp?.contactId || null);
+  const isRetry = Boolean(unresolvedContactOp && unresolvedContactOp.recordId === editing?.id);
+  el("contact-form-heading").textContent = isRetry ? "Retry contact save" : (contactToEdit ? "Edit contact" : "Add contact");
 
-  el("cform-name").value = contactToEdit?.name || "";
-  el("cform-role").value = contactToEdit?.role || "";
-  el("cform-category").value = contactToEdit?.category || "Administration";
-  el("cform-gradeRange").value = contactToEdit?.gradeRange || "";
-  el("cform-programGroup").value = contactToEdit?.programGroup || "";
-  el("cform-email").value = contactToEdit?.email || "";
-  el("cform-phone").value = contactToEdit?.phone || "";
-  el("cform-notes").value = contactToEdit?.notes || "";
+  const draft = (unresolvedContactOp && unresolvedContactOp.recordId === editing?.id) ? unresolvedContactOp.formDraft : null;
+  el("cform-name").value = draft ? draft.name : (contactToEdit?.name || "");
+  el("cform-role").value = draft ? draft.role : (contactToEdit?.role || "");
+  el("cform-category").value = draft ? draft.category : (contactToEdit?.category || "Administration");
+  el("cform-gradeRange").value = draft ? draft.gradeRange : (contactToEdit?.gradeRange || "");
+  el("cform-programGroup").value = draft ? draft.programGroup : (contactToEdit?.programGroup || "");
+  el("cform-email").value = draft ? draft.email : (contactToEdit?.email || "");
+  el("cform-phone").value = draft ? draft.phone : (contactToEdit?.phone || "");
+  el("cform-notes").value = draft ? draft.notes : (contactToEdit?.notes || "");
 
   const isPrimaryBox = el("cform-isPrimary");
   if (isPrimaryBox) {
-    isPrimaryBox.checked = contactToEdit ? Boolean(contactToEdit.isPrimary) : (editing?.contacts?.length === 0);
+    isPrimaryBox.checked = draft ? Boolean(draft.isPrimary) : (contactToEdit ? Boolean(contactToEdit.isPrimary) : (editing?.contacts?.length === 0));
   }
 
   updateStudentPrivacyCallout();
+  const saveBtn = el("cform-save-btn");
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = isRetry ? "Retry save" : "Save contact";
+  }
   el("cform-name").focus();
 }
 
@@ -662,8 +687,8 @@ const CONSUMER_EMAIL_DOMAINS = new Set([
 ]);
 
 function closeContactForm(force = false) {
-  if (editing?.pendingContactOp && !force) {
-    editorFeedback("An uncertain contact save is pending. Use Retry save or reload school values to discard.", "error");
+  if (unresolvedContactOp && !force) {
+    editorFeedback("An uncertain contact save is pending. Use Retry save to check safely; your draft is kept.", "error");
     return;
   }
   const panel = el("contact-form-panel");
@@ -671,7 +696,6 @@ function closeContactForm(force = false) {
   if (panel) panel.hidden = true;
   if (addBtn) addBtn.hidden = false;
   editingContactId = null;
-  if (editing) editing.pendingContactOp = null;
   const saveBtn = el("cform-save-btn");
   if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save contact"; }
 }
@@ -729,22 +753,46 @@ async function saveContactFromForm() {
     }
   }
 
+  const action = editingContactId ? "update" : "create";
+
+  // Prevent a different contact operation from replacing an unresolved one
+  if (unresolvedContactOp) {
+    const isSame = (
+      unresolvedContactOp.recordId === editing.id &&
+      unresolvedContactOp.action === action &&
+      (!unresolvedContactOp.contactId || unresolvedContactOp.contactId === editingContactId)
+    );
+    if (!isSame) {
+      editorFeedback(`A contact save for "${unresolvedContactOp.schoolName || "another school"}" is pending verification. You must retry or resolve it before performing other contact operations.`, "error");
+      return;
+    }
+  }
+
   const saveBtn = el("cform-save-btn");
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
   editorFeedback("Saving contact…");
 
-  const action = editingContactId ? "update" : "create";
-  if (!editing.pendingContactOp) {
-    editing.pendingContactOp = {
+  if (!unresolvedContactOp) {
+    unresolvedContactOp = {
       requestId: crypto.randomUUID(),
       recordId: editing.id,
+      schoolName: editing.original?.schoolName || "",
       expectedRequestId: editing.original.lastRequestId,
       action,
       contactId: editingContactId || undefined,
       contact: { name, role, category, gradeRange, programGroup, email, phone, notes, isPrimary },
+      formDraft: { name, role, category, gradeRange, programGroup, email, phone, notes, isPrimary },
     };
   }
-  const payload = editing.pendingContactOp;
+  editing.pendingContactOp = unresolvedContactOp;
+  const payload = {
+    requestId: unresolvedContactOp.requestId,
+    recordId: unresolvedContactOp.recordId,
+    expectedRequestId: unresolvedContactOp.expectedRequestId,
+    action: unresolvedContactOp.action,
+    contactId: unresolvedContactOp.contactId,
+    contact: unresolvedContactOp.contact,
+  };
 
   try {
     const res = await apiFetch("./api/schools/contacts", {
@@ -756,16 +804,19 @@ async function saveContactFromForm() {
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 409 && data.code === "CONFLICT_STALE_VERSION") {
+        unresolvedContactOp = null;
         editing.pendingContactOp = null;
         editing.stale = true;
         editorFeedback("School was modified elsewhere. Your draft is kept; reload saved values before saving.", "error");
       } else if (res.status === 401 || res.status === 403) {
+        unresolvedContactOp = null;
         editing.pendingContactOp = null;
         forgetSession(); status("Your access changed. Please sign in again.");
         el("google-button").hidden = false;
         if (config?.ready) await showGoogleButton();
         return;
       } else if (res.status === 422 || res.status === 404 || res.status === 409) {
+        unresolvedContactOp = null;
         editing.pendingContactOp = null;
         editorFeedback(data.message || "Failed to save contact. Please check the fields and try again.", "error");
       } else {
@@ -774,6 +825,7 @@ async function saveContactFromForm() {
       return;
     }
 
+    unresolvedContactOp = null;
     editing.pendingContactOp = null;
     editing.original.lastRequestId = data.record.lastRequestId;
     editing.original.contactName = data.record.contactName;
@@ -807,28 +859,50 @@ async function saveContactFromForm() {
     editorFeedback("Connection interrupted. Use Retry save; your draft is kept.", "error");
   } finally {
     if (saveBtn) {
-      saveBtn.disabled = !!editing.stale;
-      saveBtn.textContent = editing.pendingContactOp ? "Retry save" : "Save contact";
+      saveBtn.disabled = !!editing?.stale;
+      saveBtn.textContent = unresolvedContactOp ? "Retry save" : "Save contact";
     }
     if (el("editor-reload")) {
-      el("editor-reload").disabled = Boolean(editing.pendingContactOp || editing.pending);
+      el("editor-reload").disabled = Boolean(unresolvedContactOp || editing?.pending);
     }
   }
 }
 
 async function setPrimaryContact(contactId) {
   if (!editing || !credential || editing.busy) return;
+
+  // Prevent a different contact operation from replacing an unresolved one
+  if (unresolvedContactOp) {
+    const isSame = (
+      unresolvedContactOp.recordId === editing.id &&
+      unresolvedContactOp.action === "set_primary" &&
+      unresolvedContactOp.contactId === contactId
+    );
+    if (!isSame) {
+      editorFeedback(`A contact operation is pending verification (${unresolvedContactOp.schoolName || "previous school"}). You must retry or resolve it before performing other contact operations.`, "error");
+      return;
+    }
+  }
+
   editorFeedback("Setting primary contact…");
-  if (!editing.pendingContactOp || editing.pendingContactOp.action !== "set_primary" || editing.pendingContactOp.contactId !== contactId) {
-    editing.pendingContactOp = {
+  if (!unresolvedContactOp) {
+    unresolvedContactOp = {
       requestId: crypto.randomUUID(),
       recordId: editing.id,
+      schoolName: editing.original?.schoolName || "",
       expectedRequestId: editing.original.lastRequestId,
       action: "set_primary",
       contactId,
     };
   }
-  const payload = editing.pendingContactOp;
+  editing.pendingContactOp = unresolvedContactOp;
+  const payload = {
+    requestId: unresolvedContactOp.requestId,
+    recordId: unresolvedContactOp.recordId,
+    expectedRequestId: unresolvedContactOp.expectedRequestId,
+    action: unresolvedContactOp.action,
+    contactId: unresolvedContactOp.contactId,
+  };
 
   try {
     const res = await apiFetch("./api/schools/contacts", {
@@ -840,12 +914,14 @@ async function setPrimaryContact(contactId) {
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 409 || res.status === 422 || res.status === 404 || res.status === 401 || res.status === 403) {
+        unresolvedContactOp = null;
         editing.pendingContactOp = null;
       }
       editorFeedback(data.message || "Failed to set primary contact.", "error");
       return;
     }
 
+    unresolvedContactOp = null;
     editing.pendingContactOp = null;
     editing.original.lastRequestId = data.record.lastRequestId;
     editing.original.contactName = data.record.contactName;
@@ -865,23 +941,45 @@ async function setPrimaryContact(contactId) {
   } catch (err) {
     editorFeedback("Connection interrupted. Retry setting primary contact; your action is kept.", "error");
   } finally {
-    if (el("editor-reload")) el("editor-reload").disabled = Boolean(editing.pendingContactOp || editing.pending);
+    if (el("editor-reload")) el("editor-reload").disabled = Boolean(unresolvedContactOp || editing?.pending);
   }
 }
 
 async function deactivateContact(contactId) {
   if (!editing || !credential || editing.busy) return;
+
+  // Prevent a different contact operation from replacing an unresolved one
+  if (unresolvedContactOp) {
+    const isSame = (
+      unresolvedContactOp.recordId === editing.id &&
+      unresolvedContactOp.action === "deactivate" &&
+      unresolvedContactOp.contactId === contactId
+    );
+    if (!isSame) {
+      editorFeedback(`A contact operation is pending verification (${unresolvedContactOp.schoolName || "previous school"}). You must retry or resolve it before performing other contact operations.`, "error");
+      return;
+    }
+  }
+
   editorFeedback("Deactivating contact…");
-  if (!editing.pendingContactOp || editing.pendingContactOp.action !== "deactivate" || editing.pendingContactOp.contactId !== contactId) {
-    editing.pendingContactOp = {
+  if (!unresolvedContactOp) {
+    unresolvedContactOp = {
       requestId: crypto.randomUUID(),
       recordId: editing.id,
+      schoolName: editing.original?.schoolName || "",
       expectedRequestId: editing.original.lastRequestId,
       action: "deactivate",
       contactId,
     };
   }
-  const payload = editing.pendingContactOp;
+  editing.pendingContactOp = unresolvedContactOp;
+  const payload = {
+    requestId: unresolvedContactOp.requestId,
+    recordId: unresolvedContactOp.recordId,
+    expectedRequestId: unresolvedContactOp.expectedRequestId,
+    action: unresolvedContactOp.action,
+    contactId: unresolvedContactOp.contactId,
+  };
 
   try {
     const res = await apiFetch("./api/schools/contacts", {
@@ -893,12 +991,14 @@ async function deactivateContact(contactId) {
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 409 || res.status === 422 || res.status === 404 || res.status === 401 || res.status === 403) {
+        unresolvedContactOp = null;
         editing.pendingContactOp = null;
       }
       editorFeedback(data.message || "Failed to deactivate contact.", "error");
       return;
     }
 
+    unresolvedContactOp = null;
     editing.pendingContactOp = null;
     editing.original.lastRequestId = data.record.lastRequestId;
     editing.original.contactName = data.record.contactName;
@@ -923,21 +1023,24 @@ async function deactivateContact(contactId) {
   } catch (err) {
     editorFeedback("Connection interrupted. Retry deactivating contact; your action is kept.", "error");
   } finally {
-    if (el("editor-reload")) el("editor-reload").disabled = Boolean(editing.pendingContactOp || editing.pending);
+    if (el("editor-reload")) el("editor-reload").disabled = Boolean(unresolvedContactOp || editing?.pending);
   }
 }
 
 async function openSchoolEditor(id, reload = false, mode = "details") {
   if (!credential) return;
+  if (reload && unresolvedContactOp && unresolvedContactOp.recordId === id) {
+    unresolvedContactOp = null;
+  }
   const retainedActivity = reload && mode === "activity" && editing?.id === id ? outreachValues() : null;
   const session = sessionVersion, seq = ++editorSeq;
   editorRead?.abort(); editorRead = new AbortController();
-  editing = { id, mode, original: null, pending: null, busy: false, pendingContactOp: null };
+  editing = { id, mode, original: null, pending: null, busy: false, pendingContactOp: unresolvedContactOp?.recordId === id ? unresolvedContactOp : null };
   el("editor-kind").textContent = mode === "activity" ? "LOG OUTREACH" : "SCHOOL DETAILS";
   el("outreach-fields").hidden = mode !== "activity";
   for (const field of detailOnlyFields) el(`field-${field}`).hidden = mode === "activity";
   if (el("contacts-management")) el("contacts-management").hidden = mode === "activity";
-  closeContactForm();
+  closeContactForm(true);
   if (el("activity-step-5")) el("activity-step-5").classList.toggle("flow-step", mode === "activity");
   if (el("activity-step-5-header")) el("activity-step-5-header").hidden = mode !== "activity";
   if (el("return-to-activity-container")) el("return-to-activity-container").hidden = mode !== "details" || !editDrafts.has(`activity:${id}`);
@@ -1009,12 +1112,26 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     updateColdWarning();
     const staleDraft = draft?.original && draft.original.lastRequestId !== data.record.lastRequestId && !editing.pending;
     editing.stale = !!staleDraft;
-    editorFeedback(staleDraft ? "Your draft is kept, but saved information changed. Reload school values and review before saving." : retainedActivity ? "Latest school values loaded. Your outreach text is kept; review stage and follow-up before saving." : draft ? "Your unsaved draft was restored." : "Changes save to the test spreadsheet.", staleDraft ? "error" : "info");
+
+    if (unresolvedContactOp && unresolvedContactOp.recordId === id && mode === "details") {
+      editing.pendingContactOp = unresolvedContactOp;
+      if (unresolvedContactOp.action === "create" || unresolvedContactOp.action === "update") {
+        openContactForm(unresolvedContactOp.contactId ? { contactId: unresolvedContactOp.contactId, ...unresolvedContactOp.formDraft } : null);
+        editorFeedback("An uncertain contact save is pending. Use Retry save to check safely; your draft is kept.", "error");
+      } else {
+        editorFeedback(`An uncertain contact ${unresolvedContactOp.action === "set_primary" ? "primary update" : "deactivation"} is pending. Click Retry to complete safely.`, "error");
+      }
+    } else if (unresolvedContactOp && unresolvedContactOp.recordId !== id) {
+      editorFeedback(`Notice: A contact save for "${unresolvedContactOp.schoolName || "another school"}" is pending verification.`, "info");
+    } else {
+      editorFeedback(staleDraft ? "Your draft is kept, but saved information changed. Reload school values and review before saving." : retainedActivity ? "Latest school values loaded. Your outreach text is kept; review stage and follow-up before saving." : draft ? "Your unsaved draft was restored." : "Changes save to the test spreadsheet.", staleDraft ? "error" : "info");
+    }
+
     editorInputs(!!editing.pending);
     renderSummarySuggestions();
     updateSuggestionStates();
     el("editor-save").disabled = !!staleDraft; el("editor-save").textContent = editing.pending ? "Retry save" : editorSaveLabel(editing);
-    el("editor-reload").disabled = Boolean(editing.pending || editing.pendingContactOp);
+    el("editor-reload").disabled = Boolean(editing.pending || unresolvedContactOp);
   } catch (error) {
     if (session !== sessionVersion || seq !== editorSeq || error.name === "AbortError") return;
     editorFeedback(error.message, "error");

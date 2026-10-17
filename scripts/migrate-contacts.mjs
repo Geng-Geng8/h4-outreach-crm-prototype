@@ -1,5 +1,24 @@
-// Idempotent migration script: backfills existing school-level contacts into the Contacts tab.
+// Idempotent, non-destructive migration script: backfills existing school-level contacts into the Contacts tab.
 // Preserves existing data, skips already-migrated schools, and guarantees zero duplicate contacts.
+// Never overwrites populated rows, even when blank rows (gaps) exist between records.
+//
+// SAFE DEPLOYMENT & TEST-WORKBOOK CUTOVER SEQUENCE:
+// 1. Tab Preparation:
+//    Ensure the 'Contacts' tab exists in the test workbook with standard A1:N1 headers (matching HEADERS.Contacts).
+// 2. Backend Deployment:
+//    Deploy Worker code from PR #11 containing contact CRUD and one-source-of-truth synchronization.
+//    Once deployed, any legacy /api/schools/update will automatically synchronize with Contacts.
+// 3. Dry-Run Migration:
+//    Run 'node scripts/migrate-contacts.mjs' to inspect schools to be backfilled and their non-destructive row allocations.
+// 4. Safe Cutover / Active Write Protection:
+//    Run migration during a designated quiet window (or before enabling the School Contacts UI for users).
+//    The migration script takes a fresh pre-commit snapshot to verify no concurrent contact writes occurred.
+// 5. Live Migration Commit:
+//    Run 'node scripts/migrate-contacts.mjs --commit'.
+//    The script writes non-overlapping ranges strictly to verified empty rows, preserving all populated rows and gaps.
+// 6. User-Facing UI Enablement:
+//    Verify migration output on the test spreadsheet, then enable School Contacts UI controls in the web app.
+
 import { randomUUID } from "node:crypto";
 import { C, ContactCol } from "../src/schema.ts";
 
@@ -49,7 +68,61 @@ export async function planMigration(snapshot) {
     });
   }
 
+  // Non-destructive row allocation:
+  // Inspect candidate rows starting from row 2.
+  // Any row that contains ANY non-empty cell is skipped and preserved, even when gaps exist.
+  let candidateRow = 2;
+  for (const item of planned) {
+    while ((snapshot.Contacts?.[candidateRow - 1] ?? []).some((cell) => String(cell ?? "").trim() !== "")) {
+      candidateRow++;
+    }
+    item.targetRow = candidateRow;
+    candidateRow++;
+  }
+
   return planned;
+}
+
+export function buildMigrationRanges(planned) {
+  if (!planned || planned.length === 0) return [];
+  const sorted = [...planned].sort((a, b) => a.targetRow - b.targetRow);
+  const ranges = [];
+  let currentGroup = [];
+  let startRow = null;
+  let prevRow = null;
+
+  for (const item of sorted) {
+    const rowValues = [
+      item.contactId, item.recordId, item.schoolName, item.name, item.role,
+      item.category, item.gradeRange, item.programGroup, item.email, item.phone,
+      item.notes, item.isPrimary, item.active, item.updatedAt,
+    ];
+    if (startRow === null) {
+      startRow = item.targetRow;
+      prevRow = item.targetRow;
+      currentGroup = [rowValues];
+    } else if (item.targetRow === prevRow + 1) {
+      currentGroup.push(rowValues);
+      prevRow = item.targetRow;
+    } else {
+      ranges.push({
+        range: `'Contacts'!A${startRow}:N${prevRow}`,
+        values: currentGroup,
+      });
+      startRow = item.targetRow;
+      prevRow = item.targetRow;
+      currentGroup = [rowValues];
+    }
+  }
+
+  if (startRow !== null) {
+    ranges.push({
+      range: `'Contacts'!A${startRow}:N${prevRow}`,
+      values: currentGroup,
+    });
+  }
+
+  return ranges;
 }
 
 if (process.argv[1] && process.argv[1].endsWith("migrate-contacts.mjs")) {
@@ -77,29 +150,39 @@ if (process.argv[1] && process.argv[1].endsWith("migrate-contacts.mjs")) {
 
   console.log(`Found ${planned.length} schools with legacy contact information needing backfill.`);
   for (const p of planned) {
-    console.log(`  - ${p.schoolName}: ${p.name} (${p.role}) <${p.email || "no email"}>`);
+    console.log(`  - Row ${p.targetRow}: ${p.schoolName} -> ${p.name} (${p.role}) <${p.email || "no email"}>`);
   }
 
   if (!isCommit) {
     console.log("\nDry-run completed. Re-run with --commit to apply these contacts to the sheet.");
   } else if (planned.length > 0) {
-    console.log(`\nWriting ${planned.length} contacts to Contacts tab...`);
-    let startRow = 2;
-    while ((snapshot.Contacts?.[startRow - 1] ?? []).some((cell) => cell !== "")) startRow++;
-    const endRow = startRow + planned.length - 1;
-    const values = planned.map((p) => [
-      p.contactId, p.recordId, p.schoolName, p.name, p.role,
-      p.category, p.gradeRange, p.programGroup, p.email, p.phone,
-      p.notes, p.isPrimary, p.active, p.updatedAt,
-    ]);
+    // Race-condition prevention: verify no active concurrent contact writes occurred
+    console.log("\nVerifying spreadsheet state hasn't changed before committing...");
+    const preWriteSnapshot = await coordinator.snapshot();
+    const recheckedPlanned = await planMigration(preWriteSnapshot);
+    const hasConflict = (
+      recheckedPlanned.length !== planned.length ||
+      recheckedPlanned.some((rp, idx) => rp.recordId !== planned[idx].recordId || rp.targetRow !== planned[idx].targetRow)
+    );
+    if (hasConflict) {
+      console.error("ABORT: Concurrent modification detected in Contacts tab during migration. Re-run migration after active writes complete.");
+      process.exitCode = 1;
+      process.exit(1);
+    }
+
+    const ranges = buildMigrationRanges(planned);
+    console.log(`Writing ${planned.length} contacts across ${ranges.length} non-destructive range(s)...`);
+    for (const r of ranges) {
+      console.log(`  - Writing range: ${r.range} (${r.values.length} contact(s))`);
+    }
 
     const res = await coordinator.request("POST", "values:batchUpdate", {
       valueInputOption: "RAW",
-      data: [{ range: `'Contacts'!A${startRow}:N${endRow}`, values }],
+      data: ranges,
     });
 
     if (res.ok) {
-      console.log(`✓ Successfully migrated ${planned.length} contacts!`);
+      console.log(`✓ Successfully migrated ${planned.length} contacts non-destructively!`);
     } else {
       console.error(`Failed to write migration: HTTP ${res.status}`);
       process.exitCode = 1;

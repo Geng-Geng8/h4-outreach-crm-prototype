@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { harness, C, ACTOR, OTHER, SUPERVISOR, RECORD, VERSION } from "./harness.mjs";
 import { ContactCol, HEADERS } from "../src/schema.ts";
-import { planMigration } from "../scripts/migrate-contacts.mjs";
+import { planMigration, buildMigrationRanges } from "../scripts/migrate-contacts.mjs";
 
 const CONTACTS_URL = "/api/schools/contacts";
 const DETAIL_URL = (id) => `/api/schools/detail?recordId=${encodeURIComponent(id)}`;
@@ -264,6 +264,69 @@ test("planMigration: idempotently identifies legacy contacts and skips existing 
   assert.equal(plan[0].email, "bob@beta.test");
   assert.equal(plan[0].isPrimary, "TRUE");
   assert.equal(plan[0].active, "TRUE");
+});
+
+test("planMigration: non-destructively assigns rows skipping populated rows separated by gaps", async () => {
+  function makeSchool(id, name, contactName, email) {
+    const row = Array(32).fill("");
+    row[C.id] = id;
+    row[C.name] = name;
+    row[C.contactName] = contactName;
+    row[C.contactRole] = "Principal";
+    row[C.email] = email;
+    return row;
+  }
+
+  // Synthetic snapshot with Contacts having populated rows separated by blank rows (gaps)
+  // Row 1: Header
+  // Row 2: Populated contact (rec-1)
+  // Row 3: Blank gap
+  // Row 4: Populated contact (rec-2)
+  // Row 5: Blank gap
+  // Row 6: Populated contact (rec-3)
+  const snapshot = {
+    Schools: [
+      [...HEADERS.Schools],
+      makeSchool("rec-1", "Alpha School", "Jane Principal", "jane@alpha.test"),
+      makeSchool("rec-2", "Beta School", "Bob VP", "bob@beta.test"),
+      makeSchool("rec-3", "Gamma School", "Grace Head", "grace@gamma.test"),
+      makeSchool("rec-4", "Delta School", "Danielle Admin", "danielle@delta.test"),
+      makeSchool("rec-5", "Epsilon School", "Evan Coord", "evan@epsilon.test"),
+    ],
+    Contacts: [
+      [...HEADERS.Contacts],
+      ["c-1", "rec-1", "Alpha School", "Jane Principal", "Principal", "Administration", "", "Office", "jane@alpha.test", "", "Existing", "TRUE", "TRUE", "2026-10-15"],
+      ["", "", "", "", "", "", "", "", "", "", "", "", "", ""], // Row 3: Blank gap
+      ["c-2", "rec-2", "Beta School", "Bob VP", "VP", "Administration", "", "Office", "bob@beta.test", "", "Existing", "TRUE", "TRUE", "2026-10-15"], // Row 4: Populated
+      ["", "", "", "", "", "", "", "", "", "", "", "", "", ""], // Row 5: Blank gap
+      ["c-3", "rec-3", "Gamma School", "Grace Head", "Head", "Administration", "", "Office", "grace@gamma.test", "", "Existing", "TRUE", "TRUE", "2026-10-15"], // Row 6: Populated
+    ],
+  };
+
+  const plan = await planMigration(snapshot);
+  assert.equal(plan.length, 2);
+  assert.equal(plan[0].recordId, "rec-4");
+  assert.equal(plan[0].targetRow, 3, "First planned contact must fill the blank gap at row 3");
+  assert.equal(plan[1].recordId, "rec-5");
+  assert.equal(plan[1].targetRow, 5, "Second planned contact must skip populated row 4 and fill blank gap at row 5");
+
+  const ranges = buildMigrationRanges(plan);
+  assert.equal(ranges.length, 2);
+  assert.equal(ranges[0].range, "'Contacts'!A3:N3");
+  assert.equal(ranges[1].range, "'Contacts'!A5:N5");
+
+  // Verify that populated rows 2, 4, 6 are never included in any write range
+  const touchedRows = new Set();
+  for (const r of ranges) {
+    const match = /^'Contacts'!A(\d+):N(\d+)$/.exec(r.range);
+    assert.ok(match);
+    for (let row = Number(match[1]); row <= Number(match[2]); row++) {
+      touchedRows.add(row);
+    }
+  }
+  assert.equal(touchedRows.has(2), false, "Row 2 must not be overwritten");
+  assert.equal(touchedRows.has(4), false, "Row 4 must not be overwritten");
+  assert.equal(touchedRows.has(6), false, "Row 6 must not be overwritten");
 });
 
 test("operator recovery: contacts write committed with lost ack reconciles with Contacts range evidence", async (t) => {
