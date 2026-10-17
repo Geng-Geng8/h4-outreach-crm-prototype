@@ -2116,15 +2116,22 @@ test("Bulk Log Outreach: closing with uncertain saves requires confirmation and 
   // Reload note is visible
   assert.match(getEl("bulk-reload-note").textContent, /Session & reload limit/);
 
-  // Attempting to close with confirmResult = false prevents closing
+  // Attempting to close via close button with confirmResult = false prevents closing
   confirmResult = false;
-  context.closeBulkOutreach();
-  assert.equal(confirmCalled, true);
-  assert.equal(getEl("bulk-outreach-dialog").open, true, "Dialog remains open when confirmation is cancelled");
+  confirmCalled = false;
+  getEl("bulk-dialog-close").click();
+  assert.equal(confirmCalled, true, "Clicking close button triggers confirmation dialog");
+  assert.equal(getEl("bulk-outreach-dialog").open, true, "Dialog remains open when close button confirmation is cancelled");
+
+  // Attempting to close via Done button with confirmResult = false also prevents closing
+  confirmCalled = false;
+  getEl("bulk-finish-done").click();
+  assert.equal(confirmCalled, true, "Clicking Done button triggers confirmation dialog");
+  assert.equal(getEl("bulk-outreach-dialog").open, true, "Dialog remains open when Done button confirmation is cancelled");
 
   // Confirming exit closes dialog and stores unresolved batch
   confirmResult = true;
-  context.closeBulkOutreach();
+  getEl("bulk-dialog-close").click();
   assert.equal(getEl("bulk-outreach-dialog").open, false);
 
   // Re-opening bulk outreach shows unresolved banner
@@ -2136,5 +2143,184 @@ test("Bulk Log Outreach: closing with uncertain saves requires confirmation and 
   getEl("bulk-resume-unresolved").click();
   assert.equal(getEl("bulk-step-progress").hidden, false);
   assert.equal(getEl("bulk-retry-failed").hidden, false);
+});
+
+test("Bulk Log Outreach: ambiguous 503 errors (SAVE_UNAVAILABLE) are treated as uncertain, stop batch, and retain identical request ID and payload on retry", async (t) => {
+  const records = [
+    { recordId: "00000000-0000-4000-8000-000000000091", schoolName: "School 91", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v1", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000092", schoolName: "School 92", schoolBoard: "TDSB", geographicRegion: "East", stage: "Not Contacted", lastRequestId: "v2", canEdit: true },
+  ];
+  const activityRequests = [];
+  let saveUnavailable = true;
+
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: records, sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) {
+      const match = url.match(/recordId=([^&]+)/);
+      return Response.json({ ok: true, record: records.find((r) => r.recordId === decodeURIComponent(match[1])) });
+    }
+    if (url.includes("/api/activities")) {
+      const body = JSON.parse(init.body);
+      activityRequests.push(body);
+      if (saveUnavailable) {
+        return Response.json({ ok: false, code: "SAVE_UNAVAILABLE", message: "Google Sheets save unavailable" }, { status: 503 });
+      }
+      return Response.json({ ok: true, record: { recordId: body.recordId, lastRequestId: crypto.randomUUID() } });
+    }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  context.openBulkOutreach([records[0].recordId, records[1].recordId]);
+  getEl("bulk-to-step2").click();
+  context.applySuggestion("bulk-outcome", "No reply yet");
+  context.applySuggestion("bulk-summary", "Sent introductory email.");
+  getEl("bulk-to-step3").click();
+  getEl("bulk-confirm-sent").click();
+  getEl("bulk-submit-save").click();
+
+  for (let i = 0; i < 50 && !getEl("bulk-retry-failed").hidden; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+
+  // Ambiguous 503 stopped batch immediately: School 92 was NOT called!
+  assert.equal(activityRequests.length, 1);
+  const initialRequestId = activityRequests[0].requestId;
+  assert.equal(activityRequests[0].recordId, records[0].recordId);
+
+  // Status is uncertain and batch is stopped safely
+  assert.equal(getEl("bulk-blocked-alert").hidden, false);
+  assert.match(getEl("bulk-blocked-message").textContent, /unavailable/i);
+  assert.match(getEl("bulk-final-summary").textContent, /1 uncertain/i);
+  assert.equal(getEl("bulk-retry-failed").hidden, false);
+
+  // Now retry: server becomes available
+  saveUnavailable = false;
+  getEl("bulk-retry-failed").click();
+
+  for (let i = 0; i < 50 && activityRequests.length < 3; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+
+  // 1 initial call + 1 retry call for School 91 + 1 call for School 92 = 3 calls
+  assert.equal(activityRequests.length, 3);
+  // Original request ID and payload MUST be preserved for uncertain retry!
+  assert.equal(activityRequests[1].requestId, initialRequestId, "Exact request ID preserved on retry for ambiguous 503");
+  assert.equal(activityRequests[1].summary, activityRequests[0].summary, "Identical payload preserved on retry");
+  assert.equal(activityRequests[2].recordId, records[1].recordId, "Batch continued safely to School 92 after reconciling");
+  assert.match(getEl("bulk-final-summary").textContent, /All 2 schools were saved successfully/);
+});
+
+test("Bulk Log Outreach: WORKBOOK_BLOCKED preserves blocked and pending records across close/reopen and prevents silent batch replacement", async (t) => {
+  const records = [
+    { recordId: "00000000-0000-4000-8000-000000000101", schoolName: "School 101", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v1", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000102", schoolName: "School 102", schoolBoard: "TDSB", geographicRegion: "East", stage: "Not Contacted", lastRequestId: "v2", canEdit: true },
+  ];
+  const activityRequests = [];
+  let isBlocked = true;
+
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: records, sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) {
+      const match = url.match(/recordId=([^&]+)/);
+      return Response.json({ ok: true, record: records.find((r) => r.recordId === decodeURIComponent(match[1])) });
+    }
+    if (url.includes("/api/activities")) {
+      const body = JSON.parse(init.body);
+      activityRequests.push(body);
+      if (isBlocked) {
+        return Response.json({ ok: false, code: "WORKBOOK_BLOCKED", message: "Workbook is blocked for safety." }, { status: 503 });
+      }
+      return Response.json({ ok: true, record: { recordId: body.recordId, lastRequestId: crypto.randomUUID() } });
+    }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  let confirmPrompted = false;
+  let confirmAnswer = true;
+  context.window.confirm = () => {
+    confirmPrompted = true;
+    return confirmAnswer;
+  };
+
+  context.openBulkOutreach([records[0].recordId, records[1].recordId]);
+  getEl("bulk-to-step2").click();
+  context.applySuggestion("bulk-outcome", "No reply yet");
+  context.applySuggestion("bulk-summary", "Sent introductory email.");
+  getEl("bulk-to-step3").click();
+  getEl("bulk-confirm-sent").click();
+  getEl("bulk-submit-save").click();
+
+  for (let i = 0; i < 50 && !getEl("bulk-retry-failed").hidden; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+
+  // Batch stopped on School 101; School 102 remained pending
+  assert.equal(activityRequests.length, 1);
+  assert.equal(getEl("bulk-blocked-alert").hidden, false);
+  assert.match(getEl("bulk-blocked-message").textContent, /blocked/i);
+
+  // Close dialog using actual button click
+  confirmPrompted = false;
+  confirmAnswer = true;
+  getEl("bulk-dialog-close").click();
+  assert.equal(confirmPrompted, true, "Closing with unresolved blocked/pending items prompts confirmation");
+  assert.equal(getEl("bulk-outreach-dialog").open, false);
+
+  // Reopen bulk outreach
+  context.openBulkOutreach();
+  assert.equal(getEl("bulk-outreach-dialog").open, true);
+  // Recovery banner is displayed with count of unresolved records (1 blocked + 1 pending = 2)
+  assert.equal(getEl("bulk-unresolved-banner").hidden, false);
+  assert.match(getEl("bulk-unresolved-text").textContent, /2 schools from your previous batch need review or retry/);
+
+  // Attempt to start a NEW batch without resolving previous batch:
+  // User cancels confirmation -> new batch must NOT silently replace previous batch
+  getEl("bulk-to-step2").click();
+  context.applySuggestion("bulk-outcome", "Left voicemail");
+  context.applySuggestion("bulk-summary", "Left message with principal.");
+  getEl("bulk-to-step3").click();
+  getEl("bulk-confirm-sent").click();
+
+  confirmPrompted = false;
+  confirmAnswer = false; // User cancels replacement!
+  getEl("bulk-submit-save").click();
+  assert.equal(confirmPrompted, true, "Attempting new batch prompts confirmation to avoid silent replacement");
+  // Still only 1 activity call had been made previously
+  assert.equal(activityRequests.length, 1);
+
+  // Return to step 1 and resume unresolved batch
+  getEl("bulk-back-to-step2").click();
+  getEl("bulk-back-to-step1").click();
+  getEl("bulk-resume-unresolved").click();
+
+  // Results screen is shown with 2 eligible items to retry (blocked + pending)
+  assert.equal(getEl("bulk-step-progress").hidden, false);
+  assert.equal(getEl("bulk-retry-failed").hidden, false);
+  assert.match(getEl("bulk-retry-failed").textContent, /Retry eligible saves \(2\)/);
+
+  // Unblock coordinator and retry
+  isBlocked = false;
+  getEl("bulk-retry-failed").click();
+
+  for (let i = 0; i < 50 && activityRequests.length < 3; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+
+  assert.equal(activityRequests.length, 3);
+  assert.equal(activityRequests[1].recordId, records[0].recordId);
+  assert.equal(activityRequests[1].requestId, activityRequests[0].requestId, "Exact request ID preserved on retry");
+  assert.equal(activityRequests[2].recordId, records[1].recordId);
+  assert.match(getEl("bulk-final-summary").textContent, /All 2 schools were saved successfully/);
+
+  // Reopening now shows no unresolved banner
+  context.closeBulkOutreach(true);
+  context.openBulkOutreach();
+  assert.equal(getEl("bulk-unresolved-banner").hidden, true);
 });
 
