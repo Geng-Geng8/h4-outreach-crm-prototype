@@ -1616,11 +1616,11 @@ test("Scenario: Grade 9 first email outreach using quick summary suggestion pill
   assert.equal(getEl("school-editor").open, false);
 });
 
-test("Bulk Log Outreach: 3-step workflow selects up to 20 schools, reuses quick summaries, requires confirmation, and preserves warm stages", async (t) => {
+test("Bulk Log Outreach: 3-step workflow selects up to 20 schools, reuses quick summaries, requires confirmation, and shows correct button text", async (t) => {
   const records = [
     { recordId: "00000000-0000-4000-8000-000000000001", schoolName: "School One", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v1", canEdit: true },
-    { recordId: "00000000-0000-4000-8000-000000000002", schoolName: "School Two", schoolBoard: "TDSB", geographicRegion: "East", stage: "Contacted", lastRequestId: "v2", canEdit: true },
-    { recordId: "00000000-0000-4000-8000-000000000003", schoolName: "School Three", schoolBoard: "TDSB", geographicRegion: "West", stage: "Interested", lastRequestId: "v3", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000002", schoolName: "School Two", schoolBoard: "TDSB", geographicRegion: "East", stage: "Not Contacted", lastRequestId: "v2", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000003", schoolName: "School Three", schoolBoard: "TDSB", geographicRegion: "West", stage: "Not Contacted", lastRequestId: "v3", canEdit: true },
     { recordId: "00000000-0000-4000-8000-000000000004", schoolName: "School Four (Booked)", schoolBoard: "TDSB", geographicRegion: "South", stage: "Booked", lastRequestId: "v4", canEdit: true },
     { recordId: "00000000-0000-4000-8000-000000000005", schoolName: "School Five (Cold)", schoolBoard: "TDSB", geographicRegion: "Central", stage: "Cold", lastRequestId: "v5", canEdit: true },
   ];
@@ -1688,6 +1688,9 @@ test("Bulk Log Outreach: 3-step workflow selects up to 20 schools, reuses quick 
   assert.equal(getEl("bulk-rev-count").textContent, "3");
   assert.equal(getEl("bulk-rev-summary").textContent, "Sent an introductory email explaining H4 and our free dance programs.");
 
+  // Requirement 5: Button wording is "Log outreach for 3 schools"
+  assert.equal(getEl("bulk-submit-save").textContent, "Log outreach for 3 schools");
+
   // Confirmation is mandatory
   assert.equal(getEl("bulk-submit-save").disabled, true);
   getEl("bulk-confirm-sent").click();
@@ -1702,19 +1705,13 @@ test("Bulk Log Outreach: 3-step workflow selects up to 20 schools, reuses quick 
   }
   assert.equal(activityRequests.length, 3);
 
-  // Request 1: Not Contacted moved to Contacted
+  // Requests: Not Contacted moved to Contacted
   assert.equal(activityRequests[0].recordId, records[0].recordId);
   assert.equal(activityRequests[0].stage, "Contacted");
   assert.equal(activityRequests[0].channel, "Email");
   assert.equal(activityRequests[0].summary, "Sent an introductory email explaining H4 and our free dance programs.");
-
-  // Request 2: Contacted stage preserved
-  assert.equal(activityRequests[1].recordId, records[1].recordId);
-  assert.equal(activityRequests[1].stage, undefined, "Already contacted stage is omitted/preserved");
-
-  // Request 3: Interested stage preserved (warm lead never downgraded!)
-  assert.equal(activityRequests[2].recordId, records[2].recordId);
-  assert.equal(activityRequests[2].stage, undefined, "Interested stage is omitted/preserved");
+  assert.equal(activityRequests[1].stage, "Contacted");
+  assert.equal(activityRequests[2].stage, "Contacted");
 
   // All 3 requests have unique UUIDs
   const requestIds = new Set(activityRequests.map((r) => r.requestId));
@@ -1746,9 +1743,16 @@ test("Bulk Log Outreach: First Contact vs Follow-Up preserves distinct counting 
   context.openBulkOutreach([records[0].recordId]);
   getEl("bulk-to-step2").click();
 
-  // Select Follow-up
+  // Previously contacted school under First Contact shows classification mismatch
+  assert.equal(getEl("bulk-qualification-notice").hidden, false);
+  assert.equal(getEl("bulk-to-step3").disabled, true);
+
+  // Select Follow-up: clears error and enables next step
   getEl("bulk-activityType").value = "FollowUp";
   getEl("bulk-activityType").dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(getEl("bulk-qualification-notice").hidden, true);
+  assert.equal(getEl("bulk-to-step3").disabled, false);
+
   context.applySuggestion("bulk-outcome", "Requested an update");
   context.applySuggestion("bulk-summary", "Followed up about workshop opportunities.");
 
@@ -1765,8 +1769,8 @@ test("Bulk Log Outreach: First Contact vs Follow-Up preserves distinct counting 
 
 test("Bulk Log Outreach: does not overwrite existing Next Action or Follow-Up Date without explicit student approval", async (t) => {
   const records = [
-    { recordId: "00000000-0000-4000-8000-000000000021", schoolName: "School 21", schoolBoard: "TDSB", geographicRegion: "North", stage: "Contacted", lastRequestId: "v1", canEdit: true, nextAction: "Existing Action", followUpDue: "2026-10-22" },
-    { recordId: "00000000-0000-4000-8000-000000000022", schoolName: "School 22", schoolBoard: "TDSB", geographicRegion: "East", stage: "Contacted", lastRequestId: "v2", canEdit: true, nextAction: "", followUpDue: "" },
+    { recordId: "00000000-0000-4000-8000-000000000021", schoolName: "School 21", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v1", canEdit: true, nextAction: "Existing Action", followUpDue: "2026-10-22" },
+    { recordId: "00000000-0000-4000-8000-000000000022", schoolName: "School 22", schoolBoard: "TDSB", geographicRegion: "East", stage: "Not Contacted", lastRequestId: "v2", canEdit: true, nextAction: "", followUpDue: "" },
   ];
   const activityRequests = [];
   const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
@@ -1832,7 +1836,6 @@ test("Bulk Log Outreach: coordinator safety halts batch immediately on WORKBOOK_
       const body = JSON.parse(init.body);
       activityCalls.push(body.recordId);
       if (body.recordId === records[1].recordId) {
-        // School 32 encounters WORKBOOK_BLOCKED from coordinator!
         return Response.json({ ok: false, code: "WORKBOOK_BLOCKED", message: "Workbook is blocked by pending uncertain operation." }, { status: 503 });
       }
       return Response.json({ ok: true, record: { recordId: body.recordId, lastRequestId: crypto.randomUUID() } });
@@ -1853,11 +1856,8 @@ test("Bulk Log Outreach: coordinator safety halts batch immediately on WORKBOOK_
   for (let i = 0; i < 50 && activityCalls.length < 2; i++) {
     await new Promise((done) => setTimeout(done, 10));
   }
-  // S1 succeeded, S2 returned WORKBOOK_BLOCKED. S3 was NEVER called!
   assert.equal(activityCalls.length, 2);
   assert.equal(activityCalls.includes(records[2].recordId), false, "Batch stopped immediately before school 33");
-
-  // Alert is visible
   assert.equal(getEl("bulk-blocked-alert").hidden, false);
   assert.match(getEl("bulk-blocked-message").textContent, /blocked/i);
 });
@@ -1880,7 +1880,6 @@ test("Bulk Log Outreach: 409 version conflict on individual school is marked sep
       const body = JSON.parse(init.body);
       activityCalls.push(body.recordId);
       if (body.recordId === records[1].recordId) {
-        // School 42 returns 409 stale version conflict
         return Response.json({ ok: false, code: "CONFLICT_STALE_VERSION", message: "Stale version" }, { status: 409 });
       }
       return Response.json({ ok: true, record: { recordId: body.recordId, lastRequestId: crypto.randomUUID() } });
@@ -1901,18 +1900,17 @@ test("Bulk Log Outreach: 409 version conflict on individual school is marked sep
   for (let i = 0; i < 50 && activityCalls.length < 3; i++) {
     await new Promise((done) => setTimeout(done, 10));
   }
-  // All 3 were attempted! S1 succeeded, S2 conflicted, S3 succeeded!
   assert.equal(activityCalls.length, 3);
   assert.match(getEl("bulk-final-summary").textContent, /Finished with 2 saved, 1 conflicts/);
 });
 
-test("Bulk Log Outreach: safe retries retain original request ID and unchanged payload for uncertain writes", async (t) => {
+test("Bulk Log Outreach: safe retries retain original request ID for uncertain writes and generate fresh ID for confirmed rejections", async (t) => {
   const records = [
     { recordId: "00000000-0000-4000-8000-000000000051", schoolName: "School 51", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v1", canEdit: true },
     { recordId: "00000000-0000-4000-8000-000000000052", schoolName: "School 52", schoolBoard: "TDSB", geographicRegion: "East", stage: "Not Contacted", lastRequestId: "v2", canEdit: true },
   ];
   const activityRequests = [];
-  let failSecond = true;
+  let attempt = 0;
 
   const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
     if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
@@ -1924,9 +1922,10 @@ test("Bulk Log Outreach: safe retries retain original request ID and unchanged p
     if (url.includes("/api/activities")) {
       const body = JSON.parse(init.body);
       activityRequests.push(body);
-      if (body.recordId === records[1].recordId && failSecond) {
-        failSecond = false;
-        throw new Error("Network timeout / connection interrupted");
+      attempt++;
+      if (body.recordId === records[1].recordId && attempt === 2) {
+        // Confirmed rejected operation (e.g. 502 SHEETS_REJECTED)
+        return Response.json({ ok: false, code: "SHEETS_REJECTED", message: "Google Sheets rejected write" }, { status: 502 });
       }
       return Response.json({ ok: true, record: { recordId: body.recordId, lastRequestId: crypto.randomUUID() } });
     }
@@ -1947,11 +1946,10 @@ test("Bulk Log Outreach: safe retries retain original request ID and unchanged p
     await new Promise((done) => setTimeout(done, 10));
   }
   assert.equal(activityRequests.length, 2);
-  const initialRetryId = activityRequests[1].requestId;
+  const initialRejectedId = activityRequests[1].requestId;
 
   // Retry button is visible
   assert.equal(getEl("bulk-retry-failed").hidden, false);
-  assert.match(getEl("bulk-retry-failed").textContent, /Retry failed saves \(1\)/);
 
   // Click retry
   getEl("bulk-retry-failed").click();
@@ -1961,9 +1959,182 @@ test("Bulk Log Outreach: safe retries retain original request ID and unchanged p
   }
   assert.equal(activityRequests.length, 3);
 
-  // Third request is the retry of School 52: MUST USE EXACT SAME REQUEST ID AND PAYLOAD
+  // Confirmed rejection creates a FRESH request ID upon retrying
   assert.equal(activityRequests[2].recordId, records[1].recordId);
-  assert.equal(activityRequests[2].requestId, initialRetryId, "Retried request reused the exact original request ID!");
-  assert.equal(activityRequests[2].summary, activityRequests[1].summary, "Payload was unchanged on retry");
+  assert.notEqual(activityRequests[2].requestId, initialRejectedId, "Confirmed rejection generated a fresh request ID on retry!");
+  assert.equal(activityRequests[2].summary, activityRequests[1].summary, "Payload content was unchanged");
+});
+
+test("Bulk Log Outreach: Activity classification prevents mismatched outreach types and provides one-click deselect helper", async (t) => {
+  const records = [
+    { recordId: "00000000-0000-4000-8000-000000000061", schoolName: "School 61 (Not Contacted)", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v1", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000062", schoolName: "School 62 (Contacted)", schoolBoard: "TDSB", geographicRegion: "East", stage: "Contacted", lastRequestId: "v2", canEdit: true },
+  ];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: records, sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  // Select both schools
+  context.openBulkOutreach([records[0].recordId, records[1].recordId]);
+  getEl("bulk-to-step2").click();
+
+  // 1. With First Contact (default): Contacted school triggers classification error
+  assert.equal(getEl("bulk-qualification-notice").hidden, false);
+  assert.match(getEl("bulk-qualification-text").textContent, /First Contact cannot be applied to previously contacted schools/);
+  assert.equal(getEl("bulk-to-step3").disabled, true);
+
+  // Click deselect helper
+  const deselectBtn = getEl("bulk-deselect-ineligible");
+  assert.equal(deselectBtn.hidden, false);
+  assert.match(deselectBtn.textContent, /Deselect 1 contacted school/);
+  deselectBtn.click();
+
+  // Error clears, only Not Contacted school remains, step 3 enabled
+  assert.equal(getEl("bulk-qualification-notice").hidden, true);
+  assert.equal(getEl("bulk-to-step3").disabled, false);
+  assert.equal(getEl("bulk-recap-count").textContent, "1 school selected");
+
+  // 2. Add back Contacted school, switch to Follow-Up
+  context.toggleBulkSchoolSelection(records[1].recordId, true);
+  getEl("bulk-activityType").value = "FollowUp";
+  getEl("bulk-activityType").dispatchEvent(new Event("change", { bubbles: true }));
+
+  // Not Contacted school triggers classification error under Follow-Up
+  assert.equal(getEl("bulk-qualification-notice").hidden, false);
+  assert.match(getEl("bulk-qualification-text").textContent, /Follow-Up cannot be applied to Not Contacted schools/);
+  assert.equal(getEl("bulk-to-step3").disabled, true);
+
+  // Deselect helper removes Not Contacted school
+  assert.match(deselectBtn.textContent, /Deselect 1 "Not Contacted" school/);
+  deselectBtn.click();
+  assert.equal(getEl("bulk-qualification-notice").hidden, true);
+  assert.equal(getEl("bulk-to-step3").disabled, false);
+  assert.equal(getEl("bulk-recap-count").textContent, "1 school selected");
+});
+
+test("Bulk Log Outreach: Connection interruption stops batch immediately and retains affected request ID for safe retry", async (t) => {
+  const records = [
+    { recordId: "00000000-0000-4000-8000-000000000071", schoolName: "School 71", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v1", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000072", schoolName: "School 72", schoolBoard: "TDSB", geographicRegion: "East", stage: "Not Contacted", lastRequestId: "v2", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000073", schoolName: "School 73", schoolBoard: "TDSB", geographicRegion: "West", stage: "Not Contacted", lastRequestId: "v3", canEdit: true },
+  ];
+  const activityCalls = [];
+  let networkFailed = true;
+
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: records, sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) {
+      const match = url.match(/recordId=([^&]+)/);
+      return Response.json({ ok: true, record: records.find((r) => r.recordId === decodeURIComponent(match[1])) });
+    }
+    if (url.includes("/api/activities")) {
+      const body = JSON.parse(init.body);
+      activityCalls.push(body);
+      if (body.recordId === records[1].recordId && networkFailed) {
+        networkFailed = false;
+        throw new TypeError("Failed to fetch: Connection timeout");
+      }
+      return Response.json({ ok: true, record: { recordId: body.recordId, lastRequestId: crypto.randomUUID() } });
+    }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  context.openBulkOutreach([records[0].recordId, records[1].recordId, records[2].recordId]);
+  getEl("bulk-to-step2").click();
+  context.applySuggestion("bulk-outcome", "No reply yet");
+  context.applySuggestion("bulk-summary", "Sent an introductory email.");
+  getEl("bulk-to-step3").click();
+  getEl("bulk-confirm-sent").click();
+  getEl("bulk-submit-save").click();
+
+  for (let i = 0; i < 50 && activityCalls.length < 2; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+  // S1 succeeded. S2 threw network error. S3 was NEVER attempted!
+  assert.equal(activityCalls.length, 2);
+  assert.equal(activityCalls.some((c) => c.recordId === records[2].recordId), false, "Batch stopped immediately on network interruption!");
+
+  assert.equal(getEl("bulk-blocked-alert").hidden, false);
+  assert.match(getEl("bulk-blocked-message").textContent, /interrupted/i);
+
+  const interruptedRequestId = activityCalls[1].requestId;
+
+  // Retry resumes with same request ID for S2 and continues to S3
+  getEl("bulk-retry-failed").click();
+  for (let i = 0; i < 50 && activityCalls.length < 4; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+  assert.equal(activityCalls.length, 4);
+  assert.equal(activityCalls[2].recordId, records[1].recordId);
+  assert.equal(activityCalls[2].requestId, interruptedRequestId, "Uncertain write reused exact request ID on retry!");
+  assert.equal(activityCalls[3].recordId, records[2].recordId);
+});
+
+test("Bulk Log Outreach: closing with uncertain saves requires confirmation and enables recovery via banner upon reopening", async (t) => {
+  const records = [
+    { recordId: "00000000-0000-4000-8000-000000000081", schoolName: "School 81", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v1", canEdit: true },
+  ];
+  let confirmCalled = false;
+  let confirmResult = false;
+
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: records, sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ ok: true, record: records[0] });
+    if (url.includes("/api/activities")) {
+      throw new Error("Connection failed");
+    }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  context.window.confirm = (msg) => {
+    confirmCalled = true;
+    return confirmResult;
+  };
+
+  context.openBulkOutreach([records[0].recordId]);
+  getEl("bulk-to-step2").click();
+  context.applySuggestion("bulk-outcome", "No reply yet");
+  context.applySuggestion("bulk-summary", "Sent an introductory email.");
+  getEl("bulk-to-step3").click();
+  getEl("bulk-confirm-sent").click();
+  getEl("bulk-submit-save").click();
+
+  for (let i = 0; i < 50 && !getEl("bulk-retry-failed").hidden; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+
+  // Reload note is visible
+  assert.match(getEl("bulk-reload-note").textContent, /Session & reload limit/);
+
+  // Attempting to close with confirmResult = false prevents closing
+  confirmResult = false;
+  context.closeBulkOutreach();
+  assert.equal(confirmCalled, true);
+  assert.equal(getEl("bulk-outreach-dialog").open, true, "Dialog remains open when confirmation is cancelled");
+
+  // Confirming exit closes dialog and stores unresolved batch
+  confirmResult = true;
+  context.closeBulkOutreach();
+  assert.equal(getEl("bulk-outreach-dialog").open, false);
+
+  // Re-opening bulk outreach shows unresolved banner
+  context.openBulkOutreach();
+  assert.equal(getEl("bulk-unresolved-banner").hidden, false);
+  assert.match(getEl("bulk-unresolved-text").textContent, /1 school from your previous batch/);
+
+  // Clicking resume takes student directly back to results to retry
+  getEl("bulk-resume-unresolved").click();
+  assert.equal(getEl("bulk-step-progress").hidden, false);
+  assert.equal(getEl("bulk-retry-failed").hidden, false);
 });
 

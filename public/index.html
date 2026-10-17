@@ -302,6 +302,12 @@
 
       <!-- STEP 1: SELECT SCHOOLS -->
       <div id="bulk-step-1" class="bulk-step-panel">
+        <div id="bulk-unresolved-banner" class="demo-feedback error-feedback" style="margin-bottom: 14px;" hidden>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+            <span><strong>Unresolved saves:</strong> <span id="bulk-unresolved-text"></span></span>
+            <button type="button" id="bulk-resume-unresolved" class="button secondary small">Review & retry</button>
+          </div>
+        </div>
         <div class="bulk-toolbar">
           <label class="search bulk-search">
             <span aria-hidden="true">⌕</span>
@@ -349,7 +355,10 @@
               <span id="bulk-activityType-help" class="field-help">First contact moves "Not Contacted" schools to Contacted. Follow-up adds 1 to the school's follow-up count.</span>
             </label>
           </div>
-          <p id="bulk-qualification-notice" class="field-help quiet-note" hidden></p>
+          <div id="bulk-qualification-notice" class="demo-feedback error-feedback" style="margin-top: 10px;" hidden>
+            <p id="bulk-qualification-text" style="margin: 0;"></p>
+            <button type="button" id="bulk-deselect-ineligible" class="button secondary small" style="margin-top: 8px;" hidden></button>
+          </div>
         </section>
 
         <section class="flow-step editor-wide">
@@ -464,7 +473,7 @@
         <div class="editor-actions">
           <p id="bulk-step3-feedback" class="editor-feedback" role="status" aria-live="polite"></p>
           <button type="button" id="bulk-back-to-step2" class="button secondary">← Back to edit</button>
-          <button type="button" id="bulk-submit-save" class="button" disabled>Send & log outreach</button>
+          <button type="button" id="bulk-submit-save" class="button" disabled>Log outreach for selected schools</button>
         </div>
       </div>
 
@@ -486,6 +495,8 @@
             <!-- Filled dynamically by updateBulkProgressUI() -->
           </div>
         </div>
+
+        <p id="bulk-reload-note" class="quiet-note editor-wide" style="margin-top: 12px;"><strong>Session & reload limit:</strong> Retry tracking is maintained in memory during your active browser session. If you reload this page or your session expires, in-flight retry tracking cannot be recovered.</p>
 
         <div class="editor-actions">
           <p id="bulk-final-summary" class="editor-feedback" role="status" aria-live="polite"></p>

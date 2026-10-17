@@ -647,6 +647,7 @@ async function saveSchoolEdits(event) {
 let bulkSelectedIds = new Set();
 let bulkStep = 1;
 let bulkBatch = null;
+let savedUnresolvedBatch = null;
 
 function getEligibleBulkSchools() {
   return schools.filter((school) => {
@@ -661,6 +662,17 @@ function openBulkOutreach(preSelected = []) {
   const eligible = getEligibleBulkSchools();
   bulkSelectedIds = new Set(preSelected.filter((id) => eligible.some((s) => s.recordId === id)).slice(0, 20));
   bulkBatch = null;
+
+  if (savedUnresolvedBatch && savedUnresolvedBatch.items?.some((it) => ["uncertain", "failed"].includes(it.status))) {
+    const unresolvedCount = savedUnresolvedBatch.items.filter((it) => ["uncertain", "failed"].includes(it.status)).length;
+    if (el("bulk-unresolved-banner")) el("bulk-unresolved-banner").hidden = false;
+    if (el("bulk-unresolved-text")) {
+      el("bulk-unresolved-text").textContent = `${unresolvedCount} ${unresolvedCount === 1 ? "school" : "schools"} from your previous batch need review or retry.`;
+    }
+  } else {
+    if (el("bulk-unresolved-banner")) el("bulk-unresolved-banner").hidden = true;
+  }
+
   if (el("bulk-search")) el("bulk-search").value = "";
   if (el("bulk-activityType")) el("bulk-activityType").value = "Outreach";
   if (el("bulk-outcome")) el("bulk-outcome").value = "No reply yet";
@@ -679,11 +691,23 @@ function openBulkOutreach(preSelected = []) {
   if (dialog && !dialog.open) dialog.showModal();
 }
 
-function closeBulkOutreach() {
-  if (bulkBatch?.inProgress) return;
+function closeBulkOutreach(force = false) {
+  if (bulkBatch?.inProgress) return false;
+  const hasUncertain = bulkBatch?.items?.some((it) => it.status === "uncertain");
+  if (!force && hasUncertain) {
+    const count = bulkBatch.items.filter((it) => it.status === "uncertain").length;
+    const msg = `You have ${count} uncertain ${count === 1 ? "save" : "saves"} waiting for confirmation.\n\nClosing now will keep retry information in memory for this session, but reloading the browser will lose retry tracking.\n\nExit bulk outreach?`;
+    if (typeof window !== "undefined" && window.confirm && !window.confirm(msg)) {
+      return false;
+    }
+    savedUnresolvedBatch = bulkBatch;
+  } else if (bulkBatch?.items?.some((it) => ["uncertain", "failed"].includes(it.status))) {
+    savedUnresolvedBatch = bulkBatch;
+  }
   const dialog = el("bulk-outreach-dialog");
   if (dialog?.open) dialog.close();
   bulkBatch = null;
+  return true;
 }
 
 function setBulkStep(step) {
@@ -813,22 +837,58 @@ function prepareBulkStep2() {
   if (el("bulk-recap-count")) el("bulk-recap-count").textContent = `${count} ${count === 1 ? "school" : "schools"} selected`;
 
   const selectedSchools = schools.filter((s) => bulkSelectedIds.has(s.recordId));
-  const notContactedCount = selectedSchools.filter((s) => s.stage === "Not Contacted").length;
-  const contactedCount = selectedSchools.length - notContactedCount;
+  const notContactedSchools = selectedSchools.filter((s) => s.stage === "Not Contacted");
+  const contactedSchools = selectedSchools.filter((s) => s.stage !== "Not Contacted");
+  const notContactedCount = notContactedSchools.length;
+  const contactedCount = contactedSchools.length;
   const activityType = el("bulk-activityType")?.value || "Outreach";
 
   const notice = el("bulk-qualification-notice");
-  if (notice) {
-    if (activityType === "Outreach" && contactedCount > 0) {
-      notice.hidden = false;
-      notice.textContent = `Notice: ${contactedCount} of your selected schools were already contacted previously. Choose Follow-Up if you are sending a subsequent email.`;
-    } else if (activityType === "FollowUp" && notContactedCount > 0) {
-      notice.hidden = false;
-      notice.textContent = `Notice: ${notContactedCount} of your selected schools are still "Not Contacted". Choose First Contact if this is your first outreach to them.`;
-    } else {
-      notice.hidden = true;
-      notice.textContent = "";
+  const noticeText = el("bulk-qualification-text");
+  const deselectBtn = el("bulk-deselect-ineligible");
+  let hasClassificationError = false;
+
+  if (activityType === "Outreach" && contactedCount > 0) {
+    hasClassificationError = true;
+    if (notice) notice.hidden = false;
+    if (noticeText) {
+      noticeText.textContent = `First Contact cannot be applied to previously contacted schools. ${contactedCount} of your selected ${contactedCount === 1 ? "school was" : "schools were"} already contacted.`;
     }
+    if (deselectBtn) {
+      deselectBtn.hidden = false;
+      deselectBtn.textContent = `Deselect ${contactedCount} contacted ${contactedCount === 1 ? "school" : "schools"}`;
+      deselectBtn.onclick = () => {
+        for (const s of contactedSchools) bulkSelectedIds.delete(s.recordId);
+        renderBulkStep1();
+        prepareBulkStep2();
+      };
+    }
+  } else if (activityType === "FollowUp" && notContactedCount > 0) {
+    hasClassificationError = true;
+    if (notice) notice.hidden = false;
+    if (noticeText) {
+      noticeText.textContent = `Follow-Up cannot be applied to Not Contacted schools. ${notContactedCount} of your selected ${notContactedCount === 1 ? "school is" : "schools are"} still "Not Contacted".`;
+    }
+    if (deselectBtn) {
+      deselectBtn.hidden = false;
+      deselectBtn.textContent = `Deselect ${notContactedCount} "Not Contacted" ${notContactedCount === 1 ? "school" : "schools"}`;
+      deselectBtn.onclick = () => {
+        for (const s of notContactedSchools) bulkSelectedIds.delete(s.recordId);
+        renderBulkStep1();
+        prepareBulkStep2();
+      };
+    }
+  } else {
+    if (notice) notice.hidden = true;
+    if (noticeText) noticeText.textContent = "";
+    if (deselectBtn) {
+      deselectBtn.hidden = true;
+      deselectBtn.onclick = null;
+    }
+  }
+
+  if (el("bulk-to-step3")) {
+    el("bulk-to-step3").disabled = hasClassificationError || bulkSelectedIds.size === 0;
   }
 
   const existingPlansCount = selectedSchools.filter((s) => Boolean(s.nextAction?.trim() || s.followUpDue?.trim())).length;
@@ -910,7 +970,7 @@ function prepareBulkStep3() {
   if (el("bulk-confirm-sent")) el("bulk-confirm-sent").checked = false;
   if (el("bulk-submit-save")) {
     el("bulk-submit-save").disabled = true;
-    el("bulk-submit-save").textContent = `Send & log outreach (${bulkSelectedIds.size} ${bulkSelectedIds.size === 1 ? "school" : "schools"})`;
+    el("bulk-submit-save").textContent = `Log outreach for ${bulkSelectedIds.size} ${bulkSelectedIds.size === 1 ? "school" : "schools"}`;
   }
   if (el("bulk-step3-feedback")) el("bulk-step3-feedback").textContent = "";
 }
@@ -932,7 +992,19 @@ async function executeBulkBatch(isRetry = false) {
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    if (item.status === "success" || (isRetry && item.status === "conflict")) continue;
+    if (item.status === "success") continue;
+    // Do not blindly retry validation failures or permanent rejections
+    if (isRetry && item.retryable === false) continue;
+
+    // Requirement 1: For a confirmed rejected operation, create a fresh request ID when retrying an unchanged valid request
+    // Preserve original request ID and payload for uncertain writes
+    if (isRetry && item.isConfirmedRejection) {
+      item.requestId = crypto.randomUUID();
+      if (item.payload) {
+        item.payload.requestId = item.requestId;
+      }
+      item.isConfirmedRejection = false;
+    }
 
     item.status = "saving";
     updateBulkProgressUI(i);
@@ -991,16 +1063,22 @@ async function executeBulkBatch(isRetry = false) {
         item.status = "success";
         item.error = "";
         item.code = "SUCCESS";
+        item.retryable = false;
+        item.isConfirmedRejection = false;
       } else if (response.status === 409 && data.code === "CONFLICT_STALE_VERSION") {
         item.status = "conflict";
         item.error = "School was updated elsewhere. Changes not applied.";
         item.code = "CONFLICT_STALE_VERSION";
+        item.retryable = false;
+        item.isConfirmedRejection = true;
       } else if (response.status === 503 && ["WORKBOOK_BLOCKED", "COMMIT_UNCERTAIN"].includes(data.code)) {
         item.status = data.code === "COMMIT_UNCERTAIN" ? "uncertain" : "blocked";
         item.error = data.code === "COMMIT_UNCERTAIN"
           ? "Save status uncertain upstream. Batch stopped to protect workbook."
           : "Workbook is blocked by coordinator. Batch stopped for safety.";
         item.code = data.code;
+        item.retryable = true;
+        item.isConfirmedRejection = false; // Uncertain write: preserve requestId and payload!
         bulkBatch.stopped = true;
         bulkBatch.stopReason = data.message || `Coordinator reported ${data.code}. Batch stopped safely.`;
         updateBulkProgressUI();
@@ -1010,24 +1088,46 @@ async function executeBulkBatch(isRetry = false) {
           item.status = "conflict";
           item.error = "You can only edit schools assigned to you.";
           item.code = "NOT_OWNER";
+          item.retryable = false;
+          item.isConfirmedRejection = true;
         } else {
           item.status = "failed";
           item.error = "Session expired or access revoked.";
           item.code = data.code || "AUTH_FAILED";
+          item.retryable = false;
+          item.isConfirmedRejection = true;
           bulkBatch.stopped = true;
           bulkBatch.stopReason = "Your session expired. Please sign in again.";
           updateBulkProgressUI();
           break;
         }
+      } else if (response.status === 400 || response.status === 422) {
+        // Validation failures: do not blindly retry
+        item.status = "failed";
+        item.error = data.message || "Spreadsheet rejected save due to invalid input.";
+        item.code = data.code || "VALIDATION_FAILED";
+        item.retryable = false;
+        item.isConfirmedRejection = true;
       } else {
+        // Confirmed rejected operation (e.g. 502 SHEETS_REJECTED, 503 SAVE_UNAVAILABLE)
         item.status = "failed";
         item.error = data.message || "Spreadsheet rejected save.";
-        item.code = data.code || "FAILED";
+        item.code = data.code || "SHEETS_REJECTED";
+        item.retryable = true;
+        item.isConfirmedRejection = true;
       }
     } catch {
+      // Requirement 3: Network interruption -> outcome is uncertain!
+      // Keep affected request ID and payload for safe retry, and STOP the batch immediately!
       item.status = "uncertain";
       item.error = "Connection interrupted during save.";
       item.code = "CONNECTION_ERROR";
+      item.retryable = true;
+      item.isConfirmedRejection = false;
+      bulkBatch.stopped = true;
+      bulkBatch.stopReason = "Network connection interrupted during save. Batch stopped safely to protect the workbook and prevent duplicate writes. Retry once your connection is restored.";
+      updateBulkProgressUI();
+      break;
     }
 
     if (progressBar) progressBar.value = items.filter((it) => it.status === "success").length;
@@ -1093,8 +1193,13 @@ function finalizeBulkBatch() {
   const items = bulkBatch.items;
   const successCount = items.filter((it) => it.status === "success").length;
   const conflictCount = items.filter((it) => it.status === "conflict").length;
-  const retryableCount = items.filter((it) => ["failed", "uncertain", "blocked"].includes(it.status)).length;
+  const uncertainCount = items.filter((it) => it.status === "uncertain").length;
+  const retryableCount = items.filter((it) => it.retryable && it.status !== "success").length;
   const total = items.length;
+
+  if (uncertainCount > 0 || retryableCount > 0) {
+    savedUnresolvedBatch = bulkBatch;
+  }
 
   setBulkStep(4);
 
@@ -1112,14 +1217,23 @@ function finalizeBulkBatch() {
       el("bulk-final-summary").textContent = `✓ All ${total} schools were saved successfully to Google Sheets.`;
       el("bulk-final-summary").className = "editor-feedback";
     } else {
-      el("bulk-final-summary").textContent = `Finished with ${successCount} saved, ${conflictCount} conflicts, and ${retryableCount} failed.`;
-      el("bulk-final-summary").className = retryableCount > 0 ? "editor-feedback error" : "editor-feedback";
+      const parts = [`${successCount} saved`];
+      if (conflictCount > 0) parts.push(`${conflictCount} conflicts`);
+      if (uncertainCount > 0) parts.push(`${uncertainCount} uncertain`);
+      const otherFailed = total - successCount - conflictCount - uncertainCount;
+      if (otherFailed > 0) parts.push(`${otherFailed} rejected`);
+      el("bulk-final-summary").textContent = `Finished with ${parts.join(", ")}.`;
+      el("bulk-final-summary").className = (retryableCount > 0 || uncertainCount > 0) ? "editor-feedback error" : "editor-feedback";
     }
   }
 
   if (el("bulk-retry-failed")) {
     el("bulk-retry-failed").hidden = retryableCount === 0;
-    el("bulk-retry-failed").textContent = `Retry failed saves (${retryableCount})`;
+    el("bulk-retry-failed").textContent = `Retry eligible saves (${retryableCount})`;
+  }
+
+  if (el("bulk-reload-note")) {
+    el("bulk-reload-note").textContent = "Session & reload limit: Retry tracking is maintained in memory during your active browser session. If you reload this page or your session expires, in-flight retry tracking cannot be recovered.";
   }
 
   if (el("bulk-finish-done")) {
@@ -1901,7 +2015,34 @@ el("bulk-activityType")?.addEventListener("change", () => {
 el("bulk-outcome")?.addEventListener("input", updateBulkSuggestionStates);
 el("bulk-summary")?.addEventListener("input", updateBulkSuggestionStates);
 el("bulk-nextAction")?.addEventListener("input", updateBulkSuggestionStates);
+el("bulk-resume-unresolved")?.addEventListener("click", () => {
+  if (savedUnresolvedBatch) {
+    bulkBatch = savedUnresolvedBatch;
+    updateBulkProgressUI();
+    setBulkStep(4);
+  }
+});
 el("bulk-to-step3")?.addEventListener("click", () => {
+  const selectedSchools = schools.filter((s) => bulkSelectedIds.has(s.recordId));
+  const notContactedCount = selectedSchools.filter((s) => s.stage === "Not Contacted").length;
+  const contactedCount = selectedSchools.length - notContactedCount;
+  const activityType = el("bulk-activityType")?.value || "Outreach";
+
+  if (activityType === "Outreach" && contactedCount > 0) {
+    if (el("bulk-step2-feedback")) {
+      el("bulk-step2-feedback").textContent = `First Contact cannot be applied to previously contacted schools. Adjust your selection or choose Follow-Up.`;
+      el("bulk-step2-feedback").className = "editor-feedback error";
+    }
+    return;
+  }
+  if (activityType === "FollowUp" && notContactedCount > 0) {
+    if (el("bulk-step2-feedback")) {
+      el("bulk-step2-feedback").textContent = `Follow-Up cannot be applied to Not Contacted schools. Adjust your selection or choose First Contact.`;
+      el("bulk-step2-feedback").className = "editor-feedback error";
+    }
+    return;
+  }
+
   const outcome = el("bulk-outcome")?.value?.trim() || "";
   const summary = el("bulk-summary")?.value?.trim() || "";
   if (!outcome || !summary) {
@@ -1942,12 +2083,21 @@ el("bulk-submit-save")?.addEventListener("click", () => {
       error: "",
       code: "",
       payload: null,
+      retryable: true,
+      isConfirmedRejection: false,
     })),
   };
   executeBulkBatch(false);
 });
 el("bulk-retry-failed")?.addEventListener("click", () => executeBulkBatch(true));
 el("bulk-finish-done")?.addEventListener("click", closeBulkOutreach);
+window.addEventListener("beforeunload", (e) => {
+  if (bulkBatch && (bulkBatch.inProgress || bulkBatch.items?.some((it) => it.status === "uncertain"))) {
+    e.preventDefault();
+    e.returnValue = "You have uncertain outreach saves waiting for confirmation.";
+    return e.returnValue;
+  }
+});
 el("refresh").addEventListener("click", refresh);
 el("tab-home")?.addEventListener("click", () => switchTab("home"));
 el("home-refresh")?.addEventListener("click", refresh);
