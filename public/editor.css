@@ -165,11 +165,17 @@
   display: none;
 }
 
-/* Outreach Form Section */
+/* Outreach Form Flow */
 #outreach-fields {
   margin-bottom: 20px;
   padding-bottom: 20px;
   border-bottom: 1.5px solid #dce4d5;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+#outreach-fields[hidden] {
+  display: none;
 }
 #outreach-fields .quiet-note {
   margin: 6px 0 0;
@@ -180,6 +186,269 @@
   padding: 10px 14px;
   border-radius: 8px;
   border-left: 3.5px solid #5a8a4e;
+}
+
+/* Flow Steps */
+.flow-step {
+  background: #ffffff;
+  border: 1.5px solid #dbe5d7;
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(20, 32, 26, 0.04);
+}
+.step-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #153528;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 750;
+  flex-shrink: 0;
+}
+.step-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #14201a;
+  letter-spacing: -0.2px;
+}
+.step-sub {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: #55645b;
+  font-weight: 500;
+}
+
+/* Contact Card (Step 1) */
+.contact-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #f4f8f2;
+  border: 1.5px solid #cce0c7;
+  border-radius: 8px;
+}
+.contact-card.missing {
+  background: #fcf9ee;
+  border-color: #f2e2b6;
+}
+.contact-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.contact-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.contact-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.contact-text strong {
+  font-size: 13.5px;
+  color: #14201a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contact-role {
+  font-size: 11.5px;
+  color: #55645b;
+}
+.compact-button {
+  min-height: 36px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.contact-return-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #edf5ea;
+  border: 1px solid #d0e2cb;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 4px;
+}
+.contact-return-bar button {
+  min-height: 38px;
+}
+#return-to-activity[data-confirming="true"] {
+  background: #fde8e8;
+  border-color: #f09595;
+  color: #b42318;
+  font-weight: 700;
+}
+
+/* Step 2 Inputs */
+.flow-step-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+/* Suggestions (Steps 3 & 5) */
+.suggestion-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.suggestion-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #385945;
+}
+.suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.suggestion-chip {
+  appearance: none;
+  background: #f4f7f2;
+  border: 1px solid #cad7c5;
+  border-radius: 20px;
+  color: #153528;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 13px;
+  min-height: 36px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.2;
+  touch-action: manipulation;
+}
+.suggestion-chip:hover:not(:disabled) {
+  background: #e4efe0;
+  border-color: #153528;
+  color: #0f271d;
+}
+.suggestion-chip:focus-visible {
+  outline: 2px solid #153528;
+  outline-offset: 2px;
+}
+.suggestion-chip.selected {
+  background: #153528;
+  color: #ffffff;
+  border-color: #153528;
+  box-shadow: 0 2px 6px rgba(21, 53, 40, 0.2);
+}
+.suggestion-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Accessible Inline Help (<details>) */
+.inline-help {
+  font-size: 12px;
+  color: #2b543d;
+  margin-top: 2px;
+}
+.inline-help summary {
+  cursor: pointer;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+  list-style: none;
+  padding: 2px 0;
+  width: fit-content;
+}
+.inline-help summary::-webkit-details-marker {
+  display: none;
+}
+.inline-help summary::before {
+  content: "ⓘ";
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #385945;
+}
+.inline-help summary:hover {
+  color: #0f271d;
+  text-decoration: underline;
+}
+.inline-help summary:focus-visible {
+  outline: 2px solid #153528;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.inline-help .help-text {
+  margin-top: 6px;
+  padding: 10px 14px;
+  background: #f4f8f1;
+  border-left: 3.5px solid #385945;
+  border-radius: 6px;
+  line-height: 1.5;
+  color: #244633;
+  font-size: 12px;
+}
+
+/* Helper Text Elements */
+.field-help {
+  font-size: 11.5px;
+  color: #55645b;
+  line-height: 1.45;
+  font-weight: 450;
+  margin-top: 2px;
+}
+.example-help {
+  display: block;
+  background: #f7f9f6;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 3px solid #5a8a4e;
+  color: #28392d;
+  margin-top: 6px;
+  font-style: italic;
+}
+.example-help strong {
+  font-style: normal;
+  font-weight: 700;
+  color: #14201a;
+}
+.tip-box {
+  background: #edf5ea;
+  border: 1px solid #d0e2cb;
+  border-radius: 6px;
+  padding: 9px 13px;
+  color: #244633;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+#activity-step-5-header {
+  margin-bottom: 2px;
 }
 
 /* Grid & Form Fields */
@@ -372,4 +641,30 @@
     flex: 1;
     min-height: 48px;
   }
+  .flow-step {
+    padding: 14px 14px;
+    gap: 10px;
+  }
+  .flow-step-inputs {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .contact-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .contact-card .compact-button {
+    width: 100%;
+    min-height: 44px;
+  }
+  .suggestion-chips {
+    gap: 6px;
+  }
+  .suggestion-chip {
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 13px;
+  }
 }
+
