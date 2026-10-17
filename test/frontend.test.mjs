@@ -2324,3 +2324,79 @@ test("Bulk Log Outreach: WORKBOOK_BLOCKED preserves blocked and pending records 
   assert.equal(getEl("bulk-unresolved-banner").hidden, true);
 });
 
+test("Bulk Log Outreach: validates freshly retrieved school stage, skips Booked/Cold or mismatched stages as conflicts, and saves valid schools", async (t) => {
+  const records = [
+    { recordId: "00000000-0000-4000-8000-000000000201", schoolName: "School 201", schoolBoard: "TDSB", geographicRegion: "North", stage: "Not Contacted", lastRequestId: "v1", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000202", schoolName: "School 202", schoolBoard: "TDSB", geographicRegion: "East", stage: "Not Contacted", lastRequestId: "v2", canEdit: true },
+    { recordId: "00000000-0000-4000-8000-000000000203", schoolName: "School 203", schoolBoard: "TDSB", geographicRegion: "Central", stage: "Not Contacted", lastRequestId: "v3", canEdit: true },
+  ];
+  const activityRequests = [];
+
+  // Fresh server state:
+  // - School 201 has become "Booked" between selection and saving
+  // - School 202 has been contacted elsewhere and is now "Contacted"
+  // - School 203 is still "Not Contacted"
+  const serverRecords = new Map([
+    [records[0].recordId, { ...records[0], stage: "Booked" }],
+    [records[1].recordId, { ...records[1], stage: "Contacted" }],
+    [records[2].recordId, { ...records[2], stage: "Not Contacted" }],
+  ]);
+
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: records, sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) {
+      const match = url.match(/recordId=([^&]+)/);
+      const rec = serverRecords.get(decodeURIComponent(match[1]));
+      return Response.json({ ok: true, record: rec });
+    }
+    if (url.includes("/api/activities")) {
+      const body = JSON.parse(init.body);
+      activityRequests.push(body);
+      return Response.json({ ok: true, record: { recordId: body.recordId, lastRequestId: crypto.randomUUID() } });
+    }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  // Select all three schools when initially "Not Contacted"
+  context.openBulkOutreach([records[0].recordId, records[1].recordId, records[2].recordId]);
+  getEl("bulk-to-step2").click();
+  context.applySuggestion("bulk-outcome", "No reply yet");
+  context.applySuggestion("bulk-summary", "Sent introductory email.");
+  getEl("bulk-to-step3").click();
+  getEl("bulk-confirm-sent").click();
+  getEl("bulk-submit-save").click();
+
+  for (let i = 0; i < 50 && activityRequests.length < 1; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+
+  // Only School 203 was saved!
+  assert.equal(activityRequests.length, 1);
+  assert.equal(activityRequests[0].recordId, records[2].recordId);
+
+  // Results show 1 saved, 2 conflicts
+  assert.match(getEl("bulk-final-summary").textContent, /Finished with 1 saved, 2 conflicts/);
+
+  // Status pills in results list
+  const pills = Array.from(getEl("bulk-results-list").children).map((row) => {
+    const schoolName = row.children[0]?.children[0]?.textContent;
+    const descText = row.children[0]?.children[1]?.textContent;
+    const pillText = row.children[1]?.textContent;
+    return { schoolName, pillText, descText };
+  });
+
+  const row201 = pills.find((p) => p.schoolName === "School 201");
+  assert.equal(row201.pillText, "⚠ Conflict");
+  assert.match(row201.descText, /Booked/i);
+
+  const row202 = pills.find((p) => p.schoolName === "School 202");
+  assert.equal(row202.pillText, "⚠ Conflict");
+  assert.match(row202.descText, /First Contact/i);
+
+  const row203 = pills.find((p) => p.schoolName === "School 203");
+  assert.equal(row203.pillText, "✓ Saved");
+});
+

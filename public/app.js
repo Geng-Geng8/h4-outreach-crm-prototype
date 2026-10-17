@@ -1025,17 +1025,75 @@ async function executeBulkBatch(isRetry = false) {
 
     try {
       if (!item.payload) {
-        let schoolDetail = item.school;
+        let schoolDetail = null;
         try {
           const detailRes = await apiFetch(`./api/schools/detail?recordId=${encodeURIComponent(item.school.recordId)}`, {
             headers: { Authorization: `Bearer ${credential}` }, credentials: "omit", cache: "no-store",
           });
-          const detailData = await detailRes.json();
-          if (detailRes.ok && detailData.record) {
-            schoolDetail = detailData.record;
+          if (detailRes.ok) {
+            const detailData = await detailRes.json();
+            if (detailData && detailData.record) {
+              schoolDetail = detailData.record;
+            }
           }
         } catch {
-          // Fallback to cached school summary
+          // Network or server fetch error
+        }
+
+        if (!schoolDetail) {
+          // If fresh school details cannot be retrieved, fail safely rather than using potentially outdated cached information.
+          item.status = "failed";
+          item.error = "Could not retrieve fresh school information. Save skipped for safety.";
+          item.code = "DETAIL_FETCH_FAILED";
+          item.retryable = true;
+          item.isConfirmedRejection = false;
+          updateBulkProgressUI(i);
+          continue;
+        }
+
+        const currentStage = schoolDetail.stage;
+
+        if (schoolDetail.canEdit === false) {
+          item.status = "conflict";
+          item.error = "You can only edit schools assigned to you.";
+          item.code = "NOT_OWNER";
+          item.retryable = false;
+          item.isConfirmedRejection = false;
+          updateBulkProgressUI(i);
+          continue;
+        }
+
+        // Skip schools that have become Booked or Cold
+        if (["Booked", "Cold"].includes(currentStage)) {
+          item.status = "conflict";
+          item.error = `School is now ${currentStage}. Outreach skipped.`;
+          item.code = "STAGE_INELIGIBLE";
+          item.retryable = false;
+          item.isConfirmedRejection = false;
+          updateBulkProgressUI(i);
+          continue;
+        }
+
+        // First Contact requires the current stage to be Not Contacted
+        if (bulkBatch.activityType === "Outreach" && currentStage !== "Not Contacted") {
+          item.status = "conflict";
+          item.error = `First Contact requires "Not Contacted" stage. School is now ${currentStage}.`;
+          item.code = "STAGE_MISMATCH";
+          item.retryable = false;
+          item.isConfirmedRejection = false;
+          updateBulkProgressUI(i);
+          continue;
+        }
+
+        // Follow-Up requires an already-contacted, eligible stage
+        if (bulkBatch.activityType === "FollowUp" && currentStage === "Not Contacted") {
+          item.status = "conflict";
+          item.error = `Follow-Up requires an already-contacted school.`;
+          item.code = "STAGE_MISMATCH";
+          item.retryable = false;
+          item.isConfirmedRejection = false;
+          updateBulkProgressUI(i);
+          continue;
         }
 
         const payload = {
