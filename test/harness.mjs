@@ -36,6 +36,10 @@ export function fixture() {
       [ACTOR, "Alex", "co-op", true], [OTHER, "Sam", "co-op", true],
       [SUPERVISOR, "Morgan", "Supervisor", true], ["revoked@example.test", "Revoked", "co-op", false]],
     "Activity Log": [[...HEADERS["Activity Log"]]],
+    Contacts: [
+      [...HEADERS.Contacts],
+      ["00000000-0000-4000-9000-000000000001", RECORD, "Maple Example Secondary", "Jane Smith", "Principal", "Administration", "9-12", "Main Office", "principal@example.test", "416-555-0100", "Default primary contact", "TRUE", "TRUE", "2026-10-15"],
+    ],
     "School Directory": [[...HEADERS["School Directory"]], ...[1, 2, 3, 4].map((number) => [
       `90000${number}`, number === 1 ? "Maple Example Secondary" : `Example School ${number}`,
       "EXAMPLE", "Secondary", "9-12", "Example City", "123 Example Street", "A1A 1A1",
@@ -63,10 +67,10 @@ export class FakeSheets {
   delayMs = 12;
 
   apply(batch) {
-    if (batch.valueInputOption !== "RAW" || batch.data.length !== 3) throw new Error("Invalid batch contract");
+    if (batch.valueInputOption !== "RAW" || ![3, 4, 5].includes(batch.data.length)) throw new Error("Invalid batch contract");
     const next = structuredClone(this.tables);
     for (const [index, range] of batch.data.entries()) {
-      const match = /^'(Schools|Activity Log)'!([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range.range);
+      const match = /^'(Schools|Activity Log|Contacts)'!([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range.range);
       if (!match) throw new Error("Unexpected write range");
       const [, tab, startColumn, startRow, endColumn, endRow] = match;
       const from = columnIndex(startColumn), to = columnIndex(endColumn);
@@ -76,8 +80,9 @@ export class FakeSheets {
         throw new Error("Protected or unformatted range");
       }
       if (tab === "Activity Log" && (from !== 0 || to !== 14)) throw new Error("Invalid activity range");
+      if (tab === "Contacts" && (from !== 0 || to !== 13)) throw new Error("Invalid contacts range");
       const number = Number(startRow) - 1;
-      next[tab][number] ??= Array(tab === "Schools" ? 32 : 15).fill("");
+      next[tab][number] ??= Array(tab === "Schools" ? 32 : tab === "Contacts" ? 14 : 15).fill("");
       range.values[0].forEach((value, offset) => { next[tab][number][from + offset] = value; });
       // Fail after some ranges have been staged, proving no partial commit escapes.
       if (this.fault === "reject" && index === 1) throw new Error("Injected batch validation failure");
@@ -104,7 +109,7 @@ export class FakeSheets {
           return new Response("Read temporarily unavailable", { status });
         }
         const ranges = url.searchParams.getAll("ranges");
-        if (ranges.length !== 4 || url.searchParams.get("valueRenderOption") !== "FORMULA") {
+        if (ranges.length !== 5 || url.searchParams.get("valueRenderOption") !== "FORMULA") {
           throw new Error("Unexpected read contract");
         }
         const valueRanges = ranges.map((range) => {

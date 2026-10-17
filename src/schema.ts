@@ -16,6 +16,11 @@ export const HEADERS = {
     "Outcome", "Contacted Person", "Message Summary", "Next Action", "Follow-Up Due",
     "Related Record ID", "Request ID", "Actor Email", "Activity Type", "Platform",
   ],
+  Contacts: [
+    "Contact ID", "Record ID", "School Name", "Name", "Role",
+    "Category", "Grade Range", "Program / Group", "Email", "Phone",
+    "Notes", "Is Primary", "Active", "Updated At",
+  ],
   "School Directory": [
     "Ontario School Number", "School Name", "School Board", "School Level",
     "Grade Range", "City / Municipality", "Street Address", "Postal Code", "Email",
@@ -36,6 +41,57 @@ export const C = {
   priority: 12, notes: 13, phone: 14, value: 15, region: 18, address: 22,
   source: 23, osn: 24, owner: 25, count: 26, version: 27,
 } as const;
+
+export const ContactCol = {
+  id: 0, recordId: 1, schoolName: 2, name: 3, role: 4,
+  category: 5, gradeRange: 6, programGroup: 7, email: 8, phone: 9,
+  notes: 10, isPrimary: 11, active: 12, updatedAt: 13,
+} as const;
+
+export function contactRecord(row: Row) {
+  return {
+    contactId: String(row[ContactCol.id] ?? ""),
+    recordId: String(row[ContactCol.recordId] ?? ""),
+    schoolName: String(row[ContactCol.schoolName] ?? ""),
+    name: String(row[ContactCol.name] ?? ""),
+    role: String(row[ContactCol.role] ?? ""),
+    category: String(row[ContactCol.category] ?? ""),
+    gradeRange: String(row[ContactCol.gradeRange] ?? ""),
+    programGroup: String(row[ContactCol.programGroup] ?? ""),
+    email: String(row[ContactCol.email] ?? ""),
+    phone: String(row[ContactCol.phone] ?? ""),
+    notes: String(row[ContactCol.notes] ?? ""),
+    isPrimary: String(row[ContactCol.isPrimary] ?? "").trim().toUpperCase() === "TRUE",
+    active: ["TRUE", ""].includes(String(row[ContactCol.active] ?? "").trim().toUpperCase()),
+    updatedAt: String(row[ContactCol.updatedAt] ?? ""),
+  };
+}
+
+export const CONSUMER_EMAIL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "rocketmail.com",
+  "hotmail.com", "outlook.com", "live.com", "msn.com",
+  "icloud.com", "me.com", "mac.com", "aol.com", "aim.com",
+  "proton.me", "protonmail.com", "zoho.com", "yandex.com", "gmx.com", "mail.com",
+]);
+
+export function assertStudentPrivacy(category: string, email: string, phone: string) {
+  if (category !== "Student") return;
+  if (phone.trim()) {
+    throw new ApiError(422, "STUDENT_PHONE_FORBIDDEN", {
+      message: "Personal phone numbers cannot be stored for student contacts under student privacy rules.",
+    });
+  }
+  const trimmedEmail = email.trim().toLowerCase();
+  if (trimmedEmail) {
+    const at = trimmedEmail.lastIndexOf("@");
+    const domain = at !== -1 ? trimmedEmail.slice(at + 1) : "";
+    if (CONSUMER_EMAIL_DOMAINS.has(domain)) {
+      throw new ApiError(422, "STUDENT_PERSONAL_EMAIL_FORBIDDEN", {
+        message: "Consumer email addresses (such as Gmail, Yahoo, Hotmail, iCloud) cannot be stored for student contacts. Only school-affiliated email addresses are permitted.",
+      });
+    }
+  }
+}
 
 export class ApiError extends Error {
   status: number;

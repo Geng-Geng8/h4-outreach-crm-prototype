@@ -946,6 +946,7 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       tagName: tag.toUpperCase(),
       parentElement: null,
       style: {},
+      dataset: {},
       classes,
       get className() { return Array.from(classes).join(" "); },
       set className(val) {
@@ -985,6 +986,10 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
           if (child && typeof child === "object") child.parentElement = this;
         }
         children.push(...args);
+      },
+      appendChild: function (child) {
+        this.append(child);
+        return child;
       },
       setAttribute: (k, v) => { attrs[k] = String(v); },
       getAttribute: (k) => attrs[k],
@@ -2978,6 +2983,113 @@ test("Individual Log Outreach: supports new channels Text and Visit with adaptiv
   assert.equal(requests[0].channel, "Visit");
   assert.equal(requests[0].summary, "Visited school to introduce H4.");
 });
+
+test("unresolved contact operations: uncertain contact save preserves request ID and draft across editor close, view switch, and blocks conflicting operations until retried", async (t) => {
+  const schoolA = { recordId: "school-a", schoolName: "Alpha School", schoolBoard: "EXAMPLE", geographicRegion: "North", stage: "Contacted", lastRequestId: "ver-a" };
+  const schoolB = { recordId: "school-b", schoolName: "Beta School", schoolBoard: "EXAMPLE", geographicRegion: "South", stage: "Not Contacted", lastRequestId: "ver-b" };
+  const contactRequests = [];
+  let contactFailure = "503";
+
+  const fetchHandler = async (url, init = {}) => {
+    const sUrl = String(url);
+    if (sUrl.includes("/api/config")) {
+      return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client" });
+    }
+    if (sUrl.includes("/api/bootstrap")) {
+      return Response.json({
+        currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+        sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        schools: [schoolA, schoolB],
+      });
+    }
+    if (sUrl.includes("/api/schools/detail")) {
+      const isA = sUrl.includes("school-a");
+      return Response.json({
+        record: isA ? schoolA : schoolB,
+        contacts: [],
+      });
+    }
+    if (sUrl.includes("/api/schools/contacts")) {
+      const payload = JSON.parse(init.body);
+      contactRequests.push(payload);
+      if (contactFailure === "503") {
+        return Response.json({ code: "COMMIT_UNCERTAIN" }, { status: 503 });
+      }
+      return Response.json({
+        ok: true,
+        record: { ...schoolA, lastRequestId: payload.requestId, contactName: payload.contact.name },
+        contact: { ...payload.contact, contactId: "contact-new-1", isPrimary: true, active: true },
+      });
+    }
+    return new Response("Not found", { status: 404 });
+  };
+
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler });
+  t.after(cleanup);
+
+  // 1. Sign in and open School Details for School A
+  await signIn("alex@example.test");
+  await context.openSchoolEditor(schoolA.recordId, false, "details");
+
+  // 2. Open contact form and enter contact details
+  context.openContactForm();
+  getEl("cform-name").value = "Dana Sculptor";
+  getEl("cform-role").value = "Art Teacher";
+  getEl("cform-category").value = "Teacher";
+  getEl("cform-email").value = "dana@schoolboard.ca";
+  getEl("cform-phone").value = "416-555-0155";
+  getEl("cform-notes").value = "Ceramics lead";
+
+  // 3. Save contact -> simulates lost acknowledgment (503 COMMIT_UNCERTAIN)
+  await context.saveContactFromForm();
+  assert.equal(contactRequests.length, 1);
+  const firstReqId = contactRequests[0].requestId;
+  assert.ok(firstReqId);
+  assert.equal(contactRequests[0].contact.name, "Dana Sculptor");
+  assert.equal(getEl("cform-save-btn").textContent, "Retry save");
+  assert.match(getEl("editor-feedback").textContent, /uncertain|kept/);
+
+  // 4. Close the school editor while save is uncertain
+  context.closeSchoolEditor();
+  assert.equal(getEl("school-editor").open, false);
+
+  // 5. Navigate / switch views
+  context.switchTab("dashboard");
+  assert.equal(getEl("dashboard-view").hidden, false);
+  context.switchTab("my-schools");
+  assert.equal(getEl("schools-view").hidden, false);
+
+  // 6. Open a DIFFERENT school (School B) and attempt a contact operation
+  await context.openSchoolEditor(schoolB.recordId, false, "details");
+  context.openContactForm();
+  assert.match(getEl("editor-feedback").textContent, /pending verification/);
+  // Contact form on School B must NOT open or replace unresolved operation
+  assert.equal(getEl("contact-form-panel").hidden, true);
+  context.closeSchoolEditor();
+
+  // 7. Reopen School A
+  await context.openSchoolEditor(schoolA.recordId, false, "details");
+  // Form draft is automatically restored with "Dana Sculptor" and button says "Retry save"
+  assert.equal(getEl("contact-form-panel").hidden, false);
+  assert.equal(getEl("cform-name").value, "Dana Sculptor");
+  assert.equal(getEl("cform-role").value, "Art Teacher");
+  assert.equal(getEl("cform-email").value, "dana@schoolboard.ca");
+  assert.equal(getEl("cform-save-btn").textContent, "Retry save");
+  assert.equal(getEl("editor-reload").disabled, true);
+
+  // 8. Retry save -> succeeds
+  contactFailure = "";
+  await context.saveContactFromForm();
+  assert.equal(contactRequests.length, 2);
+  assert.equal(contactRequests[1].requestId, firstReqId, "Retry must reuse exact same requestId");
+  assert.deepEqual(contactRequests[1].contact, contactRequests[0].contact, "Retry payload must be identical");
+
+  // 9. Form closes and toast is displayed
+  assert.equal(getEl("contact-form-panel").hidden, true);
+  assert.equal(getEl("save-toast").hidden, false);
+  assert.match(getEl("save-toast").textContent, /Contact saved/);
+});
+
 
 
 
