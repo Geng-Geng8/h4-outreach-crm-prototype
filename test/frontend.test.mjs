@@ -916,6 +916,8 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
   const activeIntervals = new Set();
   const elements = new Map();
 
+  const createdElements = new Set();
+
   function cleanup() {
     for (const t of activeTimers) {
       globalThis.clearTimeout(t);
@@ -925,6 +927,7 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       globalThis.clearInterval(i);
     }
     activeIntervals.clear();
+    createdElements.clear();
   }
 
   function getEl(id) {
@@ -941,6 +944,7 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
     return {
       id,
       tagName: tag.toUpperCase(),
+      parentElement: null,
       style: {},
       classes,
       get className() { return Array.from(classes).join(" "); },
@@ -971,26 +975,37 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       close() { this.open = false; },
       focus() { this.focused = true; },
       children,
-      replaceChildren: (...args) => { children.length = 0; children.push(...args); },
-      append: (...args) => { children.push(...args); },
+      replaceChildren: function (...args) {
+        children.length = 0;
+        this.append(...args);
+      },
+      append: function (...args) {
+        for (const child of args) {
+          if (child && typeof child === "object") child.parentElement = this;
+        }
+        children.push(...args);
+      },
       setAttribute: (k, v) => { attrs[k] = String(v); },
       getAttribute: (k) => attrs[k],
       removeAttribute: (k) => { delete attrs[k]; },
       closest: function (sel) {
-        if (sel.startsWith(".")) return this.classList.contains(sel.slice(1)) ? this : null;
-        if (sel.startsWith("#")) return this.id === sel.slice(1) ? this : null;
+        if (sel.startsWith(".")) return this.classList.contains(sel.slice(1)) ? this : this.parentElement?.closest(sel) ?? null;
+        if (sel.startsWith("#")) return this.id === sel.slice(1) ? this : this.parentElement?.closest(sel) ?? null;
         return null;
       },
       dispatchEvent: function (ev) {
         const type = typeof ev === "string" ? ev : ev?.type;
         (listeners[type] || []).forEach((fn) => fn(ev));
+        if (ev?.bubbles && this.parentElement) {
+          this.parentElement.dispatchEvent(ev);
+        }
       },
       addEventListener: (ev, fn) => { (listeners[ev] ??= []).push(fn); },
       click: function () {
         if (this.disabled) return;
         if (this.onclick) this.onclick();
-        const ev = { target: this, type: "click", preventDefault() {}, stopPropagation() {} };
-        (listeners["click"] || []).forEach((fn) => fn(ev));
+        const ev = { target: this, type: "click", bubbles: true, preventDefault() {}, stopPropagation() {} };
+        this.dispatchEvent(ev);
       },
     };
   }
@@ -999,7 +1014,8 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
     querySelector: () => ({ content: apiOrigin }),
     querySelectorAll: (sel) => {
       const parts = sel.split(",").map((s) => s.trim());
-      return Array.from(elements.values()).filter((el) => {
+      const all = [...elements.values(), ...createdElements];
+      return all.filter((el) => {
         return parts.some((p) => {
           if (p.startsWith(".")) return el.classList.contains(p.slice(1));
           if (p.startsWith("#")) return el.id === p.slice(1);
@@ -1008,7 +1024,11 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       });
     },
     getElementById: (id) => missingIds.includes(id) ? null : getEl(id),
-    createElement: (tag) => makeElement("", tag),
+    createElement: (tag) => {
+      const el = makeElement("", tag);
+      createdElements.add(el);
+      return el;
+    },
     head: makeElement("head", "head"),
     addEventListener: () => {},
     visibilityState: "visible",
@@ -1078,6 +1098,8 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
   vm.createContext(context);
   getEl("workspace").hidden = true;
   getEl("session-restore").hidden = true;
+  getEl("editor-form").append(getEl("step-summary"));
+  getEl("step-summary").append(getEl("summary-suggestion-chips"));
   vm.runInContext(appCode, context);
 
   async function signIn(email = "supervisor@example.test") {
@@ -1426,3 +1448,166 @@ test("Scenario B: School responds: records outcome, custom text, summarizes disc
   assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
   assert.equal(getEl("school-editor").open, false);
 });
+
+test("quick summary suggestions: provides Grade 9 Email First Contact pills, supports one-tap fill, updates contextually, and does not overwrite existing text", async (t) => {
+  const record = { recordId: "00000000-0000-4000-8000-000000000093", schoolName: "Silverthorn CI", schoolBoard: "TDSB", geographicRegion: "Etobicoke", stage: "Not Contacted", contactName: "Mr. Brown", contactRole: "Guidance", lastRequestId: "v1" };
+  const requests = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record });
+    if (url.includes("/api/activities")) { requests.push(JSON.parse(init.body)); return Response.json({ ok: true, record: { ...record, stage: "Contacted", lastRequestId: "v2" } }); }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+  await context.openSchoolEditor(record.recordId, false, "activity");
+
+  // Step 4: Initially no summary preselected
+  assert.equal(getEl("log-summary").value, "");
+  const chipsContainer = getEl("summary-suggestion-chips");
+  assert.equal(chipsContainer.children.length, 5);
+
+  const expectedEmailOutreach = [
+    { label: "Introduced H4", value: "Sent an introductory email explaining H4 and our free dance programs." },
+    { label: "Offered free workshop", value: "Sent an email offering a free introductory dance workshop." },
+    { label: "Asked about dance program", value: "Emailed to ask if the school has a dance class, team, or club." },
+    { label: "Asked for the right contact", value: "Emailed to ask who oversees dance, leadership, or student clubs." },
+    { label: "Invited student mentors", value: "Sent an email inviting students to become H4 volunteer dance mentors." },
+  ];
+
+  for (let i = 0; i < expectedEmailOutreach.length; i++) {
+    const chip = chipsContainer.children[i];
+    assert.equal(chip.textContent, expectedEmailOutreach[i].label);
+    assert.equal(chip.getAttribute("data-value"), expectedEmailOutreach[i].value);
+    assert.equal(chip.getAttribute("data-target"), "log-summary");
+    assert.equal(chip.classList.contains("selected"), false);
+  }
+
+  // Tapping first pill fills summary and selects chip
+  chipsContainer.children[0].click();
+  assert.equal(getEl("log-summary").value, "Sent an introductory email explaining H4 and our free dance programs.");
+  assert.equal(chipsContainer.children[0].classList.contains("selected"), true);
+  assert.equal(chipsContainer.children[0].getAttribute("aria-pressed"), "true");
+  assert.equal(chipsContainer.children[1].classList.contains("selected"), false);
+
+  // Tapping another pill updates summary and transfers selection
+  chipsContainer.children[1].click();
+  assert.equal(getEl("log-summary").value, "Sent an email offering a free introductory dance workshop.");
+  assert.equal(chipsContainer.children[0].classList.contains("selected"), false);
+  assert.equal(chipsContainer.children[1].classList.contains("selected"), true);
+
+  // Manual typing preserves editing; unselects pill if non-matching
+  getEl("log-summary").value = "Sent custom email to department head.";
+  getEl("log-summary").dispatchEvent(new Event("input", { bubbles: true }));
+  assert.equal(chipsContainer.children[1].classList.contains("selected"), false);
+
+  // Context-aware update: Switch to Email + Follow-up
+  getEl("log-activityType").value = "FollowUp";
+  getEl("log-activityType").dispatchEvent(new Event("change", { bubbles: true }));
+
+  // Crucial invariant: does NOT overwrite existing text
+  assert.equal(getEl("log-summary").value, "Sent custom email to department head.");
+  assert.equal(chipsContainer.children.length, 2);
+  assert.equal(chipsContainer.children[0].textContent, "Followed up about workshop opportunities");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Followed up about workshop opportunities.");
+  assert.equal(chipsContainer.children[1].textContent, "Requested an update");
+  assert.equal(chipsContainer.children[1].getAttribute("data-value"), "Requested an update.");
+
+  // Tapping follow-up pill fills summary
+  chipsContainer.children[1].click();
+  assert.equal(getEl("log-summary").value, "Requested an update.");
+  assert.equal(chipsContainer.children[1].classList.contains("selected"), true);
+
+  // Context-aware update: Switch to Phone
+  getEl("log-channel").value = "Phone";
+  getEl("log-channel").dispatchEvent(new Event("change", { bubbles: true }));
+  // Text preserved across channel switch
+  assert.equal(getEl("log-summary").value, "Requested an update.");
+  assert.equal(chipsContainer.children.length, 3);
+  assert.equal(chipsContainer.children[0].textContent, "Called the school");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Called the school.");
+  assert.equal(chipsContainer.children[1].textContent, "Left voicemail");
+  assert.equal(chipsContainer.children[1].getAttribute("data-value"), "Left voicemail.");
+  assert.equal(chipsContainer.children[2].textContent, "Discussed workshop opportunities");
+  assert.equal(chipsContainer.children[2].getAttribute("data-value"), "Discussed workshop opportunities.");
+
+  // Context-aware update: Switch to Social
+  getEl("log-channel").value = "Social";
+  getEl("log-channel").dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(getEl("log-summary").value, "Requested an update.");
+  assert.equal(chipsContainer.children.length, 2);
+  assert.equal(chipsContainer.children[0].textContent, "Sent introductory message");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Sent introductory message.");
+  assert.equal(chipsContainer.children[1].textContent, "Followed up through social media");
+  assert.equal(chipsContainer.children[1].getAttribute("data-value"), "Followed up through social media.");
+
+  // Context-aware update: Switch to Meeting
+  getEl("log-channel").value = "Meeting";
+  getEl("log-channel").dispatchEvent(new Event("change", { bubbles: true }));
+  assert.equal(getEl("log-summary").value, "Requested an update.");
+  assert.equal(chipsContainer.children.length, 3);
+  assert.equal(chipsContainer.children[0].textContent, "Discussed workshop plans");
+  assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Discussed workshop plans.");
+  assert.equal(chipsContainer.children[1].textContent, "Discussed scheduling");
+  assert.equal(chipsContainer.children[1].getAttribute("data-value"), "Discussed scheduling.");
+  assert.equal(chipsContainer.children[2].textContent, "Agreed on next steps");
+  assert.equal(chipsContainer.children[2].getAttribute("data-value"), "Agreed on next steps.");
+
+  // Tapping Meeting pill fills summary
+  chipsContainer.children[2].click();
+  assert.equal(getEl("log-summary").value, "Agreed on next steps.");
+  assert.equal(chipsContainer.children[2].classList.contains("selected"), true);
+});
+
+test("Scenario: Grade 9 first email outreach using quick summary suggestion pill saves end-to-end", async (t) => {
+  const record = { recordId: "00000000-0000-4000-8000-000000000094", schoolName: "Birchmount Park CI", schoolBoard: "TDSB", geographicRegion: "Scarborough", stage: "Not Contacted", contactName: "Ms. Miller", contactRole: "Dance Teacher", lastRequestId: "v1" };
+  const requests = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record });
+    if (url.includes("/api/activities")) { requests.push(JSON.parse(init.body)); return Response.json({ ok: true, record: { ...record, stage: "Contacted", lastRequestId: "v2" } }); }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+  await context.openSchoolEditor(record.recordId, false, "activity");
+
+  // Step 1: Contact
+  assert.equal(getEl("log-contact-name").textContent, "Ms. Miller");
+
+  // Step 2: Defaults Email + Outreach
+  assert.equal(getEl("log-channel").value, "Email");
+  assert.equal(getEl("log-activityType").value, "Outreach");
+
+  // Step 3: Select Outcome "No reply yet"
+  context.applySuggestion("log-outcome", "No reply yet");
+
+  // Step 4: One-tap summary suggestion "Offered free workshop"
+  const chipsContainer = getEl("summary-suggestion-chips");
+  const workshopChip = chipsContainer.children.find?.((c) => c.textContent === "Offered free workshop")
+    ?? Array.from(chipsContainer.children).find((c) => c.textContent === "Offered free workshop");
+  assert.ok(workshopChip);
+  workshopChip.click();
+  assert.equal(getEl("log-summary").value, "Sent an email offering a free introductory dance workshop.");
+  assert.equal(workshopChip.classList.contains("selected"), true);
+
+  // Step 5: Next action & Follow-up date
+  context.applySuggestion("edit-nextAction", "Follow up if no reply");
+  getEl("edit-followUpDue").value = "2026-10-25";
+
+  // Save activity
+  await context.saveSchoolEdits({ preventDefault() {} });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].channel, "Email");
+  assert.equal(requests[0].activityType, "Outreach");
+  assert.equal(requests[0].outcome, "No reply yet");
+  assert.equal(requests[0].summary, "Sent an email offering a free introductory dance workshop.");
+  assert.equal(requests[0].nextAction, "Follow up if no reply");
+  assert.equal(requests[0].followUpDue, "2026-10-25");
+  assert.equal(requests[0].stage, "Contacted");
+  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("school-editor").open, false);
+});
+

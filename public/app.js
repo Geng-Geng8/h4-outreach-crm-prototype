@@ -310,6 +310,62 @@ function updateSuggestionStates() {
   }
 }
 
+const summarySuggestions = {
+  Email: {
+    Outreach: [
+      { label: "Introduced H4", value: "Sent an introductory email explaining H4 and our free dance programs." },
+      { label: "Offered free workshop", value: "Sent an email offering a free introductory dance workshop." },
+      { label: "Asked about dance program", value: "Emailed to ask if the school has a dance class, team, or club." },
+      { label: "Asked for the right contact", value: "Emailed to ask who oversees dance, leadership, or student clubs." },
+      { label: "Invited student mentors", value: "Sent an email inviting students to become H4 volunteer dance mentors." },
+    ],
+    FollowUp: [
+      { label: "Followed up about workshop opportunities", value: "Followed up about workshop opportunities." },
+      { label: "Requested an update", value: "Requested an update." },
+    ],
+  },
+  Phone: [
+    { label: "Called the school", value: "Called the school." },
+    { label: "Left voicemail", value: "Left voicemail." },
+    { label: "Discussed workshop opportunities", value: "Discussed workshop opportunities." },
+  ],
+  Social: [
+    { label: "Sent introductory message", value: "Sent introductory message." },
+    { label: "Followed up through social media", value: "Followed up through social media." },
+  ],
+  Meeting: [
+    { label: "Discussed workshop plans", value: "Discussed workshop plans." },
+    { label: "Discussed scheduling", value: "Discussed scheduling." },
+    { label: "Agreed on next steps", value: "Agreed on next steps." },
+  ],
+};
+
+function getSummarySuggestions(channel, activityType) {
+  const channelData = summarySuggestions[channel] || summarySuggestions.Email;
+  if (Array.isArray(channelData)) return channelData;
+  return channelData[activityType] || channelData.Outreach || [];
+}
+
+function renderSummarySuggestions() {
+  const container = el("summary-suggestion-chips");
+  if (!container) return;
+  const channel = el("log-channel")?.value || "Email";
+  const activityType = el("log-activityType")?.value || "Outreach";
+  const suggestions = getSummarySuggestions(channel, activityType);
+  container.replaceChildren();
+  for (const item of suggestions) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "suggestion-chip";
+    chip.setAttribute("data-target", "log-summary");
+    chip.setAttribute("data-value", item.value);
+    chip.textContent = item.label;
+    chip.onclick = () => applySuggestion("log-summary", item.value);
+    if (editing?.busy || el("log-summary")?.disabled) chip.disabled = true;
+    container.append(chip);
+  }
+}
+
 function updateColdWarning() {
   const warning = el("cold-warning");
   if (!warning) return;
@@ -434,6 +490,7 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
   el("editor-close").disabled = false; el("editor-reload").disabled = true;
   for (const field of editFields) el(`edit-${field}`).value = "";
   editorInputs(true);
+  renderSummarySuggestions();
   updateSuggestionStates();
   if (!el("school-editor").open) el("school-editor").showModal();
   try {
@@ -480,6 +537,7 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     editing.stale = !!staleDraft;
     editorFeedback(staleDraft ? "Your draft is kept, but saved information changed. Reload school values and review before saving." : retainedActivity ? "Latest school values loaded. Your outreach text is kept; review stage and follow-up before saving." : draft ? "Your unsaved draft was restored." : "Changes save to the test spreadsheet.", staleDraft ? "error" : "info");
     editorInputs(!!editing.pending);
+    renderSummarySuggestions();
     updateSuggestionStates();
     el("editor-save").disabled = !!staleDraft; el("editor-save").textContent = editing.pending ? "Retry save" : editorSaveLabel(editing);
     el("editor-reload").disabled = !!editing.pending;
@@ -1301,7 +1359,16 @@ el("editor-form").addEventListener("click", (event) => {
   if (targetId && value) applySuggestion(targetId, value);
 });
 el("log-outcome")?.addEventListener("input", updateSuggestionStates);
+el("log-summary")?.addEventListener("input", updateSuggestionStates);
 el("edit-nextAction")?.addEventListener("input", updateSuggestionStates);
+el("log-channel")?.addEventListener("change", () => {
+  renderSummarySuggestions();
+  updateSuggestionStates();
+});
+el("log-activityType")?.addEventListener("change", () => {
+  renderSummarySuggestions();
+  updateSuggestionStates();
+});
 el("edit-stage")?.addEventListener("change", updateColdWarning);
 el("log-contact-edit")?.addEventListener("click", editSchoolContact);
 el("return-to-activity")?.addEventListener("click", () => returnToActivity(false));
