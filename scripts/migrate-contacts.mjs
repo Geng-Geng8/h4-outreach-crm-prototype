@@ -4,20 +4,19 @@
 //
 // SAFE DEPLOYMENT & TEST-WORKBOOK CUTOVER SEQUENCE:
 // 1. Tab Preparation:
-//    Ensure the 'Contacts' tab exists in the test workbook with standard A1:N1 headers (matching HEADERS.Contacts).
-// 2. Backend Deployment:
-//    Deploy Worker code from PR #11 containing contact CRUD and one-source-of-truth synchronization.
-//    Once deployed, any legacy /api/schools/update will automatically synchronize with Contacts.
-// 3. Dry-Run Migration:
-//    Run 'node scripts/migrate-contacts.mjs' to inspect schools to be backfilled and their non-destructive row allocations.
-// 4. Safe Cutover / Active Write Protection:
-//    Run migration during a designated quiet window (or before enabling the School Contacts UI for users).
-//    The migration script takes a fresh pre-commit snapshot to verify no concurrent contact writes occurred.
-// 5. Live Migration Commit:
+//    Create the 'Contacts' tab in the test workbook with standard A1:N1 headers (matching HEADERS.Contacts).
+// 2. Cloudflare Worker Deployment:
+//    Deploy the Worker code from PR #11 containing contact CRUD and one-source-of-truth synchronization.
+//    Once deployed, legacy /api/schools/update calls automatically synchronize with Contacts.
+// 3. Dry-Run Migration & Quiet Window:
+//    During a quiet window (no concurrent outreach writes), run 'node scripts/migrate-contacts.mjs'
+//    to inspect schools to be backfilled and review non-destructive row allocations.
+// 4. Live Migration Commit & Verification:
 //    Run 'node scripts/migrate-contacts.mjs --commit'.
-//    The script writes non-overlapping ranges strictly to verified empty rows, preserving all populated rows and gaps.
-// 6. User-Facing UI Enablement:
-//    Verify migration output on the test spreadsheet, then enable School Contacts UI controls in the web app.
+//    The script re-verifies pre-commit that target rows remain empty, writes non-overlapping ranges,
+//    and preserves all populated rows and gaps. Verify in Google Sheets and rerun dry-run (reports 0 remaining).
+// 5. GitHub Pages Publication:
+//    Publish the updated frontend build to GitHub Pages to deliver the School Contacts UI to users.
 
 import { randomUUID } from "node:crypto";
 import { C, ContactCol } from "../src/schema.ts";
