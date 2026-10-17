@@ -559,17 +559,17 @@ test("student-friendly outreach flow: displays existing contact, applies outcome
   assert.equal(getEl("log-activityType").value, "Outreach");
 
   // Step 3: Suggestions apply to log-outcome
-  context.applySuggestion("log-outcome", "Introduction sent");
-  assert.equal(getEl("log-outcome").value, "Introduction sent");
-  context.applySuggestion("log-outcome", "Waiting for a reply");
-  assert.equal(getEl("log-outcome").value, "Waiting for a reply");
+  context.applySuggestion("log-outcome", "No reply yet");
+  assert.equal(getEl("log-outcome").value, "No reply yet");
+  context.applySuggestion("log-outcome", "Left voicemail");
+  assert.equal(getEl("log-outcome").value, "Left voicemail");
 
   // Step 4: Summary
   getEl("log-summary").value = "Emailed Ms. Patel about a free workshop. She’ll ask the principal. Follow up next Wednesday.";
 
   // Step 5: Suggestions apply to edit-nextAction
-  context.applySuggestion("edit-nextAction", "Waiting for a reply");
-  assert.equal(getEl("edit-nextAction").value, "Waiting for a reply");
+  context.applySuggestion("edit-nextAction", "Follow up if no reply");
+  assert.equal(getEl("edit-nextAction").value, "Follow up if no reply");
   getEl("edit-followUpDue").value = "2026-10-21";
 
   // Switch to contact editor via log-contact-edit and confirm draft preservation
@@ -585,17 +585,17 @@ test("student-friendly outreach flow: displays existing contact, applies outcome
   for (let i = 0; i < 10 && getEl("editor-save").disabled; i++) await new Promise((done) => setTimeout(done, 1));
   assert.equal(getEl("editor-kind").textContent, "LOG OUTREACH");
   assert.equal(getEl("outreach-fields").hidden, false);
-  assert.equal(getEl("log-outcome").value, "Waiting for a reply");
+  assert.equal(getEl("log-outcome").value, "Left voicemail");
   assert.equal(getEl("log-summary").value, "Emailed Ms. Patel about a free workshop. She’ll ask the principal. Follow up next Wednesday.");
-  assert.equal(getEl("edit-nextAction").value, "Waiting for a reply");
+  assert.equal(getEl("edit-nextAction").value, "Follow up if no reply");
   assert.equal(getEl("edit-followUpDue").value, "2026-10-21");
 
   // Save changes
   await context.saveSchoolEdits({ preventDefault() {} });
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].outcome, "Waiting for a reply");
+  assert.equal(requests[0].outcome, "Left voicemail");
   assert.equal(requests[0].summary, "Emailed Ms. Patel about a free workshop. She’ll ask the principal. Follow up next Wednesday.");
-  assert.equal(requests[0].nextAction, "Waiting for a reply");
+  assert.equal(requests[0].nextAction, "Follow up if no reply");
   assert.equal(requests[0].followUpDue, "2026-10-21");
   assert.equal(requests[0].stage, "Contacted");
   assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
@@ -669,10 +669,10 @@ test("contact-editing round trip: add contact before entering text keeps return 
 
   getEl("log-channel").value = "Phone";
   getEl("log-activityType").value = "FollowUp";
-  context.applySuggestion("log-outcome", "Introduction sent");
+  context.applySuggestion("log-outcome", "Spoke with someone");
   getEl("log-summary").value = "Spoke with main office about hip hop education.";
   getEl("edit-stage").value = "Contacted";
-  context.applySuggestion("edit-nextAction", "Waiting for a reply");
+  context.applySuggestion("edit-nextAction", "Follow up if no reply");
   getEl("edit-followUpDue").value = "2026-10-30";
 
   // 2. Click "Add contact" -> switches to details mode
@@ -707,10 +707,10 @@ test("contact-editing round trip: add contact before entering text keeps return 
   assert.equal(getEl("log-contact-role").textContent, "· Principal");
   assert.equal(getEl("log-channel").value, "Phone");
   assert.equal(getEl("log-activityType").value, "FollowUp");
-  assert.equal(getEl("log-outcome").value, "Introduction sent");
+  assert.equal(getEl("log-outcome").value, "Spoke with someone");
   assert.equal(getEl("log-summary").value, "Spoke with main office about hip hop education.");
   assert.equal(getEl("edit-stage").value, "Contacted");
-  assert.equal(getEl("edit-nextAction").value, "Waiting for a reply");
+  assert.equal(getEl("edit-nextAction").value, "Follow up if no reply");
   assert.equal(getEl("edit-followUpDue").value, "2026-10-30");
 
   // Regression 3: Outreach draft is NOT marked stale (Save button is enabled, not disabled)
@@ -723,9 +723,9 @@ test("contact-editing round trip: add contact before entering text keeps return 
   assert.equal(activityRequests[0].expectedRequestId, "v2", "uses latest version from contact update");
   assert.equal(activityRequests[0].channel, "Phone");
   assert.equal(activityRequests[0].activityType, "FollowUp");
-  assert.equal(activityRequests[0].outcome, "Introduction sent");
+  assert.equal(activityRequests[0].outcome, "Spoke with someone");
   assert.equal(activityRequests[0].summary, "Spoke with main office about hip hop education.");
-  assert.equal(activityRequests[0].nextAction, "Waiting for a reply");
+  assert.equal(activityRequests[0].nextAction, "Follow up if no reply");
   assert.equal(activityRequests[0].followUpDue, "2026-10-30");
   assert.equal(activityRequests[0].stage, "Contacted");
   assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
@@ -1327,4 +1327,102 @@ test("frontend regression: returning to Demo tab reloads synthetic availability,
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(getEl("demo-feedback").textContent, "Availability unavailable");
   assert.equal(getEl("demo-list").children.length, 0);
+});
+
+test("Scenario A: Grade 9 first email outreach: selects 'No reply yet', sets follow-up date, and saves in under 60s flow", async (t) => {
+  const record = { recordId: "00000000-0000-4000-8000-000000000091", schoolName: "Highland Heights SS", schoolBoard: "TDSB", geographicRegion: "Scarborough", stage: "Not Contacted", contactName: "Mr. Lee", contactRole: "Arts Head", lastRequestId: "v1" };
+  const requests = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record });
+    if (url.includes("/api/activities")) { requests.push(JSON.parse(init.body)); return Response.json({ ok: true, record: { ...record, stage: "Contacted", lastRequestId: "v2" } }); }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+  await context.openSchoolEditor(record.recordId, false, "activity");
+
+  // Step 1: Contact displayed
+  assert.equal(getEl("log-contact-name").textContent, "Mr. Lee");
+  assert.equal(getEl("log-contact-role").textContent, "· Arts Head");
+
+  // Step 2: First contact defaults
+  assert.equal(getEl("log-channel").value, "Email");
+  assert.equal(getEl("log-activityType").value, "Outreach");
+
+  // Step 3: Grade 9 student selects "No reply yet"
+  context.applySuggestion("log-outcome", "No reply yet");
+  assert.equal(getEl("log-outcome").value, "No reply yet");
+
+  // Step 4: Short summary
+  getEl("log-summary").value = "Sent an email introducing H4's free dance workshops and asked about their dance program.";
+
+  // Step 5: Unified Step 5 card - Next Action & Follow-up date
+  assert.equal(getEl("activity-step-5").classList.contains("flow-step"), true);
+  assert.equal(getEl("activity-step-5-header").hidden, false);
+  context.applySuggestion("edit-nextAction", "Follow up if no reply");
+  assert.equal(getEl("edit-nextAction").value, "Follow up if no reply");
+  getEl("edit-followUpDue").value = "2026-10-24";
+  assert.equal(getEl("edit-stage").value, "Contacted");
+  assert.equal(getEl("cold-warning").hidden, true);
+
+  // Save
+  await context.saveSchoolEdits({ preventDefault() {} });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].channel, "Email");
+  assert.equal(requests[0].activityType, "Outreach");
+  assert.equal(requests[0].outcome, "No reply yet");
+  assert.equal(requests[0].summary, "Sent an email introducing H4's free dance workshops and asked about their dance program.");
+  assert.equal(requests[0].nextAction, "Follow up if no reply");
+  assert.equal(requests[0].followUpDue, "2026-10-24");
+  assert.equal(requests[0].stage, "Contacted");
+  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("school-editor").open, false);
+});
+
+test("Scenario B: School responds: records outcome, custom text, summarizes discussion, selects stage, and schedules next step", async (t) => {
+  const record = { recordId: "00000000-0000-4000-8000-000000000092", schoolName: "Westdale Secondary", schoolBoard: "HWDSB", geographicRegion: "Hamilton", stage: "Contacted", contactName: "Ms. Chen", contactRole: "Principal", lastRequestId: "v1" };
+  const requests = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record });
+    if (url.includes("/api/activities")) { requests.push(JSON.parse(init.body)); return Response.json({ ok: true, record: { ...record, stage: "Interested", lastRequestId: "v2" } }); }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+  await context.openSchoolEditor(record.recordId, false, "activity");
+
+  // Step 2: Channel Phone, type FollowUp
+  getEl("log-channel").value = "Phone";
+  getEl("log-activityType").value = "FollowUp";
+
+  // Step 3: Suggestion "Interested", plus verify custom text is preserved if typed
+  context.applySuggestion("log-outcome", "Interested");
+  assert.equal(getEl("log-outcome").value, "Interested");
+  getEl("log-outcome").value = "Interested in 2 hip hop workshops for Grade 9s";
+
+  // Step 4: Summary of call
+  getEl("log-summary").value = "Spoke with Ms. Chen on phone. She wants to book workshops for November and requested availability.";
+
+  // Step 5: Advance stage to Interested, custom next action, follow-up date
+  getEl("edit-stage").value = "Interested";
+  getEl("edit-nextAction").value = "Send available November workshop dates";
+  getEl("edit-followUpDue").value = "2026-10-28";
+  assert.equal(getEl("cold-warning").hidden, true);
+
+  // Save
+  await context.saveSchoolEdits({ preventDefault() {} });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].channel, "Phone");
+  assert.equal(requests[0].activityType, "FollowUp");
+  assert.equal(requests[0].outcome, "Interested in 2 hip hop workshops for Grade 9s");
+  assert.equal(requests[0].summary, "Spoke with Ms. Chen on phone. She wants to book workshops for November and requested availability.");
+  assert.equal(requests[0].stage, "Interested");
+  assert.equal(requests[0].nextAction, "Send available November workshop dates");
+  assert.equal(requests[0].followUpDue, "2026-10-28");
+  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("school-editor").open, false);
 });

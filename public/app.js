@@ -310,6 +310,19 @@ function updateSuggestionStates() {
   }
 }
 
+function updateColdWarning() {
+  const warning = el("cold-warning");
+  if (!warning) return;
+  const stage = el("edit-stage")?.value;
+  if (stage === "Cold" && editing?.coldAllowed === false) {
+    warning.textContent = "Cold requires two follow-ups and a past follow-up date. Interested, Engaged and Booked schools stay protected.";
+    warning.hidden = false;
+  } else {
+    warning.textContent = "";
+    warning.hidden = true;
+  }
+}
+
 function editSchoolContact() {
   if (!editing || editing.busy) return;
   const values = editorValues();
@@ -397,6 +410,7 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
   el("editor-kind").textContent = mode === "activity" ? "LOG OUTREACH" : "SCHOOL DETAILS";
   el("outreach-fields").hidden = mode !== "activity";
   for (const field of detailOnlyFields) el(`field-${field}`).hidden = mode === "activity";
+  if (el("activity-step-5")) el("activity-step-5").classList.toggle("flow-step", mode === "activity");
   if (el("activity-step-5-header")) el("activity-step-5-header").hidden = mode !== "activity";
   if (el("return-to-activity-container")) el("return-to-activity-container").hidden = mode !== "details" || !editDrafts.has(`activity:${id}`);
   const returnBtn = el("return-to-activity");
@@ -460,7 +474,8 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     const coldAllowed = data.record.stage === "Cold" || (!["Interested", "Engaged", "Booked"].includes(data.record.stage) && Number(data.record.followUpCount) >= 2 && data.record.followUpDue && day > data.record.followUpDue);
     const cold = el("edit-stage").querySelector?.('option[value="Cold"]');
     if (cold) cold.disabled = !coldAllowed;
-    el("cold-warning").textContent = coldAllowed ? "" : "Cold requires two follow-ups and a past follow-up date. Interested, Engaged and Booked schools stay protected.";
+    editing.coldAllowed = coldAllowed;
+    updateColdWarning();
     const staleDraft = draft?.original && draft.original.lastRequestId !== data.record.lastRequestId && !editing.pending;
     editing.stale = !!staleDraft;
     editorFeedback(staleDraft ? "Your draft is kept, but saved information changed. Reload school values and review before saving." : retainedActivity ? "Latest school values loaded. Your outreach text is kept; review stage and follow-up before saving." : draft ? "Your unsaved draft was restored." : "Changes save to the test spreadsheet.", staleDraft ? "error" : "info");
@@ -1287,6 +1302,7 @@ el("editor-form").addEventListener("click", (event) => {
 });
 el("log-outcome")?.addEventListener("input", updateSuggestionStates);
 el("edit-nextAction")?.addEventListener("input", updateSuggestionStates);
+el("edit-stage")?.addEventListener("change", updateColdWarning);
 el("log-contact-edit")?.addEventListener("click", editSchoolContact);
 el("return-to-activity")?.addEventListener("click", () => returnToActivity(false));
 el("save-contact-return")?.addEventListener("click", saveSchoolEdits);
