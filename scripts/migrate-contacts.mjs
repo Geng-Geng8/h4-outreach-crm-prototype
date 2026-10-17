@@ -3,20 +3,22 @@
 // Never overwrites populated rows, even when blank rows (gaps) exist between records.
 //
 // SAFE DEPLOYMENT & TEST-WORKBOOK CUTOVER SEQUENCE:
-// 1. Tab Preparation:
+// 1. Workbook Backup:
+//    Back up the authorized test workbook before any schema or data modifications.
+// 2. Quiet Window:
+//    Establish a quiet window with no CRM writes (no active outreach logging or school updates).
+// 3. Tab Preparation & Validation:
 //    Create the 'Contacts' tab in the test workbook with standard A1:N1 headers (matching HEADERS.Contacts).
-// 2. Cloudflare Worker Deployment:
-//    Deploy the Worker code from PR #11 containing contact CRUD and one-source-of-truth synchronization.
-//    Once deployed, legacy /api/schools/update calls automatically synchronize with Contacts.
-// 3. Dry-Run Migration & Quiet Window:
-//    During a quiet window (no concurrent outreach writes), run 'node scripts/migrate-contacts.mjs'
-//    to inspect schools to be backfilled and review non-destructive row allocations.
-// 4. Live Migration Commit & Verification:
-//    Run 'node scripts/migrate-contacts.mjs --commit'.
-//    The script re-verifies pre-commit that target rows remain empty, writes non-overlapping ranges,
-//    and preserves all populated rows and gaps. Verify in Google Sheets and rerun dry-run (reports 0 remaining).
-// 5. GitHub Pages Publication:
-//    Publish the updated frontend build to GitHub Pages to deliver the School Contacts UI to users.
+//    Validate headers match schema expectations.
+// 4. Migration Execution & Verification:
+//    Run dry-run 'node scripts/migrate-contacts.mjs' to review allocations, then live commit
+//    with 'node scripts/migrate-contacts.mjs --commit'. Verify data in Google Sheets and rerun dry-run.
+// 5. Worker Deployment & Pre-Merge Verification:
+//    Deploy the PR #11 Worker to Cloudflare and verify read/write endpoints against the test workbook.
+// 6. Merge PR #11:
+//    Merge PR #11 to main, which automatically triggers GitHub Pages publication of the updated frontend.
+// 7. Post-Deployment Verification:
+//    Verify end-to-end functionality: existing outreach logging, multi-channel bulk outreach, and new contact management.
 
 import { randomUUID } from "node:crypto";
 import { C, ContactCol } from "../src/schema.ts";
