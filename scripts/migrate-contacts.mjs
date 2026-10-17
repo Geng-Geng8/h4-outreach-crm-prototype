@@ -143,7 +143,19 @@ if (process.argv[1] && process.argv[1].endsWith("migrate-contacts.mjs")) {
     process.exit(0);
   }
 
-  const { GoogleSheetsCoordinator } = await import("../src/google-sheets-write.ts");
+  const { build } = await import("esbuild");
+  const { fileURLToPath, pathToFileURL } = await import("node:url");
+  const { unlink } = await import("node:fs/promises");
+  const entry = fileURLToPath(new URL("../src/google-sheets-write.ts", import.meta.url));
+  const out = fileURLToPath(new URL("./.tmp-sheets-write.mjs", import.meta.url));
+  await build({ entryPoints: [entry], outfile: out, bundle: true, format: "esm", platform: "node", target: "es2022", packages: "external" });
+  let GoogleSheetsCoordinator;
+  try {
+    const mod = await import(pathToFileURL(out).href);
+    GoogleSheetsCoordinator = mod.GoogleSheetsCoordinator;
+  } finally {
+    await unlink(out).catch(() => {});
+  }
   const coordinator = new GoogleSheetsCoordinator(bindings);
   console.log("Reading test spreadsheet snapshot...");
   const snapshot = await coordinator.snapshot();
