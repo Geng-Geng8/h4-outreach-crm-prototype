@@ -986,6 +986,10 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
         }
         children.push(...args);
       },
+      appendChild: function (child) {
+        this.append(child);
+        return child;
+      },
       setAttribute: (k, v) => { attrs[k] = String(v); },
       getAttribute: (k) => attrs[k],
       removeAttribute: (k) => { delete attrs[k]; },

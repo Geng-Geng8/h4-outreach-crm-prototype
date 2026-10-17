@@ -486,6 +486,366 @@ function closeSchoolEditor() {
   el("school-editor").close();
 }
 
+let editingContactId = null;
+
+function renderSchoolContacts(contacts = []) {
+  const container = el("contacts-list");
+  if (!container) return;
+  if (typeof container.replaceChildren === "function") {
+    container.replaceChildren();
+  } else {
+    container.innerHTML = "";
+  }
+  if (!contacts || contacts.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "contacts-empty-note";
+    empty.textContent = "No contacts recorded yet. Add your first contact below.";
+    container.append(empty);
+    return;
+  }
+
+  for (const c of contacts) {
+    const card = document.createElement("div");
+    card.className = `contact-item-card${c.isPrimary ? " is-primary" : ""}`;
+    card.setAttribute("role", "listitem");
+    card.dataset.contactId = c.contactId;
+
+    const main = document.createElement("div");
+    main.className = "contact-main";
+
+    const nameRow = document.createElement("div");
+    nameRow.className = "contact-name-row";
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "contact-person-name";
+    nameEl.textContent = c.name;
+    nameRow.append(nameEl);
+
+    if (c.role) {
+      const roleEl = document.createElement("span");
+      roleEl.className = "contact-role-text";
+      roleEl.textContent = `· ${c.role}`;
+      nameRow.append(roleEl);
+    }
+
+    if (c.isPrimary) {
+      const pBadge = document.createElement("span");
+      pBadge.className = "contact-badge-primary";
+      pBadge.textContent = "★ Primary";
+      nameRow.append(pBadge);
+    }
+
+    if (c.category) {
+      const catBadge = document.createElement("span");
+      catBadge.className = `contact-badge-cat${c.category === "Student" ? " contact-badge-student" : ""}`;
+      catBadge.textContent = c.category;
+      nameRow.append(catBadge);
+    }
+
+    main.append(nameRow);
+
+    const metaRow = document.createElement("div");
+    metaRow.className = "contact-meta-row";
+
+    if (c.email) {
+      const emailItem = document.createElement("span");
+      emailItem.className = "contact-meta-item";
+      const emailLink = document.createElement("a");
+      emailLink.className = "contact-meta-link";
+      emailLink.href = `mailto:${c.email}`;
+      emailLink.textContent = c.email;
+      emailItem.append(emailLink);
+      metaRow.append(emailItem);
+    }
+
+    if (c.phone) {
+      const phoneItem = document.createElement("span");
+      phoneItem.className = "contact-meta-item";
+      phoneItem.textContent = `📞 ${c.phone}`;
+      metaRow.append(phoneItem);
+    }
+
+    if (c.gradeRange) {
+      const gradeItem = document.createElement("span");
+      gradeItem.className = "contact-meta-item";
+      gradeItem.textContent = `Grades: ${c.gradeRange}`;
+      metaRow.append(gradeItem);
+    }
+
+    if (c.programGroup) {
+      const progItem = document.createElement("span");
+      progItem.className = "contact-meta-item";
+      progItem.textContent = `Group: ${c.programGroup}`;
+      metaRow.append(progItem);
+    }
+
+    if (metaRow.children.length > 0) {
+      main.append(metaRow);
+    }
+
+    if (c.notes) {
+      const notesEl = document.createElement("div");
+      notesEl.className = "contact-notes-text";
+      notesEl.textContent = c.notes;
+      main.append(notesEl);
+    }
+
+    card.append(main);
+
+    const actions = document.createElement("div");
+    actions.className = "contact-actions-row";
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "button secondary compact-button";
+    editBtn.textContent = "Edit";
+    editBtn.setAttribute("aria-label", `Edit ${c.name}`);
+    editBtn.addEventListener("click", () => openContactForm(c));
+    actions.append(editBtn);
+
+    if (!c.isPrimary) {
+      const setPrimaryBtn = document.createElement("button");
+      setPrimaryBtn.type = "button";
+      setPrimaryBtn.className = "button secondary compact-button";
+      setPrimaryBtn.textContent = "Set primary";
+      setPrimaryBtn.setAttribute("aria-label", `Set ${c.name} as primary contact`);
+      setPrimaryBtn.addEventListener("click", () => setPrimaryContact(c.contactId));
+      actions.append(setPrimaryBtn);
+    }
+
+    const deactBtn = document.createElement("button");
+    deactBtn.type = "button";
+    deactBtn.className = "button secondary compact-button";
+    deactBtn.textContent = "Deactivate";
+    deactBtn.setAttribute("aria-label", `Deactivate ${c.name}`);
+    deactBtn.addEventListener("click", () => deactivateContact(c.contactId));
+    actions.append(deactBtn);
+
+    card.append(actions);
+    container.append(card);
+  }
+}
+
+function openContactForm(contactToEdit = null) {
+  const panel = el("contact-form-panel");
+  const addBtn = el("contact-add-btn");
+  if (!panel) return;
+  panel.hidden = false;
+  if (addBtn) addBtn.hidden = true;
+
+  editingContactId = contactToEdit ? contactToEdit.contactId : null;
+  el("contact-form-heading").textContent = contactToEdit ? "Edit contact" : "Add contact";
+
+  el("cform-name").value = contactToEdit?.name || "";
+  el("cform-role").value = contactToEdit?.role || "";
+  el("cform-category").value = contactToEdit?.category || "Administration";
+  el("cform-gradeRange").value = contactToEdit?.gradeRange || "";
+  el("cform-programGroup").value = contactToEdit?.programGroup || "";
+  el("cform-email").value = contactToEdit?.email || "";
+  el("cform-phone").value = contactToEdit?.phone || "";
+  el("cform-notes").value = contactToEdit?.notes || "";
+
+  const isPrimaryBox = el("cform-isPrimary");
+  if (isPrimaryBox) {
+    isPrimaryBox.checked = contactToEdit ? Boolean(contactToEdit.isPrimary) : (editing?.contacts?.length === 0);
+  }
+
+  updateStudentPrivacyCallout();
+  el("cform-name").focus();
+}
+
+function closeContactForm() {
+  const panel = el("contact-form-panel");
+  const addBtn = el("contact-add-btn");
+  if (panel) panel.hidden = true;
+  if (addBtn) addBtn.hidden = false;
+  editingContactId = null;
+}
+
+function updateStudentPrivacyCallout() {
+  const cat = el("cform-category")?.value;
+  const note = el("student-privacy-note");
+  if (note) note.hidden = cat !== "Student";
+}
+
+async function saveContactFromForm() {
+  if (!editing || !credential || editing.busy) return;
+  const name = el("cform-name")?.value.trim();
+  const role = el("cform-role")?.value.trim();
+  if (!name || !role) {
+    editorFeedback("Please enter a contact name and role.", "error");
+    if (!name) el("cform-name")?.focus();
+    else el("cform-role")?.focus();
+    return;
+  }
+
+  const category = el("cform-category")?.value || "Other";
+  const gradeRange = el("cform-gradeRange")?.value.trim() || "";
+  const programGroup = el("cform-programGroup")?.value.trim() || "";
+  const email = el("cform-email")?.value.trim() || "";
+  const phone = el("cform-phone")?.value.trim() || "";
+  const notes = el("cform-notes")?.value.trim() || "";
+  const isPrimary = el("cform-isPrimary")?.checked || false;
+
+  const saveBtn = el("cform-save-btn");
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
+  editorFeedback("Saving contact…");
+
+  const action = editingContactId ? "update" : "create";
+  const payload = {
+    requestId: crypto.randomUUID(),
+    recordId: editing.id,
+    expectedRequestId: editing.original.lastRequestId,
+    action,
+    contactId: editingContactId || undefined,
+    contact: { name, role, category, gradeRange, programGroup, email, phone, notes, isPrimary },
+  };
+
+  try {
+    const res = await apiFetch("./api/schools/contacts", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      credentials: "omit", cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (res.status === 409 && data.code === "CONFLICT_STALE_VERSION") {
+        editorFeedback("School was modified elsewhere. Reload saved values before continuing.", "error");
+      } else {
+        editorFeedback(data.message || "Failed to save contact. Please try again.", "error");
+      }
+      return;
+    }
+
+    editing.original.lastRequestId = data.record.lastRequestId;
+    editing.original.contactName = data.record.contactName;
+    editing.original.contactRole = data.record.contactRole;
+    editing.original.email = data.record.email;
+    editing.original.phone = data.record.phone;
+    if (el("edit-contactName")) el("edit-contactName").value = data.record.contactName || "";
+    if (el("edit-contactRole")) el("edit-contactRole").value = data.record.contactRole || "";
+    if (el("edit-email")) el("edit-email").value = data.record.email || "";
+    if (el("edit-phone")) el("edit-phone").value = data.record.phone || "";
+
+    if (action === "create" && data.contact) {
+      if (data.contact.isPrimary) {
+        editing.contacts.forEach((c) => { c.isPrimary = false; });
+      }
+      editing.contacts.push(data.contact);
+    } else if (action === "update" && data.contact) {
+      const idx = editing.contacts.findIndex((c) => c.contactId === data.contact.contactId);
+      if (data.contact.isPrimary) {
+        editing.contacts.forEach((c) => { c.isPrimary = false; });
+      }
+      if (idx !== -1) editing.contacts[idx] = data.contact;
+    }
+
+    renderSchoolContacts(editing.contacts);
+    closeContactForm();
+    editorFeedback("Contact saved to the test spreadsheet.");
+    showSaveToast("✓ Contact saved");
+    await refresh();
+  } catch (err) {
+    editorFeedback("Save failed. Check network and try again.", "error");
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save contact"; }
+  }
+}
+
+async function setPrimaryContact(contactId) {
+  if (!editing || !credential || editing.busy) return;
+  editorFeedback("Setting primary contact…");
+  const payload = {
+    requestId: crypto.randomUUID(),
+    recordId: editing.id,
+    expectedRequestId: editing.original.lastRequestId,
+    action: "set_primary",
+    contactId,
+  };
+
+  try {
+    const res = await apiFetch("./api/schools/contacts", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      credentials: "omit", cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      editorFeedback(data.message || "Failed to set primary contact.", "error");
+      return;
+    }
+
+    editing.original.lastRequestId = data.record.lastRequestId;
+    editing.original.contactName = data.record.contactName;
+    editing.original.contactRole = data.record.contactRole;
+    editing.original.email = data.record.email;
+    editing.original.phone = data.record.phone;
+    if (el("edit-contactName")) el("edit-contactName").value = data.record.contactName || "";
+    if (el("edit-contactRole")) el("edit-contactRole").value = data.record.contactRole || "";
+    if (el("edit-email")) el("edit-email").value = data.record.email || "";
+    if (el("edit-phone")) el("edit-phone").value = data.record.phone || "";
+
+    editing.contacts.forEach((c) => { c.isPrimary = (c.contactId === contactId); });
+    renderSchoolContacts(editing.contacts);
+    editorFeedback("Primary contact updated.");
+    showSaveToast("✓ Primary contact updated");
+    await refresh();
+  } catch (err) {
+    editorFeedback("Failed to set primary contact.", "error");
+  }
+}
+
+async function deactivateContact(contactId) {
+  if (!editing || !credential || editing.busy) return;
+  editorFeedback("Deactivating contact…");
+  const payload = {
+    requestId: crypto.randomUUID(),
+    recordId: editing.id,
+    expectedRequestId: editing.original.lastRequestId,
+    action: "deactivate",
+    contactId,
+  };
+
+  try {
+    const res = await apiFetch("./api/schools/contacts", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      credentials: "omit", cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      editorFeedback(data.message || "Failed to deactivate contact.", "error");
+      return;
+    }
+
+    editing.original.lastRequestId = data.record.lastRequestId;
+    editing.original.contactName = data.record.contactName;
+    editing.original.contactRole = data.record.contactRole;
+    editing.original.email = data.record.email;
+    editing.original.phone = data.record.phone;
+    if (el("edit-contactName")) el("edit-contactName").value = data.record.contactName || "";
+    if (el("edit-contactRole")) el("edit-contactRole").value = data.record.contactRole || "";
+    if (el("edit-email")) el("edit-email").value = data.record.email || "";
+    if (el("edit-phone")) el("edit-phone").value = data.record.phone || "";
+
+    editing.contacts = editing.contacts.filter((c) => c.contactId !== contactId);
+    if (data.record.contactName) {
+      editing.contacts.forEach((c) => {
+        if (c.name === data.record.contactName) c.isPrimary = true;
+      });
+    }
+    renderSchoolContacts(editing.contacts);
+    editorFeedback("Contact deactivated.");
+    showSaveToast("✓ Contact deactivated");
+    await refresh();
+  } catch (err) {
+    editorFeedback("Failed to deactivate contact.", "error");
+  }
+}
+
 async function openSchoolEditor(id, reload = false, mode = "details") {
   if (!credential) return;
   const retainedActivity = reload && mode === "activity" && editing?.id === id ? outreachValues() : null;
@@ -495,6 +855,8 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
   el("editor-kind").textContent = mode === "activity" ? "LOG OUTREACH" : "SCHOOL DETAILS";
   el("outreach-fields").hidden = mode !== "activity";
   for (const field of detailOnlyFields) el(`field-${field}`).hidden = mode === "activity";
+  if (el("contacts-management")) el("contacts-management").hidden = mode === "activity";
+  closeContactForm();
   if (el("activity-step-5")) el("activity-step-5").classList.toggle("flow-step", mode === "activity");
   if (el("activity-step-5-header")) el("activity-step-5-header").hidden = mode !== "activity";
   if (el("return-to-activity-container")) el("return-to-activity-container").hidden = mode !== "details" || !editDrafts.has(`activity:${id}`);
@@ -537,6 +899,8 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     if (!response.ok) throw new Error(data.code === "NOT_OWNER" ? "You can edit only your assigned schools." : "Could not load this school. Close and try again.");
     const draft = reload ? null : editDrafts.get(editorDraftKey(editing));
     editing.original = draft?.original ?? data.record; editing.pending = draft?.pending ?? null;
+    editing.contacts = data.contacts || [];
+    try { renderSchoolContacts(editing.contacts); } catch {}
     for (const field of editFields) el(`edit-${field}`).value = draft?.values[field] ?? String(data.record[field] ?? "");
     if (mode === "activity") {
       const activity = retainedActivity ?? draft?.activity;
@@ -2137,6 +2501,10 @@ el("edit-stage")?.addEventListener("change", updateColdWarning);
 el("log-contact-edit")?.addEventListener("click", editSchoolContact);
 el("return-to-activity")?.addEventListener("click", () => returnToActivity(false));
 el("save-contact-return")?.addEventListener("click", saveSchoolEdits);
+el("contact-add-btn")?.addEventListener("click", () => openContactForm());
+el("cform-cancel-btn")?.addEventListener("click", closeContactForm);
+el("cform-save-btn")?.addEventListener("click", saveContactFromForm);
+el("cform-category")?.addEventListener("change", updateStudentPrivacyCallout);
 el("home-bulk-log")?.addEventListener("click", () => openBulkOutreach());
 el("schools-bulk-log")?.addEventListener("click", () => openBulkOutreach());
 el("bulk-dialog-close")?.addEventListener("click", () => closeBulkOutreach(false));

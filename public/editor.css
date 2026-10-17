@@ -1066,3 +1066,219 @@
   font-size: 13px;
 }
 
+/* School Contacts Section V1 */
+.contacts-section {
+  background: #fbfdfa;
+  border: 1.5px solid #d5e2d1;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 6px 0 16px 0;
+}
+.contacts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.contacts-heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #153528;
+}
+.contacts-sub {
+  margin: 2px 0 0 0;
+  font-size: 12.5px;
+  color: #556b5f;
+}
+.contacts-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.contact-item-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border: 1px solid #d8e2d5;
+  border-radius: 8px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.contact-item-card:hover {
+  border-color: #a8c4a0;
+  box-shadow: 0 2px 6px rgba(21, 53, 40, 0.05);
+}
+.contact-item-card.is-primary {
+  border-left: 4px solid #1f6b43;
+  background: #f8faf6;
+}
+.contact-main {
+  flex: 1;
+  min-width: 0;
+}
+.contact-name-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.contact-person-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: #153528;
+}
+.contact-role-text {
+  font-size: 13px;
+  color: #3b5245;
+}
+.contact-badge-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  background: #e6f4ea;
+  color: #137333;
+  border-radius: 12px;
+  border: 1px solid #b7e1cd;
+}
+.contact-badge-cat {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  background: #edf3eb;
+  color: #42584a;
+  border-radius: 6px;
+}
+.contact-badge-student {
+  background: #e8f0fe;
+  color: #1967d2;
+  border: 1px solid #d2e3fc;
+}
+.contact-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12.5px;
+  color: #556b5f;
+  margin-top: 4px;
+}
+.contact-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.contact-meta-link {
+  color: #1f6b43;
+  text-decoration: none;
+}
+.contact-meta-link:hover {
+  text-decoration: underline;
+}
+.contact-notes-text {
+  font-size: 12px;
+  font-style: italic;
+  color: #63776d;
+  margin-top: 4px;
+}
+.contact-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.contacts-empty-note {
+  font-size: 13px;
+  color: #63776d;
+  padding: 12px 14px;
+  background: #f4f7f2;
+  border-radius: 8px;
+  text-align: center;
+  margin: 0;
+}
+.contact-editor-panel {
+  background: #ffffff;
+  border: 1.5px solid #a8c4a0;
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 10px;
+  box-shadow: 0 4px 12px rgba(21, 53, 40, 0.08);
+}
+.contact-panel-title {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #153528;
+}
+.contact-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.contact-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #274033;
+}
+.contact-form-grid input,
+.contact-form-grid select {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border: 1.5px solid #cad7c5;
+  border-radius: 6px;
+  background: #fbfdfa;
+  color: #153528;
+}
+.contact-form-grid input:focus,
+.contact-form-grid select:focus {
+  outline: 2px solid #1f6b43;
+  background: #ffffff;
+}
+.student-privacy-callout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #eef5ff;
+  border: 1px solid #c9dfff;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #124da0;
+  margin: 4px 0;
+}
+.checkbox-label {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #1f6b43;
+}
+.contact-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid #eef2ec;
+}
+.required-star {
+  color: #b3261e;
+}
+
+

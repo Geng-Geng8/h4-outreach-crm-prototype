@@ -8,14 +8,14 @@ export class SyntheticSheets {
   async read(): Promise<Snapshot> {
     const url = new URL(`https://synthetic.invalid/v4/spreadsheets/${this.sheetId}/values:batchGet`);
     for (const tab of Object.keys(HEADERS) as Tab[]) {
-      const range = tab === "Schools" ? "A1:AF500" : tab === "CRM Users" ? "A1:D" : "A1:O";
+      const range = tab === "Schools" ? "A1:AF500" : tab === "CRM Users" ? "A1:D" : tab === "Contacts" ? "A1:N500" : "A1:O";
       url.searchParams.append("ranges", `'${tab}'!${range}`);
     }
     url.searchParams.set("valueRenderOption", "FORMULA");
     const response = await this.service.fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!response.ok) throw new ApiError(503, "SHEETS_READ_FAILED");
     const payload = await response.json<{ valueRanges: { values?: Snapshot[Tab] }[] }>();
-    if (!Array.isArray(payload.valueRanges) || payload.valueRanges.length !== 4) {
+    if (!Array.isArray(payload.valueRanges) || payload.valueRanges.length !== 5) {
       throw new ApiError(503, "SCHEMA_MISMATCH");
     }
     const snapshot = Object.fromEntries(

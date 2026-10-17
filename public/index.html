@@ -242,10 +242,68 @@
             <button type="button" id="return-to-activity" class="button secondary compact-button">← Return to Log Outreach</button>
             <button type="button" id="save-contact-return" class="button compact-button">Save contact & return</button>
           </div>
-          <label id="field-contactName">Contact name<input id="edit-contactName" maxlength="300" autocomplete="off"></label>
-          <label id="field-contactRole">Contact role<input id="edit-contactRole" maxlength="300" autocomplete="off"></label>
-          <label id="field-email">Email<input id="edit-email" type="email" maxlength="300" autocomplete="off"></label>
-          <label id="field-phone">Phone<input id="edit-phone" type="tel" maxlength="100" autocomplete="off"></label>
+          <section id="contacts-management" class="editor-wide contacts-section" aria-labelledby="contacts-heading">
+            <div class="contacts-header">
+              <div>
+                <h3 id="contacts-heading" class="contacts-heading">School Contacts</h3>
+                <p class="contacts-sub">Add teachers, staff, administrators, and student representatives.</p>
+              </div>
+              <button type="button" id="contact-add-btn" class="button secondary compact-button">+ Add contact</button>
+            </div>
+            <div id="contacts-list" class="contacts-grid" role="list"></div>
+            <div id="contact-form-panel" class="contact-editor-panel" hidden>
+              <h4 id="contact-form-heading" class="contact-panel-title">Add contact</h4>
+              <div class="contact-form-grid">
+                <label>Full name <span class="required-star">*</span>
+                  <input id="cform-name" type="text" maxlength="300" placeholder="e.g. Brenda Vance" autocomplete="off" required>
+                </label>
+                <label>Role / Position <span class="required-star">*</span>
+                  <input id="cform-role" type="text" maxlength="300" placeholder="e.g. Principal, Dance Lead" autocomplete="off" required>
+                </label>
+                <label>Category
+                  <select id="cform-category">
+                    <option value="Administration">Administration</option>
+                    <option value="Teacher">Teacher</option>
+                    <option value="Staff">Staff</option>
+                    <option value="Student">Student (Dance/Club/Leadership)</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+                <label>Grade(s)
+                  <input id="cform-gradeRange" type="text" maxlength="100" placeholder="e.g. 9-10, All" autocomplete="off">
+                </label>
+                <label>Program / Department
+                  <input id="cform-programGroup" type="text" maxlength="200" placeholder="e.g. Dance Team, Main Office" autocomplete="off">
+                </label>
+                <label>School Email
+                  <input id="cform-email" type="email" maxlength="300" placeholder="school/institutional email" autocomplete="off">
+                </label>
+                <label>Phone / Extension
+                  <input id="cform-phone" type="tel" maxlength="100" placeholder="e.g. ext 102" autocomplete="off">
+                </label>
+                <label class="editor-wide">Notes
+                  <input id="cform-notes" type="text" maxlength="4000" placeholder="Availability or preferences" autocomplete="off">
+                </label>
+                <div id="student-privacy-note" class="editor-wide student-privacy-callout" hidden>
+                  <span aria-hidden="true">🛡️</span>
+                  <span><strong>Student Privacy:</strong> Use official school email only. Do not record personal phone numbers or private handles for minors.</span>
+                </div>
+                <label id="cform-primary-label" class="editor-wide checkbox-label">
+                  <input id="cform-isPrimary" type="checkbox"> Set as primary contact for this school
+                </label>
+              </div>
+              <div class="contact-form-actions">
+                <button type="button" id="cform-cancel-btn" class="button secondary compact-button">Cancel</button>
+                <button type="button" id="cform-save-btn" class="button compact-button">Save contact</button>
+              </div>
+            </div>
+          </section>
+          <div class="legacy-contact-fields" hidden aria-hidden="true">
+            <label id="field-contactName">Contact name<input id="edit-contactName" maxlength="300" autocomplete="off"></label>
+            <label id="field-contactRole">Contact role<input id="edit-contactRole" maxlength="300" autocomplete="off"></label>
+            <label id="field-email">Email<input id="edit-email" type="email" maxlength="300" autocomplete="off"></label>
+            <label id="field-phone">Phone<input id="edit-phone" type="tel" maxlength="100" autocomplete="off"></label>
+          </div>
           <label id="field-priority">Priority<select id="edit-priority"><option value="">Not set</option><option>High</option><option>Medium</option><option>Low</option></select></label>
           <label id="field-outreachGoal">Outreach goal<input id="edit-outreachGoal" maxlength="300"></label>
           <label id="field-notes" class="editor-wide">Notes / reply<textarea id="edit-notes" maxlength="4000" rows="5"></textarea></label>
