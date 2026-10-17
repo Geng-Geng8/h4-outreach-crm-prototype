@@ -2400,3 +2400,199 @@ test("Bulk Log Outreach: validates freshly retrieved school stage, skips Booked/
   assert.equal(row203.pillText, "✓ Saved");
 });
 
+test("Supervisor bulk outreach: displays bulk button in Schools view, limits picker to personally owned schools by email, and preserves individual editing", async (t) => {
+  const supervisorUser = { name: "Morgan", email: "morgan@example.test", role: "Supervisor" };
+  const studentUser = { name: "Alex", email: "alex@example.test", role: "co-op" };
+
+  const allSchools = [
+    {
+      recordId: "00000000-0000-4000-8000-000000000301",
+      schoolName: "Morgan Owned School",
+      schoolBoard: "TDSB",
+      geographicRegion: "North",
+      assignedTo: "Morgan",
+      stage: "Not Contacted",
+      lastRequestId: "v1",
+      isMySchool: true, // Personally owned by supervisor
+      canEdit: true,
+      ownerEmail: "morgan@example.test",
+    },
+    {
+      recordId: "00000000-0000-4000-8000-000000000302",
+      schoolName: "Student Owned School",
+      schoolBoard: "TDSB",
+      geographicRegion: "East",
+      assignedTo: "Alex",
+      stage: "Not Contacted",
+      lastRequestId: "v2",
+      isMySchool: false, // Owned by student Alex
+      canEdit: true,
+      ownerEmail: "alex@example.test",
+    },
+    {
+      recordId: "00000000-0000-4000-8000-000000000303",
+      schoolName: "Shared Display Name But Student Owned",
+      schoolBoard: "TDSB",
+      geographicRegion: "West",
+      assignedTo: "Morgan", // Same display name as supervisor, but owned by someone else
+      stage: "Not Contacted",
+      lastRequestId: "v3",
+      isMySchool: false, // Server computed owner !== user.email
+      canEdit: true,
+      ownerEmail: "sam@example.test",
+    },
+    {
+      recordId: "00000000-0000-4000-8000-000000000304",
+      schoolName: "Morgan Booked School",
+      schoolBoard: "TDSB",
+      geographicRegion: "Central",
+      assignedTo: "Morgan",
+      stage: "Booked",
+      lastRequestId: "v4",
+      isMySchool: true,
+      canEdit: true,
+      ownerEmail: "morgan@example.test",
+    },
+  ];
+
+  const activityRequests = [];
+
+  const { context, getEl, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: supervisorUser,
+          schools: allSchools,
+          overview: { students: [{ id: "alex", name: "Alex", active: true }] },
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/schools/detail")) {
+        const match = url.match(/recordId=([^&]+)/);
+        const record = allSchools.find((r) => r.recordId === decodeURIComponent(match[1]));
+        return Response.json({ ok: true, record });
+      }
+      if (url.includes("/api/activities")) {
+        const body = JSON.parse(init.body);
+        activityRequests.push(body);
+        return Response.json({ ok: true, record: { recordId: body.recordId, lastRequestId: crypto.randomUUID() } });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+
+  // 1. Sign in as Supervisor
+  await signIn("morgan@example.test");
+  assert.equal(getEl("user-role").textContent, "Supervisor");
+
+  // 2. Switch to Schools view: Supervisor sees the Bulk log outreach button
+  getEl("tab-my-schools").click();
+  assert.equal(getEl("schools-bulk-log").hidden, false, "Supervisor sees Bulk log outreach button in Schools view");
+
+  // 3. Open Bulk Outreach: check school picker contents
+  getEl("schools-bulk-log").click();
+  assert.equal(getEl("bulk-outreach-dialog").open, true);
+
+  const pickerItems = Array.from(getEl("bulk-school-list").children);
+  // Only 1 school should be eligible: "Morgan Owned School"
+  // - "Student Owned School" is excluded because isMySchool is false
+  // - "Shared Display Name But Student Owned" is excluded because isMySchool is false (email match, not display name)
+  // - "Morgan Booked School" is excluded because stage is Booked
+  assert.equal(pickerItems.length, 1, "Only personally owned, non-Booked/Cold schools appear in picker");
+  assert.equal(pickerItems[0].getAttribute("data-id"), allSchools[0].recordId);
+  const titleEl = pickerItems[0].children[1]?.children[0];
+  assert.equal(titleEl?.textContent, "Morgan Owned School");
+
+  // 4. Select Morgan Owned School and complete outreach logging
+  const checkbox = pickerItems[0].children[0];
+  checkbox.checked = true;
+  if (checkbox.onchange) checkbox.onchange({ stopPropagation() {} });
+  assert.equal(getEl("bulk-select-count").textContent, "1 of 20 selected");
+
+  getEl("bulk-to-step2").click();
+  context.applySuggestion("bulk-outcome", "Interested");
+  context.applySuggestion("bulk-summary", "Emailed workshop details to principal.");
+  getEl("bulk-to-step3").click();
+  getEl("bulk-confirm-sent").click();
+  getEl("bulk-submit-save").click();
+
+  for (let i = 0; i < 50 && activityRequests.length < 1; i++) {
+    await new Promise((done) => setTimeout(done, 10));
+  }
+
+  assert.equal(activityRequests.length, 1);
+  assert.equal(activityRequests[0].recordId, allSchools[0].recordId);
+  assert.equal(activityRequests[0].outcome, "Interested");
+  assert.equal(activityRequests[0].summary, "Emailed workshop details to principal.");
+  assert.match(getEl("bulk-final-summary").textContent, /All 1 schools were saved successfully/);
+
+  getEl("bulk-finish-done").click();
+  assert.equal(getEl("bulk-outreach-dialog").open, false);
+
+  // 5. Supervisor cannot bulk-select another student's school even if forced via preSelected
+  context.openBulkOutreach([allSchools[1].recordId, allSchools[2].recordId]);
+  const forcedPickerItems = Array.from(getEl("bulk-school-list").children);
+  assert.equal(forcedPickerItems.length, 1, "Still only personally owned school is available in picker");
+  assert.equal(getEl("bulk-select-count").textContent, "0 of 20 selected", "Other students' schools were rejected from pre-selection");
+  getEl("bulk-dialog-close").click();
+
+  // 6. Supervisor preserves ability to view and individually edit other students' schools
+  await context.openSchoolEditor(allSchools[1].recordId);
+  assert.equal(getEl("school-editor").open, true, "Supervisor can open other student's school for individual editing");
+  assert.equal(getEl("edit-contactName").disabled, false, "Fields are editable for supervisor");
+  getEl("editor-close").click();
+});
+
+test("Student bulk outreach: student experience remains unchanged with access from My Outreach and My Schools", async (t) => {
+  const studentSchools = [
+    {
+      recordId: "00000000-0000-4000-8000-000000000401",
+      schoolName: "Alex Assigned School",
+      schoolBoard: "TDSB",
+      geographicRegion: "North",
+      assignedTo: "Alex",
+      stage: "Not Contacted",
+      lastRequestId: "v1",
+      isMySchool: true,
+      canEdit: true,
+      ownerEmail: "alex@example.test",
+    },
+  ];
+
+  const { context, getEl, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: studentSchools,
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+
+  await signIn("alex@example.test");
+  assert.equal(getEl("user-role").textContent, "Student co-op");
+
+  // Student sees bulk log button on My Outreach (home view)
+  assert.equal(getEl("home-bulk-log").hidden, false, "Student sees bulk log on My Outreach");
+
+  // Student switches to My Schools and also sees bulk log button
+  getEl("tab-my-schools").click();
+  assert.equal(getEl("schools-bulk-log").hidden, false, "Student sees bulk log on My Schools");
+
+  // Opening bulk outreach shows assigned school
+  getEl("schools-bulk-log").click();
+  assert.equal(getEl("bulk-outreach-dialog").open, true);
+  const items = Array.from(getEl("bulk-school-list").children);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].getAttribute("data-id"), studentSchools[0].recordId);
+  getEl("bulk-dialog-close").click();
+});
+
+

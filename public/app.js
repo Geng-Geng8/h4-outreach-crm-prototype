@@ -42,7 +42,7 @@ function checkConnection() {
 let credential = "", schools = [], directory = [], demoSchools = [], config, nonce = "";
 let sessionVersion = 0, refreshSeq = 0, dirSeq = 0, demoSeq = 0;
 let activeRequest, activeDirRequest, activeDemoRequest, expiryTimer;
-let googleLoading, currentTab = "my-schools", isSupervisor = false;
+let googleLoading, currentTab = "my-schools", isSupervisor = false, currentUser = null;
 const pendingClaims = new Map(); // osn -> requestId
 let teamSchools = [], dashboardLoaded = false, dashboardSeq = 0, dashboardRequest;
 let overviewStudents = [], schoolScopeFilter = null, schoolStageFilter = "", schoolScopeLabel = "", homeShowAll = false;
@@ -178,7 +178,7 @@ function forgetSession() {
   clearTimeout(expiryTimer);
   el("refresh").disabled = false; el("retry").disabled = false;
   if (el("home-refresh")) el("home-refresh").disabled = false;
-  credential = ""; schools = []; directory = []; demoSchools = []; isSupervisor = false;
+  credential = ""; schools = []; directory = []; demoSchools = []; isSupervisor = false; currentUser = null;
   pendingClaims.clear();
   el("school-list").replaceChildren(); el("search").value = "";
   el("school-count").textContent = "0"; el("school-count-label").textContent = "schools";
@@ -254,7 +254,7 @@ function renderSchools() {
   }
   if (el("schools-bulk-log")) {
     el("schools-bulk-log").disabled = config?.writesEnabled !== true;
-    el("schools-bulk-log").hidden = isSupervisor;
+    el("schools-bulk-log").hidden = false;
   }
   el("school-count").textContent = String(visible.length);
   el("school-count-label").textContent = visible.length !== schools.length ? `of ${schools.length} schools` : schools.length === 1 ? "school" : "schools";
@@ -665,6 +665,8 @@ function getUnresolvedBulkCount(batch) {
 function getEligibleBulkSchools() {
   return schools.filter((school) => {
     if (school.canEdit === false) return false;
+    if (isSupervisor && school.isMySchool !== true) return false;
+    if (school.isMySchool === false) return false;
     if (["Booked", "Cold"].includes(school.stage)) return false;
     return true;
   });
@@ -1061,6 +1063,19 @@ async function executeBulkBatch(isRetry = false) {
           item.isConfirmedRejection = false;
           updateBulkProgressUI(i);
           continue;
+        }
+
+        const userEmail = currentUser?.email || parseJwtPayload(credential)?.email || "";
+        if (isSupervisor && schoolDetail.ownerEmail && userEmail) {
+          if (schoolDetail.ownerEmail.trim().toLowerCase() !== userEmail.trim().toLowerCase()) {
+            item.status = "conflict";
+            item.error = "Supervisors can only bulk-log schools they personally own.";
+            item.code = "NOT_OWNER";
+            item.retryable = false;
+            item.isConfirmedRejection = false;
+            updateBulkProgressUI(i);
+            continue;
+          }
         }
 
         // Skip schools that have become Booked or Cold
@@ -1967,6 +1982,7 @@ async function refresh() {
       schoolScopeFilter = null; schoolStageFilter = ""; schoolScopeLabel = "";
       dashboardRequest?.abort(); dashboardSeq++; teamSchools = [];
     }
+    currentUser = data.currentUser;
     schools = data.schools;
     overviewStudents = nextSupervisor ? data.overview?.students ?? [] : [];
     if (!nextSupervisor && el("home-view")) {

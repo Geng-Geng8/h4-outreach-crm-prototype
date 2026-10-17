@@ -18,7 +18,7 @@ export type SchoolSummary = {
   assignedTo: string; stage: string; priority: string; geographicRegion: string;
 };
 export type ActionSchool = SchoolSummary & {
-  lastContacted: string; followUpDue: string; nextAction: string;
+  lastContacted: string; followUpDue: string; nextAction: string; isMySchool: boolean;
 };
 type StudentProgress = { id: string; name: string; active: boolean };
 async function studentId(email: string): Promise<string> {
@@ -173,6 +173,7 @@ export class GoogleSheetsReadOnly {
         assignedTo: value(row[3]), stage: value(stages?.[index]?.[0]),
         lastContacted: value(stages?.[index]?.[1]), followUpDue: value(stages?.[index]?.[2]), nextAction: value(stages?.[index]?.[3]),
         priority: value(priorities?.[index]?.[0]), geographicRegion: value(regions?.[index]?.[0]),
+        isMySchool: owner === user.email,
       });
     }
     return { schools: summaries, users: users ?? [] };
