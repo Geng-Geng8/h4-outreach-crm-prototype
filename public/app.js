@@ -981,15 +981,27 @@ async function saveContactFromForm() {
     if (el("edit-email")) el("edit-email").value = data.record.email || "";
     if (el("edit-phone")) el("edit-phone").value = data.record.phone || "";
 
+    const outreachDraft = editDrafts.get(`activity:${editing.id}`);
+    if (outreachDraft) {
+      outreachDraft.original = { ...outreachDraft.original, ...data.record, lastRequestId: data.record.lastRequestId };
+      if (outreachDraft.values) {
+        outreachDraft.values.contactName = data.record.contactName;
+        outreachDraft.values.contactRole = data.record.contactRole;
+      }
+    }
+
     if (payload.action === "create" && data.contact) {
       if (data.contact.isPrimary) {
         editing.contacts.forEach((c) => { c.isPrimary = false; });
       }
       editing.contacts.push(data.contact);
       editing.lastCreatedContactId = data.contact.contactId;
-      const outreachDraft = editDrafts.get(`activity:${editing.id}`);
       if (outreachDraft) {
-        outreachDraft.selectedContactIds = [data.contact.contactId];
+        const existing = (outreachDraft.selectedContactIds || []).filter((id) => id && id !== "__general__");
+        if (!existing.includes(data.contact.contactId)) {
+          existing.push(data.contact.contactId);
+        }
+        outreachDraft.selectedContactIds = existing;
       }
     } else if (payload.action === "update" && data.contact) {
       const idx = editing.contacts.findIndex((c) => c.contactId === data.contact.contactId);
@@ -1082,6 +1094,15 @@ async function setPrimaryContact(contactId) {
     if (el("edit-email")) el("edit-email").value = data.record.email || "";
     if (el("edit-phone")) el("edit-phone").value = data.record.phone || "";
 
+    const outreachDraft = editDrafts.get(`activity:${editing.id}`);
+    if (outreachDraft) {
+      outreachDraft.original = { ...outreachDraft.original, ...data.record, lastRequestId: data.record.lastRequestId };
+      if (outreachDraft.values) {
+        outreachDraft.values.contactName = data.record.contactName;
+        outreachDraft.values.contactRole = data.record.contactRole;
+      }
+    }
+
     editing.contacts.forEach((c) => { c.isPrimary = (c.contactId === contactId); });
     renderSchoolContacts(editing.contacts);
     editorFeedback("Primary contact updated.");
@@ -1158,6 +1179,18 @@ async function deactivateContact(contactId) {
     if (el("edit-contactRole")) el("edit-contactRole").value = data.record.contactRole || "";
     if (el("edit-email")) el("edit-email").value = data.record.email || "";
     if (el("edit-phone")) el("edit-phone").value = data.record.phone || "";
+
+    const outreachDraft = editDrafts.get(`activity:${editing.id}`);
+    if (outreachDraft) {
+      outreachDraft.original = { ...outreachDraft.original, ...data.record, lastRequestId: data.record.lastRequestId };
+      if (outreachDraft.values) {
+        outreachDraft.values.contactName = data.record.contactName;
+        outreachDraft.values.contactRole = data.record.contactRole;
+      }
+      if (outreachDraft.selectedContactIds) {
+        outreachDraft.selectedContactIds = outreachDraft.selectedContactIds.filter((id) => id !== contactId);
+      }
+    }
 
     editing.contacts = editing.contacts.filter((c) => c.contactId !== contactId);
     if (data.record.contactName) {
@@ -1239,9 +1272,12 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
       const activity = retainedActivity ?? draft?.activity;
       if (activity) for (const field of outreachFields) el(`log-${field}`).value = activity[field];
       if (!draft && data.record.stage === "Not Contacted") el("edit-stage").value = "Contacted";
-      let toSelect = draft?.selectedContactIds || [];
+      let toSelect = draft?.selectedContactIds ? [...draft.selectedContactIds] : [];
       if (editing.lastCreatedContactId) {
-        toSelect = [editing.lastCreatedContactId];
+        toSelect = toSelect.filter((id) => id && id !== "__general__");
+        if (!toSelect.includes(editing.lastCreatedContactId)) {
+          toSelect.push(editing.lastCreatedContactId);
+        }
         delete editing.lastCreatedContactId;
       }
       renderOutreachContactPicker(editing.contacts, toSelect);

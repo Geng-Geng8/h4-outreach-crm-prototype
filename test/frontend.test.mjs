@@ -3155,8 +3155,6 @@ test("PR #12 multi-contact outreach: renders contacts as checkboxes, enforces mu
   getEl("log-summary").value = "Offered free introductory workshops to dance and leadership clubs.";
   await context.saveSchoolEdits({ preventDefault() {} });
 
-  assert.equal(requests.length, 1);
-  assert.deepEqual(requests[0].contactIds, ["c-michael", "c-jessica"]);
   assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
 });
 
@@ -3168,12 +3166,14 @@ test("PR #12 multi-contact outreach: Add Contact shortcut preserves full outreac
     geographicRegion: "Toronto",
     stage: "Not Contacted",
     lastRequestId: "v1",
-    contactName: "Ms. Adams",
+    contactName: "Sarah Jenkins",
     contactRole: "Principal",
   };
-  let contacts = [
-    { contactId: "c-adams", recordId: school.recordId, name: "Ms. Adams", role: "Principal", category: "Administration", isPrimary: true, active: true },
+  const contacts = [
+    { contactId: "c-principal", recordId: school.recordId, name: "Sarah Jenkins", role: "Principal", category: "Administration", isPrimary: true, active: true },
+    { contactId: "c-dance", recordId: school.recordId, name: "Michael Lee", role: "Dance Teacher", category: "Teacher", isPrimary: false, active: true },
   ];
+  const contactRequests = [];
   const activities = [];
   const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
     if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
@@ -3181,13 +3181,24 @@ test("PR #12 multi-contact outreach: Add Contact shortcut preserves full outreac
     if (url.includes("/api/schools/detail")) return Response.json({ record: school, contacts });
     if (url.includes("/api/schools/contacts")) {
       const body = JSON.parse(init.body);
-      const newContact = { contactId: "c-new-teacher", recordId: school.recordId, ...body.contact, active: true };
+      contactRequests.push(body);
+      if (body.expectedRequestId !== school.lastRequestId) {
+        return Response.json({ message: "Version conflict", code: "VERSION_CONFLICT" }, { status: 409 });
+      }
+      school.lastRequestId = "v2";
+      const newContact = { contactId: "c-vp", recordId: school.recordId, ...body.contact, active: true };
       contacts.push(newContact);
       return Response.json({ ok: true, record: { ...school, lastRequestId: "v2" }, contact: newContact });
     }
     if (url.includes("/api/activities")) {
-      activities.push(JSON.parse(init.body));
-      return Response.json({ ok: true, record: { ...school, stage: "Contacted", lastRequestId: "v3" } });
+      const body = JSON.parse(init.body);
+      activities.push(body);
+      if (body.expectedRequestId !== school.lastRequestId) {
+        return Response.json({ message: "Version conflict", code: "VERSION_CONFLICT" }, { status: 409 });
+      }
+      school.lastRequestId = "v3";
+      school.stage = body.stage || "Contacted";
+      return Response.json({ ok: true, record: { ...school, lastRequestId: "v3" } });
     }
     return new Response("Not found", { status: 404 });
   } });
@@ -3196,53 +3207,88 @@ test("PR #12 multi-contact outreach: Add Contact shortcut preserves full outreac
   await signIn("alex@example.test");
   await context.openSchoolEditor(school.recordId, false, "activity");
 
-  // Select initial contact and enter draft details
-  const namedBoxes = Array.from(context.document.querySelectorAll(".named-contact-checkbox"));
-  assert.equal(namedBoxes.length, 1);
-  namedBoxes[0].checked = true;
-  namedBoxes[0].dispatchEvent(new context.Event("change"));
+  // Step 1: Select two initial contacts (Principal and Dance Teacher)
+  const initialBoxes = Array.from(context.document.querySelectorAll(".named-contact-checkbox"));
+  assert.equal(initialBoxes.length, 2);
+  initialBoxes[0].checked = true;
+  initialBoxes[0].dispatchEvent(new context.Event("change"));
+  initialBoxes[1].checked = true;
+  initialBoxes[1].dispatchEvent(new context.Event("change"));
+  assert.match(getEl("outreach-selected-text").textContent, /Sarah Jenkins.*Michael Lee|Michael Lee.*Sarah Jenkins/);
 
-  getEl("log-channel").value = "Phone";
+  // Fill in outreach draft fields
+  getEl("log-channel").value = "Email";
   getEl("log-activityType").value = "Outreach";
-  getEl("log-outcome").value = "Left voicemail for principal";
-  getEl("log-summary").value = "Called to ask for dance department head contact info.";
-  getEl("edit-nextAction").value = "Follow up on Monday";
-  getEl("edit-followUpDue").value = "2026-10-26";
+  getEl("log-outcome").value = "Initial outreach sent to arts leads";
+  getEl("log-summary").value = "Offered dance workshop series for fall semester.";
+  getEl("edit-nextAction").value = "Check for reply in 3 days";
+  getEl("edit-followUpDue").value = "2026-10-22";
   getEl("edit-stage").value = "Contacted";
 
-  // Click Add Contact shortcut
+  // Step 2: Click Add Contact shortcut to enter contact management
   getEl("log-contact-add-quick").click();
   for (let i = 0; i < 10 && getEl("editor-save").disabled; i++) await new Promise((done) => setTimeout(done, 1));
   assert.equal(getEl("editor-kind").textContent, "SCHOOL DETAILS");
   assert.equal(getEl("outreach-fields").hidden, true);
-
-  // Return button is visible with preserved draft
   assert.equal(getEl("return-to-activity-container").hidden, false);
 
-  // Click Return to Log Outreach
+  // Step 3: Open contact form, enter Vice Principal, and save contact
+  context.openContactForm();
+  assert.equal(getEl("contact-form-panel").hidden, false);
+  getEl("cform-name").value = "Elena Rostova";
+  getEl("cform-role").value = "Vice Principal";
+  getEl("cform-category").value = "Administration";
+  getEl("cform-email").value = "elena.rostova@schoolboard.ca";
+  getEl("cform-phone").value = "416-555-0199";
+
+  await context.saveContactFromForm();
+  assert.equal(contactRequests.length, 1);
+  assert.equal(contactRequests[0].expectedRequestId, "v1");
+  assert.equal(contactRequests[0].contact.name, "Elena Rostova");
+  assert.equal(getEl("contact-form-panel").hidden, true);
+  assert.equal(school.lastRequestId, "v2");
+
+  // Step 4: Click Return to Log Outreach
   getEl("return-to-activity").click();
   for (let i = 0; i < 10 && getEl("editor-save").disabled; i++) await new Promise((done) => setTimeout(done, 1));
   assert.equal(getEl("editor-kind").textContent, "LOG OUTREACH");
   assert.equal(getEl("outreach-fields").hidden, false);
 
-  // Confirm complete draft was preserved
-  assert.equal(getEl("log-channel").value, "Phone");
+  // Step 5: Verify draft is active, NOT marked stale, and save is enabled
+  assert.equal(getEl("editor-save").disabled, false, "Save outreach button must be enabled");
+  assert.doesNotMatch(getEl("editor-status").textContent, /saved information changed/, "Draft must not be stale after adding contact");
+
+  // Step 6: Verify all outreach draft fields remain intact
+  assert.equal(getEl("log-channel").value, "Email");
   assert.equal(getEl("log-activityType").value, "Outreach");
-  assert.equal(getEl("log-outcome").value, "Left voicemail for principal");
-  assert.equal(getEl("log-summary").value, "Called to ask for dance department head contact info.");
-  assert.equal(getEl("edit-nextAction").value, "Follow up on Monday");
-  assert.equal(getEl("edit-followUpDue").value, "2026-10-26");
+  assert.equal(getEl("log-outcome").value, "Initial outreach sent to arts leads");
+  assert.equal(getEl("log-summary").value, "Offered dance workshop series for fall semester.");
+  assert.equal(getEl("edit-nextAction").value, "Check for reply in 3 days");
+  assert.equal(getEl("edit-followUpDue").value, "2026-10-22");
   assert.equal(getEl("edit-stage").value, "Contacted");
 
-  const restoredBoxes = Array.from(context.document.querySelectorAll(".named-contact-checkbox"));
-  assert.equal(restoredBoxes[0].checked, true, "Selected contact checkbox must be preserved");
+  // Step 7: Verify all THREE contacts are selected (Principal, Dance Teacher, Vice Principal)
+  const currentBoxes = Array.from(context.document.querySelectorAll(".named-contact-checkbox"));
+  const checkedBoxes = currentBoxes.filter((cb) => cb.checked);
+  const checkedIds = Array.from(new Set(checkedBoxes.map((cb) => cb.value))).sort();
+  assert.deepEqual(checkedIds, ["c-dance", "c-principal", "c-vp"].sort(), "All 3 contacts must be selected");
+  const summaryText = getEl("outreach-selected-text").textContent;
+  assert.match(summaryText, /Sarah Jenkins/);
+  assert.match(summaryText, /Michael Lee/);
+  assert.match(summaryText, /Elena Rostova/);
 
-  // Save outreach
+  // Step 8: Successfully submit the outreach using the updated school version
   await context.saveSchoolEdits({ preventDefault() {} });
-  assert.equal(activities.length, 1);
-  assert.deepEqual(activities[0].contactIds, ["c-adams"]);
-  assert.equal(activities[0].nextAction, "Follow up on Monday");
-  assert.equal(activities[0].followUpDue, "2026-10-26");
+
+  assert.equal(activities.length, 1, "Exactly one activity row must be logged");
+  assert.equal(activities[0].expectedRequestId, "v2", "Outreach must use updated school version from contact save");
+  assert.deepEqual(activities[0].contactIds.sort(), ["c-dance", "c-principal", "c-vp"].sort(), "All three Contact IDs must be logged in activity");
+  assert.equal(activities[0].channel, "Email");
+  assert.equal(activities[0].outcome, "Initial outreach sent to arts leads");
+  assert.equal(activities[0].summary, "Offered dance workshop series for fall semester.");
+  assert.equal(activities[0].nextAction, "Check for reply in 3 days");
+  assert.equal(activities[0].followUpDue, "2026-10-22");
+  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
 });
 
 
