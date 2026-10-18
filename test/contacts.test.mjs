@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { harness, C, ACTOR, OTHER, SUPERVISOR, RECORD, VERSION } from "./harness.mjs";
-import { ContactCol, HEADERS } from "../src/schema.ts";
+import { ContactCol, ActivityCol, HEADERS } from "../src/schema.ts";
 import { planMigration, buildMigrationRanges } from "../scripts/migrate-contacts.mjs";
 
 const CONTACTS_URL = "/api/schools/contacts";
@@ -46,6 +46,13 @@ test("contact CRUD: create secondary contact, edit details, set primary (demotin
 
   assert.equal(createRes.body.record.contactName, "");
 
+  // Verify Activity Log for ContactCreated records John Doe in Column G and John's ID in Column P
+  const createLog = h.sheets.tables["Activity Log"].slice(1).find((l) => l[ActivityCol.requestId] === createReqId);
+  assert.ok(createLog);
+  assert.equal(createLog[ActivityCol.activityType], "ContactCreated");
+  assert.equal(createLog[ActivityCol.contactedPerson], "John Doe");
+  assert.equal(createLog[ActivityCol.contactIds], johnContactId);
+
   // Contacts table in sheets has 2 contacts now
   const contactsInSheet = h.sheets.tables.Contacts.slice(1);
   assert.equal(contactsInSheet.length, 2);
@@ -69,6 +76,13 @@ test("contact CRUD: create secondary contact, edit details, set primary (demotin
 
   assert.equal(updateRes.status, 200);
   assert.equal(updateRes.body.contact.role, "Head of Science");
+
+  // Verify Activity Log for ContactUpdated records John Doe in Column G and John's ID in Column P
+  const updateLog = h.sheets.tables["Activity Log"].slice(1).find((l) => l[ActivityCol.requestId] === updateReqId);
+  assert.ok(updateLog);
+  assert.equal(updateLog[ActivityCol.activityType], "ContactUpdated");
+  assert.equal(updateLog[ActivityCol.contactedPerson], "John Doe");
+  assert.equal(updateLog[ActivityCol.contactIds], johnContactId);
 
   // 4. Set John Doe as primary contact (demotes Jane Smith)
   const setPrimaryReqId = randomUUID();
@@ -94,11 +108,12 @@ test("contact CRUD: create secondary contact, edit details, set primary (demotin
   assert.equal(updatedJohnRow[ContactCol.isPrimary], "TRUE");
 
   // Verify Activity Log recorded the change
-  const logs = h.sheets.tables["Activity Log"].slice(1);
-  const primaryLog = logs.find((l) => l[11] === setPrimaryReqId);
+  const primaryLog = h.sheets.tables["Activity Log"].slice(1).find((l) => l[ActivityCol.requestId] === setPrimaryReqId);
   assert.ok(primaryLog);
-  assert.equal(primaryLog[13], "ContactUpdated");
-  assert.equal(primaryLog[7], "Set John Doe as primary contact");
+  assert.equal(primaryLog[ActivityCol.activityType], "ContactUpdated");
+  assert.equal(primaryLog[ActivityCol.messageSummary], "Set John Doe as primary contact");
+  assert.equal(primaryLog[ActivityCol.contactedPerson], "John Doe");
+  assert.equal(primaryLog[ActivityCol.contactIds], johnContactId);
 
   // 5. Deactivate John Doe -> Jane Smith is automatically promoted back to primary
   const deactReqId = randomUUID();
@@ -120,6 +135,14 @@ test("contact CRUD: create secondary contact, edit details, set primary (demotin
 
   const repromotedJaneRow = h.sheets.tables.Contacts.slice(1).find((r) => r[ContactCol.name] === "Jane Smith");
   assert.equal(repromotedJaneRow[ContactCol.isPrimary], "TRUE");
+
+  // Verify Activity Log for ContactDeactivated records John Doe (the deactivated contact) in Column G, NOT Jane Smith
+  const deactLog = h.sheets.tables["Activity Log"].slice(1).find((l) => l[ActivityCol.requestId] === deactReqId);
+  assert.ok(deactLog);
+  assert.equal(deactLog[ActivityCol.activityType], "ContactDeactivated");
+  assert.equal(deactLog[ActivityCol.contactedPerson], "John Doe");
+  assert.equal(deactLog[ActivityCol.messageSummary], "Deactivated contact John Doe");
+  assert.equal(deactLog[ActivityCol.contactIds], johnContactId);
 });
 
 test("contact safety: stale version protection and idempotent request replay", async (t) => {
@@ -644,4 +667,143 @@ test("uncertain-write retry: contact operations retain same request ID and paylo
   assert.equal(alteredRes.status, 409);
   assert.equal(alteredRes.body.code, "REQUEST_ID_REUSED");
 });
+
+test("regression: Activity Log Column G records the actual affected contact (not primary contact) on ContactCreated, ContactUpdated, ContactDeactivated", async (t) => {
+  const h = await harness(t);
+
+  // Setup school with primary contact Cheryl
+  const schoolRow = h.sheets.tables.Schools[1];
+  schoolRow[C.contactName] = "Cheryl";
+  schoolRow[C.contactRole] = "Principal";
+  schoolRow[C.email] = "cheryl@example.test";
+  schoolRow[C.phone] = "416-555-0199";
+
+  // Contacts table has Cheryl as active primary
+  const cherylContactId = "00000000-0000-4000-9000-000000000001";
+  h.sheets.tables.Contacts[1] = [
+    cherylContactId, RECORD, "Maple Example Secondary", "Cheryl", "Principal",
+    "Administration", "9-12", "Main Office", "cheryl@example.test", "416-555-0199",
+    "Primary contact", "TRUE", "TRUE", "2026-10-15",
+  ];
+
+  // 1. Add non-primary contact Steph Celia
+  const createReqId = randomUUID();
+  const createRes = await h.post(CONTACTS_URL, {
+    requestId: createReqId,
+    recordId: RECORD,
+    expectedRequestId: VERSION,
+    action: "create",
+    contact: {
+      name: "Steph Celia",
+      role: "Dance Teacher",
+      category: "Teacher",
+      gradeRange: "9-12",
+      programGroup: "Arts",
+      email: "scelia@example.test",
+      phone: "416-555-0250",
+      notes: "Direct outreach contact for dance",
+      isPrimary: false,
+    },
+  }, ACTOR);
+
+  assert.equal(createRes.status, 200);
+  assert.equal(createRes.body.contact.name, "Steph Celia");
+  assert.equal(createRes.body.contact.isPrimary, false);
+  const stephContactId = createRes.body.contact.contactId;
+
+  // School primary contact must remain Cheryl
+  assert.equal(createRes.body.record.contactName, "Cheryl");
+
+  // Verify Activity Log row for ContactCreated
+  const createLog = h.sheets.tables["Activity Log"].slice(1).find((l) => l[ActivityCol.requestId] === createReqId);
+  assert.ok(createLog, "Activity log entry must exist for create");
+  assert.equal(createLog[ActivityCol.activityType], "ContactCreated");
+  assert.equal(createLog[ActivityCol.contactedPerson], "Steph Celia", "Column G must identify Steph Celia, NOT Cheryl");
+  assert.equal(createLog[ActivityCol.messageSummary], "Added contact Steph Celia (Dance Teacher)");
+  assert.equal(createLog[ActivityCol.contactIds], stephContactId, "Column P must record Steph Celia's Contact ID");
+
+  // 2. Update non-primary contact Steph Celia
+  const updateReqId = randomUUID();
+  const updateRes = await h.post(CONTACTS_URL, {
+    requestId: updateReqId,
+    recordId: RECORD,
+    expectedRequestId: createRes.body.requestId,
+    action: "update",
+    contactId: stephContactId,
+    contact: {
+      role: "Arts Department Head",
+    },
+  }, ACTOR);
+
+  assert.equal(updateRes.status, 200);
+  assert.equal(updateRes.body.contact.role, "Arts Department Head");
+
+  // School primary contact must remain Cheryl
+  assert.equal(updateRes.body.record.contactName, "Cheryl");
+
+  // Verify Activity Log row for ContactUpdated
+  const updateLog = h.sheets.tables["Activity Log"].slice(1).find((l) => l[ActivityCol.requestId] === updateReqId);
+  assert.ok(updateLog, "Activity log entry must exist for update");
+  assert.equal(updateLog[ActivityCol.activityType], "ContactUpdated");
+  assert.equal(updateLog[ActivityCol.contactedPerson], "Steph Celia", "Column G must identify Steph Celia, NOT Cheryl");
+  assert.equal(updateLog[ActivityCol.messageSummary], "Updated contact Steph Celia");
+  assert.equal(updateLog[ActivityCol.contactIds], stephContactId, "Column P must record Steph Celia's Contact ID");
+
+  // 3. Deactivate non-primary contact Steph Celia
+  const deactStephReqId = randomUUID();
+  const deactStephRes = await h.post(CONTACTS_URL, {
+    requestId: deactStephReqId,
+    recordId: RECORD,
+    expectedRequestId: updateRes.body.requestId,
+    action: "deactivate",
+    contactId: stephContactId,
+  }, ACTOR);
+
+  assert.equal(deactStephRes.status, 200);
+  // School primary contact remains Cheryl
+  assert.equal(deactStephRes.body.record.contactName, "Cheryl");
+
+  // Verify Activity Log row for ContactDeactivated
+  const deactStephLog = h.sheets.tables["Activity Log"].slice(1).find((l) => l[ActivityCol.requestId] === deactStephReqId);
+  assert.ok(deactStephLog, "Activity log entry must exist for deactivate");
+  assert.equal(deactStephLog[ActivityCol.activityType], "ContactDeactivated");
+  assert.equal(deactStephLog[ActivityCol.contactedPerson], "Steph Celia", "Column G must identify Steph Celia, NOT Cheryl");
+  assert.equal(deactStephLog[ActivityCol.messageSummary], "Deactivated contact Steph Celia");
+  assert.equal(deactStephLog[ActivityCol.contactIds], stephContactId, "Column P must record Steph Celia's Contact ID");
+
+  // 4. Deactivate primary contact Cheryl (with another contact Alex promoted)
+  const alexReqId = randomUUID();
+  const alexRes = await h.post(CONTACTS_URL, {
+    requestId: alexReqId,
+    recordId: RECORD,
+    expectedRequestId: deactStephRes.body.requestId,
+    action: "create",
+    contact: {
+      name: "Alex Rivera",
+      role: "Vice Principal",
+      category: "Administration",
+      isPrimary: false,
+    },
+  }, ACTOR);
+  assert.equal(alexRes.status, 200);
+
+  // Now deactivate Cheryl -> Alex Rivera becomes primary
+  const deactCherylReqId = randomUUID();
+  const deactCherylRes = await h.post(CONTACTS_URL, {
+    requestId: deactCherylReqId,
+    recordId: RECORD,
+    expectedRequestId: alexRes.body.requestId,
+    action: "deactivate",
+    contactId: cherylContactId,
+  }, ACTOR);
+  assert.equal(deactCherylRes.status, 200);
+  assert.equal(deactCherylRes.body.record.contactName, "Alex Rivera");
+
+  const deactCherylLog = h.sheets.tables["Activity Log"].slice(1).find((l) => l[ActivityCol.requestId] === deactCherylReqId);
+  assert.ok(deactCherylLog);
+  assert.equal(deactCherylLog[ActivityCol.activityType], "ContactDeactivated");
+  assert.equal(deactCherylLog[ActivityCol.contactedPerson], "Cheryl", "Column G must identify deactivated contact Cheryl, NOT promoted Alex Rivera");
+  assert.equal(deactCherylLog[ActivityCol.contactIds], cherylContactId);
+});
+
 

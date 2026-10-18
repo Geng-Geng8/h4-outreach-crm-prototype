@@ -705,12 +705,13 @@ export class SheetCoordinator extends DurableObject<Env> {
         }
 
         const contactIdVal = contactResult?.contactId ?? (typeof input.contactId === "string" ? input.contactId : "");
+        const contactPerson = contactResult?.name ?? String(row[C.contactName] ?? "");
         row[C.version] = requestId;
         let activityNumber = 2;
         while ((snapshot["Activity Log"][activityNumber - 1] ?? []).some((cell) => cell !== "")) activityNumber++;
         const activity: Row = [
           crypto.randomUUID(), day, row[C.name]!, row[C.assigned]!, channel, outcome,
-          row[C.contactName]!, summary, row[C.action]!, row[C.due]!, row[C.id]!, requestId,
+          contactPerson, summary, row[C.action]!, row[C.due]!, row[C.id]!, requestId,
           actor.email, activityType, this.env.GOOGLE_SHEET_ID === "synthetic-h4" ? "Local synthetic proof" : "App",
           contactIdVal,
         ];
