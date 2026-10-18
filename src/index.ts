@@ -427,6 +427,8 @@ export class SheetCoordinator extends DurableObject<Env> {
     let channel = "App";
     let outcome = "Updated";
     let summary = "";
+    let contactedPerson = "";
+    let contactIdsStr = "";
     const contactRanges: ValueRange[] = [];
     const day = today(this.env);
     if (path === "/api/schools/claim") {
@@ -702,6 +704,7 @@ export class SheetCoordinator extends DurableObject<Env> {
           }
         }
 
+        const contactIdVal = contactResult?.contactId ?? (typeof input.contactId === "string" ? input.contactId : "");
         row[C.version] = requestId;
         let activityNumber = 2;
         while ((snapshot["Activity Log"][activityNumber - 1] ?? []).some((cell) => cell !== "")) activityNumber++;
@@ -709,6 +712,7 @@ export class SheetCoordinator extends DurableObject<Env> {
           crypto.randomUUID(), day, row[C.name]!, row[C.assigned]!, channel, outcome,
           row[C.contactName]!, summary, row[C.action]!, row[C.due]!, row[C.id]!, requestId,
           actor.email, activityType, this.env.GOOGLE_SHEET_ID === "synthetic-h4" ? "Local synthetic proof" : "App",
+          contactIdVal,
         ];
         return {
           batch: {
@@ -716,7 +720,7 @@ export class SheetCoordinator extends DurableObject<Env> {
             data: [
               ...schoolWrites(rowNumber, row),
               ...contactRanges,
-              { range: `'Activity Log'!A${activityNumber}:O${activityNumber}`, values: [activity] },
+              { range: `'Activity Log'!A${activityNumber}:P${activityNumber}`, values: [activity] },
             ],
           },
           result: {
@@ -725,13 +729,46 @@ export class SheetCoordinator extends DurableObject<Env> {
           },
         };
       } else {
-        onlyKeys(input, ["requestId", "recordId", "expectedRequestId", "channel", "activityType", "outcome", "summary", "stage", "followUpDue", "nextAction"]);
+        onlyKeys(input, ["requestId", "recordId", "expectedRequestId", "channel", "activityType", "outcome", "summary", "stage", "followUpDue", "nextAction", "contactIds"]);
         channel = text(input.channel, 30);
         if (!["Email", "Phone", "Follow-Up", "Social", "Meeting", "Reply", "App", "Text", "Visit"].includes(channel)) throw new ApiError(422, "INVALID_CHANNEL");
         activityType = text(input.activityType, 30);
         if (!["Outreach", "FollowUp"].includes(activityType)) throw new ApiError(422, "INVALID_ACTIVITY_TYPE");
         outcome = text(input.outcome, 300); summary = text(input.summary);
         if (!outcome.trim() || !summary.trim()) throw new ApiError(422, "OUTREACH_DETAILS_REQUIRED");
+
+        if (input.contactIds !== undefined) {
+          if (!Array.isArray(input.contactIds)) throw new ApiError(422, "INVALID_CONTACT_IDS");
+          for (const cid of input.contactIds) {
+            if (typeof cid !== "string" || !uuid.test(cid)) throw new ApiError(422, "INVALID_CONTACT_ID");
+          }
+          const uniqueIds = new Set(input.contactIds);
+          if (uniqueIds.size !== input.contactIds.length) throw new ApiError(422, "DUPLICATE_CONTACT_IDS");
+
+          if (input.contactIds.length > 0) {
+            const allContacts = (snapshot.Contacts?.slice(1) ?? []).map(contactRecord);
+            const selected: ReturnType<typeof contactRecord>[] = [];
+            for (const cid of input.contactIds) {
+              const found = allContacts.find((c) => c.contactId === cid);
+              if (!found) throw new ApiError(404, "CONTACT_NOT_FOUND", { contactId: cid });
+              if (found.recordId !== input.recordId) throw new ApiError(422, "CROSS_SCHOOL_CONTACT_FORBIDDEN", { contactId: cid, schoolRecordId: input.recordId });
+              if (!found.active) throw new ApiError(422, "INACTIVE_CONTACT_FORBIDDEN", { contactId: cid });
+              selected.push(found);
+            }
+            contactedPerson = selected.map((c) => c.role ? `${c.name} (${c.role})` : c.name).join(", ");
+            contactIdsStr = selected.map((c) => c.contactId).join(",");
+          } else {
+            contactedPerson = "General School Outreach";
+            contactIdsStr = "";
+          }
+        } else {
+          const primary = (snapshot.Contacts?.slice(1) ?? [])
+            .map(contactRecord)
+            .find((c) => c.recordId === input.recordId && c.active && c.isPrimary);
+          contactedPerson = String(row[C.contactName] ?? "").trim() || (primary ? (primary.role ? `${primary.name} (${primary.role})` : primary.name) : "General School Outreach");
+          contactIdsStr = "";
+        }
+
         // Explicit follow-up events increment once; other outreach does not reset the count.
         const count = Number(row[C.count]);
         if (!Number.isInteger(count) || count < 0) throw new ApiError(422, "INVALID_STORED_COUNT");
@@ -750,19 +787,24 @@ export class SheetCoordinator extends DurableObject<Env> {
         if (input.nextAction !== undefined) row[C.action] = text(input.nextAction);
       }
     }
+    if (path === "/api/schools/claim" || path === "/api/schools/update") {
+      contactedPerson = String(row[C.contactName] ?? "");
+      contactIdsStr = "";
+    }
     row[C.version] = requestId;
     let activityNumber = 2;
     while ((snapshot["Activity Log"][activityNumber - 1] ?? []).some((cell) => cell !== "")) activityNumber++;
     const activity: Row = [
       crypto.randomUUID(), day, row[C.name]!, row[C.assigned]!, channel, outcome,
-      row[C.contactName]!, summary, row[C.action]!, row[C.due]!, row[C.id]!, requestId,
+      contactedPerson, summary, row[C.action]!, row[C.due]!, row[C.id]!, requestId,
       actor.email, activityType, this.env.GOOGLE_SHEET_ID === "synthetic-h4" ? "Local synthetic proof" : "App",
+      contactIdsStr,
     ];
     return {
       batch: { valueInputOption: "RAW", data: [
         ...schoolWrites(rowNumber, row),
         ...contactRanges,
-        { range: `'Activity Log'!A${activityNumber}:O${activityNumber}`, values: [activity] },
+        { range: `'Activity Log'!A${activityNumber}:P${activityNumber}`, values: [activity] },
       ] },
       result: { status: 200, body: { ok: true, code: "SUCCESS", requestId, record: record(row) } },
     };

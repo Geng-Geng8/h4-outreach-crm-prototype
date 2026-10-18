@@ -408,14 +408,157 @@ function updateColdWarning() {
   }
 }
 
+function getSelectedContactIds() {
+  const genBox = el("contact-choice-general");
+  if (genBox?.checked) return [];
+  const allBoxes = Array.from(document.querySelectorAll(".named-contact-checkbox") || []);
+  const namedBoxes = allBoxes.filter((cb) => cb.checked);
+  return Array.from(new Set(namedBoxes.map((cb) => cb.value)));
+}
+
+function getSelectedContactTokens() {
+  const genBox = el("contact-choice-general");
+  if (genBox?.checked) return ["__general__"];
+  const allBoxes = Array.from(document.querySelectorAll(".named-contact-checkbox") || []);
+  const namedBoxes = allBoxes.filter((cb) => cb.checked);
+  return Array.from(new Set(namedBoxes.map((cb) => cb.value)));
+}
+
+function updateSelectedContactsSummary() {
+  const display = el("outreach-selected-text");
+  if (!display) return;
+  const genBox = el("contact-choice-general");
+  const allBoxes = Array.from(document.querySelectorAll(".named-contact-checkbox") || []);
+  const namedBoxes = allBoxes.filter((cb) => cb.checked);
+  const selectedIds = Array.from(new Set(namedBoxes.map((cb) => cb.value)));
+
+  if (selectedIds.length > 0) {
+    const contactsMap = new Map((editing?.contacts || []).map((c) => [c.contactId, c]));
+    const selectedNames = selectedIds.map((id) => {
+      const c = contactsMap.get(id);
+      if (c) {
+        return `${c.name} — ${c.role || "Contact"}`;
+      }
+      const cb = namedBoxes.find((b) => b.value === id);
+      const card = cb?.closest?.(".outreach-contact-card");
+      return card?.querySelector?.(".outreach-contact-name")?.textContent || cb?.getAttribute?.("aria-label") || "Contact";
+    });
+    display.textContent = selectedNames.join(", ");
+  } else if (genBox?.checked) {
+    display.textContent = "General School Outreach";
+  } else {
+    display.textContent = "No contacts selected (optional)";
+  }
+}
+
+function renderOutreachContactPicker(contacts = [], selectedIds = []) {
+  const container = el("outreach-named-contacts");
+  const genCard = el("contact-choice-general-card");
+  const genBox = el("contact-choice-general");
+  if (!container) return;
+
+  if (typeof container.replaceChildren === "function") {
+    container.replaceChildren();
+  } else {
+    container.innerHTML = "";
+  }
+
+  const activeContacts = (contacts || []).filter((c) => c.active !== false);
+
+  if (activeContacts.length === 0) {
+    const emptyMsg = document.createElement("p");
+    emptyMsg.className = "contacts-empty-note";
+    emptyMsg.textContent = "No specific contacts recorded yet for this school. You can select General School Outreach or add a contact.";
+    container.append(emptyMsg);
+  } else {
+    for (const c of activeContacts) {
+      const card = document.createElement("label");
+      card.className = `outreach-contact-card${c.isPrimary ? " is-primary" : ""}`;
+      card.setAttribute("data-contact-id", c.contactId);
+      if (card.dataset) card.dataset.contactId = c.contactId;
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "outreach-contact-checkbox named-contact-checkbox";
+      checkbox.value = c.contactId;
+      checkbox.setAttribute("aria-label", `${c.name} — ${c.role || "Contact"}`);
+      if (selectedIds && selectedIds.includes(c.contactId)) {
+        checkbox.checked = true;
+        card.classList.add("is-selected");
+      }
+
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          if (genBox) {
+            genBox.checked = false;
+            genCard?.classList.remove("is-selected");
+          }
+          card.classList.add("is-selected");
+        } else {
+          card.classList.remove("is-selected");
+        }
+        updateSelectedContactsSummary();
+      });
+
+      const content = document.createElement("div");
+      content.className = "outreach-contact-content";
+
+      const nameRow = document.createElement("div");
+      nameRow.className = "outreach-contact-name-row";
+
+      const nameEl = document.createElement("strong");
+      nameEl.className = "outreach-contact-name";
+      nameEl.textContent = `${c.name} — ${c.role || "Contact"}`;
+      nameRow.append(nameEl);
+
+      if (c.isPrimary) {
+        const pBadge = document.createElement("span");
+        pBadge.className = "contact-badge-primary";
+        pBadge.textContent = "★ Primary";
+        nameRow.append(pBadge);
+      }
+
+      if (c.category) {
+        const catBadge = document.createElement("span");
+        catBadge.className = `contact-badge-cat${c.category === "Student" ? " contact-badge-student" : ""}`;
+        catBadge.textContent = c.category;
+        nameRow.append(catBadge);
+      }
+
+      content.append(nameRow);
+
+      const subInfo = [c.email, c.phone, c.programGroup].filter(Boolean).join(" · ");
+      if (subInfo) {
+        const subEl = document.createElement("span");
+        subEl.className = "outreach-contact-sub";
+        subEl.textContent = subInfo;
+        content.append(subEl);
+      }
+
+      card.append(checkbox);
+      card.append(content);
+      container.append(card);
+    }
+  }
+
+  if (genBox) {
+    genBox.checked = Boolean(selectedIds && selectedIds.includes("__general__"));
+    genCard?.classList.toggle("is-selected", genBox.checked);
+  }
+
+  updateSelectedContactsSummary();
+}
+
 function editSchoolContact() {
   if (!editing || editing.busy) return;
   const values = editorValues();
   const activity = outreachValues();
+  const selectedContactIds = getSelectedContactTokens();
   // Always preserve the complete outreach draft when entering contact editor
   editDrafts.set(`activity:${editing.id}`, {
     values,
     activity,
+    selectedContactIds,
     pending: editing.pending,
     original: editing.original,
   });
@@ -478,8 +621,9 @@ function closeSchoolEditor() {
   if (editing?.original && !editing.saved) {
     const values = editorValues();
     const activity = outreachValues();
-    if (editing.pending || (editing.mode === "activity" ? activity.outcome || activity.summary || values.nextAction || values.followUpDue : editFields.some((key) => values[key] !== String(editing.original[key] ?? "")))) {
-      editDrafts.set(editorDraftKey(editing), { values, activity, pending: editing.pending, original: editing.original });
+    const selectedContactIds = getSelectedContactTokens();
+    if (editing.pending || (editing.mode === "activity" ? activity.outcome || activity.summary || values.nextAction || values.followUpDue || selectedContactIds.length > 0 : editFields.some((key) => values[key] !== String(editing.original[key] ?? "")))) {
+      editDrafts.set(editorDraftKey(editing), { values, activity, selectedContactIds, pending: editing.pending, original: editing.original });
     } else editDrafts.delete(editorDraftKey(editing));
   }
   editorSeq++; editorRead?.abort(); editing = null;
@@ -842,6 +986,11 @@ async function saveContactFromForm() {
         editing.contacts.forEach((c) => { c.isPrimary = false; });
       }
       editing.contacts.push(data.contact);
+      editing.lastCreatedContactId = data.contact.contactId;
+      const outreachDraft = editDrafts.get(`activity:${editing.id}`);
+      if (outreachDraft) {
+        outreachDraft.selectedContactIds = [data.contact.contactId];
+      }
     } else if (payload.action === "update" && data.contact) {
       const idx = editing.contacts.findIndex((c) => c.contactId === data.contact.contactId);
       if (data.contact.isPrimary) {
@@ -1090,6 +1239,12 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
       const activity = retainedActivity ?? draft?.activity;
       if (activity) for (const field of outreachFields) el(`log-${field}`).value = activity[field];
       if (!draft && data.record.stage === "Not Contacted") el("edit-stage").value = "Contacted";
+      let toSelect = draft?.selectedContactIds || [];
+      if (editing.lastCreatedContactId) {
+        toSelect = [editing.lastCreatedContactId];
+        delete editing.lastCreatedContactId;
+      }
+      renderOutreachContactPicker(editing.contacts, toSelect);
     }
     const contactName = (data.record.contactName ?? "").trim();
     const contactRole = (data.record.contactRole ?? "").trim();
@@ -1156,7 +1311,9 @@ async function saveSchoolEdits(event) {
     if (edit.mode === "activity") {
       const activity = outreachValues();
       if (!activity.outcome.trim() || !activity.summary.trim()) { editorFeedback("Add an outcome and a short description before saving.", "error"); return; }
+      const contactIds = getSelectedContactIds();
       edit.pending = { recordId: edit.id, expectedRequestId: edit.original.lastRequestId, requestId: crypto.randomUUID(), ...activity,
+        contactIds,
         followUpDue: values.followUpDue, nextAction: values.nextAction,
         ...(values.stage !== edit.original.stage ? { stage: values.stage } : {}),
       };
@@ -2697,6 +2854,22 @@ el("log-activityType")?.addEventListener("change", () => {
 });
 el("edit-stage")?.addEventListener("change", updateColdWarning);
 el("log-contact-edit")?.addEventListener("click", editSchoolContact);
+el("log-contact-add-quick")?.addEventListener("click", editSchoolContact);
+el("contact-choice-general")?.addEventListener("change", () => {
+  const genBox = el("contact-choice-general");
+  const genCard = el("contact-choice-general-card");
+  if (genBox?.checked) {
+    genCard?.classList.add("is-selected");
+    const named = document.querySelectorAll(".named-contact-checkbox");
+    named.forEach((cb) => {
+      cb.checked = false;
+      cb.closest(".outreach-contact-card")?.classList.remove("is-selected");
+    });
+  } else {
+    genCard?.classList.remove("is-selected");
+  }
+  updateSelectedContactsSummary();
+});
 el("return-to-activity")?.addEventListener("click", () => returnToActivity(false));
 el("save-contact-return")?.addEventListener("click", saveSchoolEdits);
 el("contact-add-btn")?.addEventListener("click", () => openContactForm());

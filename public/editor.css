@@ -282,6 +282,119 @@
   flex-shrink: 0;
   white-space: nowrap;
 }
+
+/* Multi-Contact Outreach Picker (PR #12) */
+.outreach-contacts-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.outreach-contacts-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.outreach-named-contacts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.outreach-contact-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #ffffff;
+  border: 1.5px solid #dce4d5;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  min-height: 48px;
+}
+.outreach-contact-card:hover {
+  background: #f7faf5;
+  border-color: #2e5941;
+}
+.outreach-contact-card:has(.outreach-contact-checkbox:checked),
+.outreach-contact-card.is-selected {
+  background: #eef6eb;
+  border-color: #153528;
+  box-shadow: 0 1px 3px rgba(21, 53, 40, 0.12);
+}
+.outreach-contact-card.is-primary {
+  border-left: 3.5px solid #2e5941;
+}
+.outreach-contact-checkbox {
+  appearance: auto;
+  accent-color: #153528;
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.outreach-checkbox-visual {
+  display: none;
+}
+.outreach-contact-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.outreach-contact-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.outreach-contact-name {
+  font-size: 13.5px;
+  color: #14201a;
+  font-weight: 700;
+}
+.outreach-contact-sub {
+  font-size: 12px;
+  color: #55645b;
+  line-height: 1.4;
+}
+.outreach-contacts-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #f1f6ed;
+  border: 1px solid #d4e2cf;
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+.outreach-selected-display {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12.5px;
+  color: #153528;
+  min-width: 0;
+  flex: 1;
+}
+.outreach-selected-label {
+  font-weight: 600;
+  color: #385945;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.outreach-selected-text {
+  font-weight: 700;
+  color: #14201a;
+  word-break: break-word;
+}
+
 .contact-return-bar {
   display: flex;
   align-items: center;

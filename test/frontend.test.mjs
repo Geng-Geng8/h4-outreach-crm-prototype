@@ -3090,6 +3090,162 @@ test("unresolved contact operations: uncertain contact save preserves request ID
   assert.match(getEl("save-toast").textContent, /Contact saved/);
 });
 
+test("PR #12 multi-contact outreach: renders contacts as checkboxes, enforces mutual exclusivity with General School Outreach", async (t) => {
+  const school = {
+    recordId: "00000000-0000-4000-8000-000000000088",
+    schoolName: "Oakridge Secondary",
+    schoolBoard: "TDSB",
+    geographicRegion: "Toronto",
+    stage: "Not Contacted",
+    lastRequestId: "v1",
+    contactName: "Sarah Jenkins",
+    contactRole: "Principal",
+  };
+  const contacts = [
+    { contactId: "c-sarah", recordId: school.recordId, name: "Sarah Jenkins", role: "Principal", category: "Administration", isPrimary: true, active: true },
+    { contactId: "c-michael", recordId: school.recordId, name: "Michael Lee", role: "Dance Teacher", category: "Teacher", isPrimary: false, active: true },
+    { contactId: "c-jessica", recordId: school.recordId, name: "Jessica Cruz", role: "Leadership Teacher", category: "Teacher", isPrimary: false, active: true },
+  ];
+  const requests = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [school], sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record: school, contacts });
+    if (url.includes("/api/activities")) { requests.push(JSON.parse(init.body)); return Response.json({ ok: true, record: { ...school, stage: "Contacted", lastRequestId: "v2" } }); }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+
+  await signIn("alex@example.test");
+  await context.openSchoolEditor(school.recordId, false, "activity");
+
+  // Step 1: Rendered options
+  const genBox = getEl("contact-choice-general");
+  assert.ok(genBox, "General School Outreach checkbox should exist");
+  assert.equal(genBox.checked, false);
+
+  const namedBoxes = Array.from(context.document.querySelectorAll(".named-contact-checkbox"));
+  assert.equal(namedBoxes.length, 3, "All 3 active contacts should be rendered as selectable checkboxes");
+  assert.equal(namedBoxes[0].value, "c-sarah");
+  assert.equal(namedBoxes[1].value, "c-michael");
+  assert.equal(namedBoxes[2].value, "c-jessica");
+
+  // Mutual exclusivity test 1: Check General School Outreach -> unchecks all named contacts
+  namedBoxes[0].checked = true;
+  namedBoxes[0].dispatchEvent(new context.Event("change"));
+  assert.match(getEl("outreach-selected-text").textContent, /Sarah Jenkins/);
+
+  genBox.checked = true;
+  genBox.dispatchEvent(new context.Event("change"));
+  assert.equal(namedBoxes[0].checked, false, "Named contact must be unchecked when General School Outreach is checked");
+  assert.equal(getEl("outreach-selected-text").textContent, "General School Outreach");
+
+  // Mutual exclusivity test 2: Check named contact -> unchecks General School Outreach
+  namedBoxes[1].checked = true;
+  namedBoxes[1].dispatchEvent(new context.Event("change"));
+  assert.equal(genBox.checked, false, "General School Outreach must be unchecked when named contact is checked");
+
+  // Multiple selection: select Michael and Jessica together
+  namedBoxes[2].checked = true;
+  namedBoxes[2].dispatchEvent(new context.Event("change"));
+  assert.match(getEl("outreach-selected-text").textContent, /Michael Lee.*Jessica Cruz/);
+
+  // Fill remaining fields and save
+  getEl("log-outcome").value = "Sent email to dance and leadership teachers";
+  getEl("log-summary").value = "Offered free introductory workshops to dance and leadership clubs.";
+  await context.saveSchoolEdits({ preventDefault() {} });
+
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0].contactIds, ["c-michael", "c-jessica"]);
+  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+});
+
+test("PR #12 multi-contact outreach: Add Contact shortcut preserves full outreach draft across contact creation", async (t) => {
+  const school = {
+    recordId: "00000000-0000-4000-8000-000000000099",
+    schoolName: "Pinecrest High",
+    schoolBoard: "TDSB",
+    geographicRegion: "Toronto",
+    stage: "Not Contacted",
+    lastRequestId: "v1",
+    contactName: "Ms. Adams",
+    contactRole: "Principal",
+  };
+  let contacts = [
+    { contactId: "c-adams", recordId: school.recordId, name: "Ms. Adams", role: "Principal", category: "Administration", isPrimary: true, active: true },
+  ];
+  const activities = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [school], sessionExpiresAt: Math.floor(Date.now()/1000)+3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record: school, contacts });
+    if (url.includes("/api/schools/contacts")) {
+      const body = JSON.parse(init.body);
+      const newContact = { contactId: "c-new-teacher", recordId: school.recordId, ...body.contact, active: true };
+      contacts.push(newContact);
+      return Response.json({ ok: true, record: { ...school, lastRequestId: "v2" }, contact: newContact });
+    }
+    if (url.includes("/api/activities")) {
+      activities.push(JSON.parse(init.body));
+      return Response.json({ ok: true, record: { ...school, stage: "Contacted", lastRequestId: "v3" } });
+    }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+
+  await signIn("alex@example.test");
+  await context.openSchoolEditor(school.recordId, false, "activity");
+
+  // Select initial contact and enter draft details
+  const namedBoxes = Array.from(context.document.querySelectorAll(".named-contact-checkbox"));
+  assert.equal(namedBoxes.length, 1);
+  namedBoxes[0].checked = true;
+  namedBoxes[0].dispatchEvent(new context.Event("change"));
+
+  getEl("log-channel").value = "Phone";
+  getEl("log-activityType").value = "Outreach";
+  getEl("log-outcome").value = "Left voicemail for principal";
+  getEl("log-summary").value = "Called to ask for dance department head contact info.";
+  getEl("edit-nextAction").value = "Follow up on Monday";
+  getEl("edit-followUpDue").value = "2026-10-26";
+  getEl("edit-stage").value = "Contacted";
+
+  // Click Add Contact shortcut
+  getEl("log-contact-add-quick").click();
+  for (let i = 0; i < 10 && getEl("editor-save").disabled; i++) await new Promise((done) => setTimeout(done, 1));
+  assert.equal(getEl("editor-kind").textContent, "SCHOOL DETAILS");
+  assert.equal(getEl("outreach-fields").hidden, true);
+
+  // Return button is visible with preserved draft
+  assert.equal(getEl("return-to-activity-container").hidden, false);
+
+  // Click Return to Log Outreach
+  getEl("return-to-activity").click();
+  for (let i = 0; i < 10 && getEl("editor-save").disabled; i++) await new Promise((done) => setTimeout(done, 1));
+  assert.equal(getEl("editor-kind").textContent, "LOG OUTREACH");
+  assert.equal(getEl("outreach-fields").hidden, false);
+
+  // Confirm complete draft was preserved
+  assert.equal(getEl("log-channel").value, "Phone");
+  assert.equal(getEl("log-activityType").value, "Outreach");
+  assert.equal(getEl("log-outcome").value, "Left voicemail for principal");
+  assert.equal(getEl("log-summary").value, "Called to ask for dance department head contact info.");
+  assert.equal(getEl("edit-nextAction").value, "Follow up on Monday");
+  assert.equal(getEl("edit-followUpDue").value, "2026-10-26");
+  assert.equal(getEl("edit-stage").value, "Contacted");
+
+  const restoredBoxes = Array.from(context.document.querySelectorAll(".named-contact-checkbox"));
+  assert.equal(restoredBoxes[0].checked, true, "Selected contact checkbox must be preserved");
+
+  // Save outreach
+  await context.saveSchoolEdits({ preventDefault() {} });
+  assert.equal(activities.length, 1);
+  assert.deepEqual(activities[0].contactIds, ["c-adams"]);
+  assert.equal(activities[0].nextAction, "Follow up on Monday");
+  assert.equal(activities[0].followUpDue, "2026-10-26");
+});
+
+
 
 
 

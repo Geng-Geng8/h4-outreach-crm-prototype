@@ -9,7 +9,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "node --test --test-concurrency=1 test/save-safety.test.mjs test/read-only.test.mjs test/frontend.test.mjs test/operator-recovery.test.mjs test/claim-workflow.test.mjs test/google-writes.test.mjs test/pages-build.test.mjs test/contacts.test.mjs",
+    "test": "node --test --test-concurrency=1 test/save-safety.test.mjs test/read-only.test.mjs test/frontend.test.mjs test/operator-recovery.test.mjs test/claim-workflow.test.mjs test/google-writes.test.mjs test/pages-build.test.mjs test/contacts.test.mjs test/multi-contact-outreach.test.mjs",
     "dev": "node scripts/dev.mjs"
   },
   "devDependencies": {

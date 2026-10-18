@@ -141,7 +141,7 @@
               <span class="step-num" aria-hidden="true">1</span>
               <div>
                 <h3 class="step-title">Who did you contact?</h3>
-                <p class="step-sub">School contact person</p>
+                <p class="step-sub">Select one or multiple contacts, or General School Outreach</p>
               </div>
             </div>
             <div id="log-contact-card" class="contact-card">
@@ -154,7 +154,29 @@
               </div>
               <button type="button" id="log-contact-edit" class="button secondary compact-button" aria-label="Edit school contact details">Edit contact</button>
             </div>
-            <p class="field-help">A contact name is optional if you emailed the school's general inbox. You can add or edit contact details anytime.</p>
+            <div class="outreach-contacts-picker" role="group" aria-label="Who did you contact?">
+              <div class="outreach-contacts-options" id="outreach-contacts-options">
+                <label class="outreach-contact-card" id="contact-choice-general-card">
+                  <input type="checkbox" id="contact-choice-general" class="outreach-contact-checkbox" value="__general__">
+                  <span class="outreach-checkbox-visual" aria-hidden="true"></span>
+                  <div class="outreach-contact-content">
+                    <strong class="outreach-contact-name">General School Outreach</strong>
+                    <span class="outreach-contact-sub">School general inbox, main phone, or office (no specific person)</span>
+                  </div>
+                </label>
+                <div id="outreach-named-contacts" class="outreach-named-contacts"></div>
+              </div>
+              <div class="outreach-contacts-toolbar">
+                <div id="outreach-selected-display" class="outreach-selected-display" aria-live="polite">
+                  <span class="outreach-selected-label">Selected:</span>
+                  <strong id="outreach-selected-text" class="outreach-selected-text">No contacts selected (optional)</strong>
+                </div>
+                <button type="button" id="log-contact-add-quick" class="button secondary compact-button" aria-label="Add new contact to this school">
+                  + Add contact
+                </button>
+              </div>
+            </div>
+            <p class="field-help">Contact selection is optional. You can choose one or multiple contacts at this school, or choose General School Outreach.</p>
           </section>
 
           <section class="flow-step editor-wide" id="step-channel">

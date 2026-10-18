@@ -15,6 +15,7 @@ export const HEADERS = {
     "Activity ID", "Date", "School / Organization", "Assigned To", "Channel",
     "Outcome", "Contacted Person", "Message Summary", "Next Action", "Follow-Up Due",
     "Related Record ID", "Request ID", "Actor Email", "Activity Type", "Platform",
+    "Contact IDs",
   ],
   Contacts: [
     "Contact ID", "Record ID", "School Name", "Name", "Role",
@@ -46,6 +47,13 @@ export const ContactCol = {
   id: 0, recordId: 1, schoolName: 2, name: 3, role: 4,
   category: 5, gradeRange: 6, programGroup: 7, email: 8, phone: 9,
   notes: 10, isPrimary: 11, active: 12, updatedAt: 13,
+} as const;
+
+export const ActivityCol = {
+  id: 0, date: 1, schoolName: 2, assignedTo: 3, channel: 4,
+  outcome: 5, contactedPerson: 6, messageSummary: 7, nextAction: 8, followUpDue: 9,
+  relatedRecordId: 10, requestId: 11, actorEmail: 12, activityType: 13, platform: 14,
+  contactIds: 15,
 } as const;
 
 export function contactRecord(row: Row) {
