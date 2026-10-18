@@ -19,7 +19,7 @@ export class GoogleSheetsCoordinator extends GoogleSheetsReadOnly {
   async snapshot(): Promise<Snapshot> {
     const query = new URLSearchParams({ valueRenderOption: "FORMULA", dateTimeRenderOption: "FORMATTED_STRING" });
     const tabs = Object.keys(HEADERS) as Tab[];
-    for (const tab of tabs) query.append("ranges", `'${tab}'!${tab === "Schools" ? "A:AF" : tab === "CRM Users" ? "A:D" : tab === "Contacts" ? "A:N" : "A:O"}`);
+    for (const tab of tabs) query.append("ranges", `'${tab}'!${tab === "Schools" ? "A:AF" : tab === "CRM Users" ? "A:D" : tab === "Contacts" ? "A:N" : tab === "Activity Log" ? "A:P" : "A:O"}`);
     const response = await this.request("GET", `values:batchGet?${query}`);
     if (!response.ok) throw new ApiError(503, response.status === 403 ? "TEST_SHEET_ACCESS_REQUIRED" : "SHEETS_READ_FAILED");
     const data = await response.json<{ valueRanges?: { values?: Row[] }[] }>();
@@ -54,8 +54,8 @@ export class GoogleSheetsCoordinator extends GoogleSheetsReadOnly {
     }
 
     const last = batch.data.length - 1;
-    const log = /^'Activity Log'!A(\d+):O\1$/.exec(batch.data[last]!.range);
-    if (!log || Number(log[1]) < 2 || batch.data[last]!.values.length !== 1 || batch.data[last]!.values[0]?.length !== 15) {
+    const log = /^'Activity Log'!A(\d+):P\1$/.exec(batch.data[last]!.range);
+    if (!log || Number(log[1]) < 2 || batch.data[last]!.values.length !== 1 || batch.data[last]!.values[0]?.length !== 16) {
       throw new ApiError(422, "INVALID_WRITE_RANGES");
     }
 

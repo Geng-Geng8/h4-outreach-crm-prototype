@@ -107,8 +107,8 @@ test("school updates and activities share one RAW split-range batch, preserving 
   assert.equal(h.sheets.batches.length, 1);
   const batch = h.sheets.batches[0];
   assert.equal(batch.valueInputOption, "RAW");
-  assert.deepEqual(batch.data.map(({ range }) => range), ["'Schools'!A2:P2", "'Schools'!S2:AF2", "'Activity Log'!A2:O2"]);
-  assert.deepEqual(batch.data.map(({ values }) => values[0].length), [16, 14, 15]);
+  assert.deepEqual(batch.data.map(({ range }) => range), ["'Schools'!A2:P2", "'Schools'!S2:AF2", "'Activity Log'!A2:P2"]);
+  assert.deepEqual(batch.data.map(({ values }) => values[0].length), [16, 14, 16]);
   assert.deepEqual(h.sheets.tables.Schools.map((row) => row.slice(16, 18)), formulas);
   assert.equal(logs(h)[0][11], input.requestId);
   assert.equal(logs(h)[0][10], RECORD);

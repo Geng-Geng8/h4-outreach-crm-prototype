@@ -79,10 +79,10 @@ export class FakeSheets {
       if (tab === "Schools" && (Number(endRow) > 500 || !((from === 0 && to === 15) || (from === 18 && to === 31)))) {
         throw new Error("Protected or unformatted range");
       }
-      if (tab === "Activity Log" && (from !== 0 || to !== 14)) throw new Error("Invalid activity range");
+      if (tab === "Activity Log" && (from !== 0 || to !== 15)) throw new Error("Invalid activity range");
       if (tab === "Contacts" && (from !== 0 || to !== 13)) throw new Error("Invalid contacts range");
       const number = Number(startRow) - 1;
-      next[tab][number] ??= Array(tab === "Schools" ? 32 : tab === "Contacts" ? 14 : 15).fill("");
+      next[tab][number] ??= Array(tab === "Schools" ? 32 : tab === "Contacts" ? 14 : 16).fill("");
       range.values[0].forEach((value, offset) => { next[tab][number][from + offset] = value; });
       // Fail after some ranges have been staged, proving no partial commit escapes.
       if (this.fault === "reject" && index === 1) throw new Error("Injected batch validation failure");

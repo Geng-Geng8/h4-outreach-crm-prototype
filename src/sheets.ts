@@ -8,7 +8,7 @@ export class SyntheticSheets {
   async read(): Promise<Snapshot> {
     const url = new URL(`https://synthetic.invalid/v4/spreadsheets/${this.sheetId}/values:batchGet`);
     for (const tab of Object.keys(HEADERS) as Tab[]) {
-      const range = tab === "Schools" ? "A1:AF500" : tab === "CRM Users" ? "A1:D" : tab === "Contacts" ? "A1:N500" : "A1:O";
+      const range = tab === "Schools" ? "A1:AF500" : tab === "CRM Users" ? "A1:D" : tab === "Contacts" ? "A1:N500" : tab === "Activity Log" ? "A1:P" : "A1:O";
       url.searchParams.append("ranges", `'${tab}'!${range}`);
     }
     url.searchParams.set("valueRenderOption", "FORMULA");
