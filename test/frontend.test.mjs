@@ -3542,6 +3542,133 @@ test("school editor: release / unclaim school flow prompts inline confirmation a
   assert.equal(getEl("school-editor").open, false);
 });
 
+test("supervisor default Schools tab: defaults to personal assigned schools with quick toggle to all team schools", async (t) => {
+  const glenEmail = "glendale.reyes@gmail.com";
+  const elianaEmail = "eliana@example.test";
+  const teamSchools = [];
+  // 13 schools assigned to Glen
+  for (let i = 1; i <= 13; i++) {
+    teamSchools.push({
+      recordId: `glen-${i}`,
+      schoolName: `Glen School ${i}`,
+      schoolBoard: "TDSB",
+      geographicRegion: "Toronto",
+      stage: "Contacted",
+      assignedTo: "Glen",
+      ownerEmail: glenEmail,
+    });
+  }
+  // 12 schools assigned to Eliana
+  for (let i = 1; i <= 12; i++) {
+    teamSchools.push({
+      recordId: `eliana-${i}`,
+      schoolName: `Eliana School ${i}`,
+      schoolBoard: "YRDSB",
+      geographicRegion: "York",
+      stage: "Not Contacted",
+      assignedTo: "Eliana",
+      ownerEmail: elianaEmail,
+    });
+  }
+
+  const { context, getEl, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Glen", email: glenEmail, role: "Supervisor" },
+          schools: teamSchools,
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+
+  await signIn(glenEmail);
+  assert.equal(getEl("user-role").textContent, "Supervisor");
+
+  // 1. Click "Schools" tab
+  getEl("tab-my-schools").click();
+  assert.equal(getEl("schools-view").hidden, false);
+
+  // 2. Default view: only Glen's 13 assigned schools are visible
+  assert.equal(getEl("school-list").children.length, 13);
+  assert.equal(getEl("school-count").textContent, "13");
+
+  // 3. Supervisor toggle is visible and shows counts
+  const toggle = getEl("schools-supervisor-toggle");
+  assert.equal(toggle.hidden, false);
+  const btnMine = getEl("schools-toggle-mine");
+  const btnAll = getEl("schools-toggle-all");
+  assert.equal(btnMine.textContent, "My Schools (13)");
+  assert.equal(btnAll.textContent, "All Team Schools (25)");
+  assert.equal(btnMine.classList.contains("active"), true);
+  assert.equal(btnMine.getAttribute("aria-pressed"), "true");
+  assert.equal(btnAll.classList.contains("active"), false);
+  assert.equal(btnAll.getAttribute("aria-pressed"), "false");
+
+  // 4. Toggle to All Team Schools (25)
+  btnAll.click();
+  assert.equal(getEl("school-list").children.length, 25);
+  assert.equal(getEl("school-count").textContent, "25");
+  assert.equal(btnAll.classList.contains("active"), true);
+  assert.equal(btnAll.getAttribute("aria-pressed"), "true");
+  assert.equal(btnMine.classList.contains("active"), false);
+  assert.equal(btnMine.getAttribute("aria-pressed"), "false");
+
+  // 5. Toggle back to My Schools (13)
+  btnMine.click();
+  assert.equal(getEl("school-list").children.length, 13);
+  assert.equal(getEl("school-count").textContent, "13");
+  assert.equal(btnMine.classList.contains("active"), true);
+
+  // 6. When on All Team Schools, clicking "Schools" tab again resets to My Schools
+  btnAll.click();
+  assert.equal(getEl("school-list").children.length, 25);
+  getEl("tab-my-schools").click();
+  assert.equal(getEl("school-list").children.length, 13);
+  assert.equal(btnMine.classList.contains("active"), true);
+});
+
+test("student default Schools tab: toggle is hidden and only student's assigned schools are shown", async (t) => {
+  const studentEmail = "alex@example.test";
+  const studentSchools = [
+    {
+      recordId: "alex-1",
+      schoolName: "Alex School 1",
+      schoolBoard: "TDSB",
+      geographicRegion: "Toronto",
+      stage: "Contacted",
+      assignedTo: "Alex",
+      ownerEmail: studentEmail,
+    },
+  ];
+
+  const { context, getEl, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: studentEmail, role: "co-op" },
+          schools: studentSchools,
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+
+  await signIn(studentEmail);
+  getEl("tab-my-schools").click();
+
+  assert.equal(getEl("schools-supervisor-toggle").hidden, true);
+  assert.equal(getEl("school-list").children.length, 1);
+});
+
+
 
 
 

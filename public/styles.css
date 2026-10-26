@@ -1003,3 +1003,38 @@ button.dashboard-metric:hover { border-color: var(--brand-pine); box-shadow: var
   #home-view:not(.student-home) .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #home-view:not(.student-home) .dashboard-metric:last-child { grid-column: 1 / -1; }
 }
+
+/* Supervisor Schools View Segmented Control */
+.supervisor-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  padding: 3px;
+  gap: 2px;
+  margin-top: 16px;
+  margin-bottom: 4px;
+}
+.supervisor-toggle-btn {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-full);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.supervisor-toggle-btn:hover {
+  color: var(--brand-pine);
+}
+.supervisor-toggle-btn.active {
+  background: var(--brand-pine);
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(21, 53, 40, 0.2);
+}
+

@@ -106,6 +106,10 @@
       </div>
 
       <div id="schools-view" role="tabpanel" aria-labelledby="tab-my-schools" hidden>
+        <div id="schools-supervisor-toggle" class="supervisor-filter-toggle" role="group" aria-label="School assignment view" hidden>
+          <button id="schools-toggle-mine" type="button" class="supervisor-toggle-btn active" aria-pressed="true">My Schools (0)</button>
+          <button id="schools-toggle-all" type="button" class="supervisor-toggle-btn" aria-pressed="false">All Team Schools (0)</button>
+        </div>
         <div id="schools-scope" class="visibility-note" hidden><span id="schools-scope-label"></span><button id="schools-scope-clear" class="text-button" type="button">Show all schools</button></div>
         <div class="workspace-tools"><div class="count-label"><strong id="school-count">0</strong><span id="school-count-label">schools</span></div><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search schools</span><input id="search" type="search" placeholder="Search by school, board or region" autocomplete="off"></label><button id="schools-bulk-log" class="button secondary" type="button">Bulk log outreach</button><button id="refresh" class="button secondary" type="button">Refresh</button></div>
         <p class="visibility-note">Select a school to edit details, or choose Log outreach to record a contact or follow-up. Students can update only their own schools.</p>

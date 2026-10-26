@@ -46,6 +46,7 @@ let googleLoading, currentTab = "my-schools", isSupervisor = false, currentUser 
 const pendingClaims = new Map(); // osn -> requestId
 let teamSchools = [], dashboardLoaded = false, dashboardSeq = 0, dashboardRequest;
 let overviewStudents = [], schoolScopeFilter = null, schoolStageFilter = "", schoolScopeLabel = "", homeShowAll = false;
+let supervisorSchoolScope = "mine";
 const pipelineStages = ["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Cold"];
 const otherStage = "Other / not set";
 const stageKey = (school) => pipelineStages.includes(school.stage) ? school.stage : otherStage;
@@ -54,13 +55,24 @@ const assignee = (school) => school.assignedTo?.trim() || "Unassigned";
 function isAssignedToMe(school) {
   if (!school) return false;
   const userEmail = (currentUser?.email || (credential ? parseJwtPayload(credential)?.email : "") || "").trim().toLowerCase();
+  const userName = (currentUser?.name || "").trim().toLowerCase();
+
   if (school.ownerEmail) {
-    return (school.ownerEmail || "")
+    const emails = school.ownerEmail
       .toLowerCase()
       .split(",")
-      .map((e) => e.trim())
-      .includes(userEmail);
+      .map((e) => e.trim());
+    return Boolean(userEmail && emails.includes(userEmail));
   }
+
+  if (school.assignedTo) {
+    const assignees = school.assignedTo
+      .toLowerCase()
+      .split(",")
+      .map((e) => e.trim());
+    return Boolean((userName && assignees.includes(userName)) || (userEmail && assignees.includes(userEmail)));
+  }
+
   if (school.isMySchool !== undefined) return Boolean(school.isMySchool);
   return !isSupervisor;
 }
@@ -203,7 +215,8 @@ function forgetSession() {
   el("refresh").disabled = false; el("retry").disabled = false;
   if (el("home-refresh")) el("home-refresh").disabled = false;
   credential = ""; schools = []; directory = []; demoSchools = []; isSupervisor = false; currentUser = null;
-  pendingClaims.clear();
+  pendingClaims.clear(); supervisorSchoolScope = "mine";
+  if (el("schools-supervisor-toggle")) el("schools-supervisor-toggle").hidden = true;
   el("school-list").replaceChildren(); el("search").value = "";
   el("school-count").textContent = "0"; el("school-count-label").textContent = "schools";
   if (el("schools-scope")) { el("schools-scope").hidden = true; el("schools-scope-label").textContent = ""; }
@@ -267,11 +280,55 @@ async function onGoogleSignIn(response) {
   }
 }
 
+function renderSupervisorSchoolToggle() {
+  const toggle = el("schools-supervisor-toggle");
+  if (!toggle) return;
+  if (!isSupervisor) {
+    toggle.hidden = true;
+    return;
+  }
+  toggle.hidden = false;
+  const myCount = schools.filter(isAssignedToMe).length;
+  const allCount = schools.length;
+
+  const btnMine = el("schools-toggle-mine");
+  const btnAll = el("schools-toggle-all");
+
+  if (btnMine) {
+    btnMine.textContent = `My Schools (${myCount})`;
+    const active = supervisorSchoolScope !== "all";
+    btnMine.classList.toggle("active", active);
+    btnMine.setAttribute("aria-pressed", String(active));
+  }
+  if (btnAll) {
+    btnAll.textContent = `All Team Schools (${allCount})`;
+    const active = supervisorSchoolScope === "all";
+    btnAll.classList.toggle("active", active);
+    btnAll.setAttribute("aria-pressed", String(active));
+  }
+}
+
 function renderSchools() {
   const query = el("search").value.trim().toLowerCase();
   const today = dashboardToday();
-  const visible = schools.filter((school) => (!schoolScopeFilter || schoolScopeFilter(school, today)) && (!schoolStageFilter || stageKey(school) === schoolStageFilter) &&
+
+  const isDrilldown = Boolean(schoolScopeFilter || schoolStageFilter);
+  const mySchools = schools.filter(isAssignedToMe);
+
+  let scopedSchools = schools;
+  if (!isDrilldown) {
+    if (isSupervisor) {
+      scopedSchools = supervisorSchoolScope === "all" ? schools : mySchools;
+    } else {
+      scopedSchools = schools;
+    }
+  }
+
+  const visible = scopedSchools.filter((school) => (!schoolScopeFilter || schoolScopeFilter(school, today)) && (!schoolStageFilter || stageKey(school) === schoolStageFilter) &&
     [school.schoolName, school.schoolBoard, school.geographicRegion].some((value) => value.toLowerCase().includes(query)));
+
+  renderSupervisorSchoolToggle();
+
   if (el("schools-scope")) {
     el("schools-scope").hidden = !schoolScopeFilter && !schoolStageFilter;
     el("schools-scope-label").textContent = `${schoolScopeLabel || schoolStageFilter} · ${visible.length} ${visible.length === 1 ? "school" : "schools"}`;
@@ -280,8 +337,9 @@ function renderSchools() {
     el("schools-bulk-log").disabled = config?.writesEnabled !== true;
     el("schools-bulk-log").hidden = false;
   }
+  const baseTotal = isDrilldown ? schools.length : scopedSchools.length;
   el("school-count").textContent = String(visible.length);
-  el("school-count-label").textContent = visible.length !== schools.length ? `of ${schools.length} schools` : schools.length === 1 ? "school" : "schools";
+  el("school-count-label").textContent = visible.length !== baseTotal ? `of ${baseTotal} schools` : baseTotal === 1 ? "school" : "schools";
   el("school-list").replaceChildren();
   for (const school of visible) {
     const container = document.createElement("article"); container.className = "school-card";
@@ -2700,6 +2758,7 @@ function renderMetrics(id, entries) {
 function reviewSchools(filter, label, stage = "") {
   schoolScopeFilter = filter;
   schoolScopeLabel = label; schoolStageFilter = stage; el("search").value = "";
+  if (!filter && !stage) supervisorSchoolScope = "all";
   renderSchools(); switchTab("my-schools");
 }
 function attentionReasons(school, today = dashboardToday()) {
@@ -3534,13 +3593,40 @@ el("refresh").addEventListener("click", refresh);
 el("tab-home")?.addEventListener("click", () => switchTab("home"));
 el("home-refresh")?.addEventListener("click", refresh);
 el("home-find")?.addEventListener("click", () => switchTab("directory"));
-el("home-schools")?.addEventListener("click", () => reviewSchools(null, ""));
+el("home-schools")?.addEventListener("click", () => {
+  supervisorSchoolScope = isSupervisor ? "all" : "mine";
+  reviewSchools(null, "");
+});
 el("home-filter")?.addEventListener("change", () => { homeShowAll = false; renderHome(); });
 el("home-more")?.addEventListener("click", () => { homeShowAll = true; renderHome(); });
-el("schools-scope-clear")?.addEventListener("click", () => reviewSchools(null, ""));
+el("schools-scope-clear")?.addEventListener("click", () => {
+  supervisorSchoolScope = "all";
+  reviewSchools(null, "");
+});
 el("retry").addEventListener("click", initialize);
 el("search").addEventListener("input", renderSchools);
-el("tab-my-schools").addEventListener("click", () => switchTab("my-schools"));
+el("tab-my-schools").addEventListener("click", () => {
+  supervisorSchoolScope = "mine";
+  schoolScopeFilter = null;
+  schoolStageFilter = "";
+  schoolScopeLabel = "";
+  switchTab("my-schools");
+  renderSchools();
+});
+el("schools-toggle-mine")?.addEventListener("click", () => {
+  supervisorSchoolScope = "mine";
+  schoolScopeFilter = null;
+  schoolStageFilter = "";
+  schoolScopeLabel = "";
+  renderSchools();
+});
+el("schools-toggle-all")?.addEventListener("click", () => {
+  supervisorSchoolScope = "all";
+  schoolScopeFilter = null;
+  schoolStageFilter = "";
+  schoolScopeLabel = "";
+  renderSchools();
+});
 el("tab-dashboard")?.addEventListener("click", () => switchTab("dashboard"));
 el("dashboard-refresh")?.addEventListener("click", loadDashboard);
 el("dashboard-clear")?.addEventListener("click", clearDashboardFilters);
