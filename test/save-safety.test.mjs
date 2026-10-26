@@ -223,6 +223,90 @@ test("Cold guard rejects warm stages, insufficient follow-ups, missing/current/f
   assert.equal(h.sheets.attempts, 1);
 });
 
+test("Cold status Path A: explicit decline allowed immediately with 0 follow-ups, clears followUpDue, sets nextAction, and saves coldReason in Column AC", async (t) => {
+  const h = await harness(t);
+  h.sheets.tables.Schools[1][C.stage] = "Not Contacted";
+  h.sheets.tables.Schools[1][C.count] = 0;
+  h.sheets.tables.Schools[1][C.due] = "2026-11-15";
+  h.sheets.tables.Schools[1][C.action] = "Follow up";
+
+  // Outcome 'Not interested' sets Cold immediately
+  const res1 = await h.post(ACTIVITY, {
+    ...activity(),
+    stage: "Cold",
+    outcome: "Not interested",
+    summary: "School principal emailed saying they are not interested this year.",
+  });
+  assert.equal(res1.status, 200);
+  const row1 = h.sheets.tables.Schools[1];
+  assert.equal(row1[C.stage], "Cold");
+  assert.equal(row1[C.coldReason], "Explicit Rejection / Not Interested");
+  assert.equal(row1[C.due], "");
+  assert.equal(row1[C.action], "Archived for season");
+
+  // Re-open school and test explicit rejection reason via /api/schools/update
+  row1[C.stage] = "Contacted";
+  row1[C.count] = 1;
+  row1[C.due] = "2026-12-01";
+  row1[C.action] = "Plan call";
+  const currentVersion = row1[C.version];
+
+  const res2 = await h.post(UPDATE, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: currentVersion,
+    patch: {
+      stage: "Cold",
+      coldReason: "No Budget / Funding",
+    },
+  });
+  assert.equal(res2.status, 200);
+  const row2 = h.sheets.tables.Schools[1];
+  assert.equal(row2[C.stage], "Cold");
+  assert.equal(row2[C.coldReason], "No Budget / Funding");
+  assert.equal(row2[C.due], "");
+  assert.equal(row2[C.action], "Archived for season");
+});
+
+test("Cold status Path B: unresponsive path saves default unresponsive reason in Column AC", async (t) => {
+  const h = await harness(t);
+  h.sheets.tables.Schools[1][C.stage] = "Contacted";
+  h.sheets.tables.Schools[1][C.count] = 2;
+  h.sheets.tables.Schools[1][C.due] = "2026-10-14"; // Past deadline
+
+  const res = await h.post(ACTIVITY, {
+    ...activity(),
+    stage: "Cold",
+    outcome: "No response after multiple attempts",
+    summary: "Sent 2 follow-ups with no reply.",
+  });
+  assert.equal(res.status, 200);
+  const row = h.sheets.tables.Schools[1];
+  assert.equal(row[C.stage], "Cold");
+  assert.equal(row[C.coldReason], "Unresponsive (2+ follow-ups completed with no reply)");
+});
+
+test("Cold status Path C: warm stages reject Cold even with explicit rejection", async (t) => {
+  const h = await harness(t);
+  const row = h.sheets.tables.Schools[1];
+
+  for (const warmStage of ["Interested", "Engaged", "Booked"]) {
+    row[C.stage] = warmStage;
+    row[C.count] = 0;
+    row[C.due] = "";
+
+    const res = await h.post(ACTIVITY, {
+      ...activity(),
+      stage: "Cold",
+      outcome: "Not interested",
+      summary: "Declined after discussion",
+    });
+    assert.equal(res.status, 422);
+    assert.equal(res.body.code, "COLD_RULE_VIOLATION");
+    assert.match(res.body.reason, /protected/i);
+  }
+});
+
 test("invalid calendar dates are rejected", async (t) => {
   const h = await harness(t);
   const input = update(); input.patch.followUpDue = "2026-02-30";

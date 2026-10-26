@@ -50,8 +50,18 @@ const pipelineStages = ["Not Contacted", "Contacted", "Interested", "Engaged", "
 const otherStage = "Other / not set";
 const stageKey = (school) => pipelineStages.includes(school.stage) ? school.stage : otherStage;
 const assignee = (school) => school.assignedTo?.trim() || "Unassigned";
-const editFields = ["contactName", "contactRole", "email", "phone", "stage", "priority", "outreachGoal", "followUpDue", "nextAction", "notes"];
+const editFields = ["contactName", "contactRole", "email", "phone", "stage", "priority", "outreachGoal", "followUpDue", "nextAction", "notes", "coldReason"];
 const outreachFields = ["channel", "activityType", "outcome", "summary"];
+const EXPLICIT_REJECTION_REASONS = [
+  "Not Interested",
+  "Explicit Rejection / Not Interested",
+  "No Budget / Funding",
+  "Timing / Scheduling Conflict",
+  "Outside Program Scope / Ineligible",
+  "Other (Declined)",
+];
+const DEFAULT_DECLINE_REASON = "Explicit Rejection / Not Interested";
+const UNRESPONSIVE_COLD_REASON = "Unresponsive (2+ follow-ups completed with no reply)";
 const detailOnlyFields = ["contactName", "contactRole", "email", "phone", "priority", "outreachGoal", "notes"];
 let editing = null, editorSeq = 0, editorRead;
 let saveToastTimer;
@@ -299,6 +309,17 @@ function applySuggestion(targetId, value) {
   input.dispatchEvent(new Event("change", { bubbles: true }));
   input.focus?.();
   updateSuggestionStates();
+
+  if (targetId === "log-outcome" && value.toLowerCase() === "not interested") {
+    const origStage = editing?.original?.stage;
+    if (!origStage || !["Interested", "Engaged", "Booked"].includes(origStage)) {
+      if (el("edit-stage")) el("edit-stage").value = "Cold";
+      if (el("edit-coldReason")) el("edit-coldReason").value = DEFAULT_DECLINE_REASON;
+      if (el("edit-followUpDue")) el("edit-followUpDue").value = "";
+      if (el("edit-nextAction")) el("edit-nextAction").value = "Archived for season";
+      updateColdWarning();
+    }
+  }
 }
 
 function updateSuggestionStates() {
@@ -395,16 +416,92 @@ function renderSummarySuggestions() {
   }
 }
 
+function evaluateColdEligibility(params) {
+  const PROTECTED_STAGES = new Set(["Interested", "Engaged", "Booked"]);
+
+  if (PROTECTED_STAGES.has(params.currentStage)) {
+    return {
+      allowed: false,
+      reason: `Schools in "${params.currentStage}" stage are protected. Change stage to Contacted first before marking Cold.`,
+    };
+  }
+
+  const explicitRejectionReasons = [
+    "Not Interested",
+    "Explicit Rejection / Not Interested",
+    "No Budget / Funding",
+    "Timing / Scheduling Conflict",
+    "Outside Program Scope / Ineligible",
+    "Other (Declined)",
+  ];
+
+  if (
+    params.isExplicitRejection ||
+    (params.coldReason && explicitRejectionReasons.includes(params.coldReason))
+  ) {
+    return {
+      allowed: true,
+      reason: "Eligible for Cold status (Explicit rejection / declined by school).",
+    };
+  }
+
+  // Unresponsive path
+  if (params.followUpCount < 2) {
+    return {
+      allowed: false,
+      reason: `Requires 2 unanswered follow-ups before marking Cold due to no response (currently ${params.followUpCount}/2), OR select an explicit decline reason.`,
+    };
+  }
+
+  const today = params.today || new Date().toISOString().slice(0, 10);
+  if (!params.followUpDue || today <= params.followUpDue) {
+    return {
+      allowed: false,
+      reason: `Response deadline (${params.followUpDue || "not set"}) must pass before marking Cold due to no response.`,
+    };
+  }
+
+  return {
+    allowed: true,
+    reason: "Eligible for Cold status (2 unanswered follow-ups completed & deadline passed).",
+  };
+}
+
 function updateColdWarning() {
   const warning = el("cold-warning");
+  const coldReasonField = el("field-coldReason");
   if (!warning) return;
   const stage = el("edit-stage")?.value;
-  if (stage === "Cold" && editing?.coldAllowed === false) {
-    warning.textContent = "Cold requires two follow-ups and a past follow-up date. Interested, Engaged and Booked schools stay protected.";
+  if (stage !== "Cold") {
+    warning.textContent = "";
+    warning.hidden = true;
+    if (coldReasonField) coldReasonField.hidden = true;
+    if (editing) editing.coldAllowed = true;
+    return;
+  }
+
+  if (coldReasonField) coldReasonField.hidden = false;
+  const coldReasonInput = el("edit-coldReason");
+  const coldReason = coldReasonInput?.value || DEFAULT_DECLINE_REASON;
+  const outcome = el("log-outcome")?.value || "";
+  const isExplicit = EXPLICIT_REJECTION_REASONS.includes(coldReason) || outcome.trim().toLowerCase() === "not interested";
+
+  const check = evaluateColdEligibility({
+    currentStage: editing?.original?.stage || "Not Contacted",
+    followUpCount: Number(editing?.original?.followUpCount || 0),
+    followUpDue: editing?.original?.followUpDue || null,
+    coldReason: coldReason,
+    isExplicitRejection: isExplicit,
+  });
+
+  if (!check.allowed) {
+    warning.textContent = check.reason;
     warning.hidden = false;
+    if (editing) editing.coldAllowed = false;
   } else {
     warning.textContent = "";
     warning.hidden = true;
+    if (editing) editing.coldAllowed = true;
   }
 }
 
@@ -595,7 +692,13 @@ function returnToActivity(force = false) {
   openSchoolEditor(editing.id, false, "activity");
 }
 
-function editorValues() { return Object.fromEntries(editFields.map((field) => [field, el(`edit-${field}`).value])); }
+function editorValues() {
+  const vals = Object.fromEntries(editFields.map((field) => [field, el(`edit-${field}`)?.value ?? ""]));
+  if (vals.stage !== "Cold" && !editing?.original?.coldReason) {
+    vals.coldReason = "";
+  }
+  return vals;
+}
 function outreachValues() { return Object.fromEntries(outreachFields.map((field) => [field, el(`log-${field}`).value])); }
 function editorDraftKey(edit) { return `${edit.mode ?? "details"}:${edit.id}`; }
 function editorSaveLabel(edit) {
@@ -1296,10 +1399,13 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     el("editor-title").textContent = data.record.schoolName;
     el("editor-meta").textContent = [data.record.schoolBoard, `Assigned to ${data.record.assignedTo || "you"}`].filter(Boolean).join(" · ");
     const day = new Date().toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
-    const coldAllowed = data.record.stage === "Cold" || (!["Interested", "Engaged", "Booked"].includes(data.record.stage) && Number(data.record.followUpCount) >= 2 && data.record.followUpDue && day > data.record.followUpDue);
+    const isProtected = ["Interested", "Engaged", "Booked"].includes(data.record.stage);
     const cold = el("edit-stage").querySelector?.('option[value="Cold"]');
-    if (cold) cold.disabled = !coldAllowed;
-    editing.coldAllowed = coldAllowed;
+    if (cold) cold.disabled = isProtected;
+    editing.coldAllowed = !isProtected;
+    if (el("edit-coldReason")) {
+      el("edit-coldReason").value = data.record.coldReason || (data.record.stage === "Cold" ? DEFAULT_DECLINE_REASON : "");
+    }
     updateColdWarning();
     const staleDraft = draft?.original && draft.original.lastRequestId !== data.record.lastRequestId && !editing.pending;
     editing.stale = !!staleDraft;
@@ -1344,25 +1450,45 @@ async function saveSchoolEdits(event) {
   }
   if (!edit.pending) {
     const values = editorValues();
+    if (values.stage === "Cold" && edit.coldAllowed === false) {
+      const warningText = el("cold-warning")?.textContent || "This school cannot be marked Cold yet. Check the follow-up rule below.";
+      editorFeedback(warningText, "error");
+      return;
+    }
     if (edit.mode === "activity") {
       const activity = outreachValues();
       if (!activity.outcome.trim() || !activity.summary.trim()) { editorFeedback("Add an outcome and a short description before saving.", "error"); return; }
       const contactIds = getSelectedContactIds();
+      const isCold = values.stage === "Cold";
+      const coldReasonVal = isCold ? (values.coldReason || el("edit-coldReason")?.value || DEFAULT_DECLINE_REASON) : undefined;
+      const isExplicitRejection = isCold && (EXPLICIT_REJECTION_REASONS.includes(coldReasonVal) || activity.outcome.trim().toLowerCase() === "not interested");
       edit.pending = { recordId: edit.id, expectedRequestId: edit.original.lastRequestId, requestId: crypto.randomUUID(), ...activity,
         contactIds,
-        followUpDue: values.followUpDue, nextAction: values.nextAction,
-        ...(values.stage !== edit.original.stage ? { stage: values.stage } : {}),
+        followUpDue: isCold && isExplicitRejection && !values.followUpDue ? "" : values.followUpDue,
+        nextAction: isCold && isExplicitRejection && !values.nextAction ? "Archived for season" : values.nextAction,
+        ...(values.stage !== edit.original.stage || isCold ? { stage: values.stage } : {}),
+        ...(isCold ? { coldReason: coldReasonVal, isExplicitRejection } : {}),
       };
     } else {
-    const patch = Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== String(edit.original[key] ?? "")));
-    if (!Object.keys(patch).length) {
-      if (edit.mode === "details" && editDrafts.has(`activity:${edit.id}`)) {
-        openSchoolEditor(edit.id, false, "activity");
-        return;
+      const patch = Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== String(edit.original[key] ?? "")));
+      if (values.stage === "Cold") {
+        const coldReasonVal = values.coldReason || el("edit-coldReason")?.value || DEFAULT_DECLINE_REASON;
+        if (!patch.coldReason) patch.coldReason = coldReasonVal;
+        const isExplicitRejection = EXPLICIT_REJECTION_REASONS.includes(coldReasonVal);
+        if (isExplicitRejection) {
+          patch.isExplicitRejection = true;
+          if (values.followUpDue === "" && edit.original.followUpDue) patch.followUpDue = "";
+          if (values.nextAction && !patch.nextAction && values.nextAction !== edit.original.nextAction) patch.nextAction = values.nextAction;
+        }
       }
-      closeSchoolEditor(); showSaveToast("No changes to save"); return;
-    }
-    edit.pending = { recordId: edit.id, expectedRequestId: edit.original.lastRequestId, requestId: crypto.randomUUID(), patch };
+      if (!Object.keys(patch).length) {
+        if (edit.mode === "details" && editDrafts.has(`activity:${edit.id}`)) {
+          openSchoolEditor(edit.id, false, "activity");
+          return;
+        }
+        closeSchoolEditor(); showSaveToast("No changes to save"); return;
+      }
+      edit.pending = { recordId: edit.id, expectedRequestId: edit.original.lastRequestId, requestId: crypto.randomUUID(), patch };
     }
   }
   edit.busy = true; editorInputs(true);
@@ -1406,7 +1532,7 @@ async function saveSchoolEdits(event) {
       edit.stale = data.code === "CONFLICT_STALE_VERSION";
       editorFeedback(data.code === "CONFLICT_STALE_VERSION"
         ? "Someone changed this school. Your draft is kept. Reload school values and review before saving."
-        : data.code === "COLD_RULE_VIOLATION" ? "This school cannot be marked Cold yet. Check the follow-up rule below."
+        : data.code === "COLD_RULE_VIOLATION" ? (data.reason || "This school cannot be marked Cold yet. Check the follow-up rule below.")
         : data.code === "OUTREACH_DETAILS_REQUIRED" ? "Add an outcome and a short description before saving."
         : data.message || "The spreadsheet rejected this change. Your draft is kept.", "error");
     } else {
@@ -2888,7 +3014,35 @@ el("log-activityType")?.addEventListener("change", () => {
   renderSummarySuggestions();
   updateSuggestionStates();
 });
-el("edit-stage")?.addEventListener("change", updateColdWarning);
+el("edit-stage")?.addEventListener("change", () => {
+  const stage = el("edit-stage")?.value;
+  if (stage === "Cold") {
+    const reasonInput = el("edit-coldReason");
+    if (reasonInput && !reasonInput.value) reasonInput.value = DEFAULT_DECLINE_REASON;
+    const reason = reasonInput?.value || DEFAULT_DECLINE_REASON;
+    if (EXPLICIT_REJECTION_REASONS.includes(reason)) {
+      if (el("edit-followUpDue")) el("edit-followUpDue").value = "";
+      if (el("edit-nextAction") && (!el("edit-nextAction").value || el("edit-nextAction").value === "Follow up if no reply")) {
+        el("edit-nextAction").value = "Archived for season";
+      }
+    }
+  } else {
+    if (el("edit-coldReason") && !editing?.original?.coldReason) {
+      el("edit-coldReason").value = "";
+    }
+  }
+  updateColdWarning();
+});
+el("edit-coldReason")?.addEventListener("change", () => {
+  const reason = el("edit-coldReason")?.value;
+  if (EXPLICIT_REJECTION_REASONS.includes(reason)) {
+    if (el("edit-followUpDue")) el("edit-followUpDue").value = "";
+    if (el("edit-nextAction") && (!el("edit-nextAction").value || el("edit-nextAction").value === "Follow up if no reply")) {
+      el("edit-nextAction").value = "Archived for season";
+    }
+  }
+  updateColdWarning();
+});
 el("log-contact-edit")?.addEventListener("click", editSchoolContact);
 el("log-contact-add-quick")?.addEventListener("click", editSchoolContact);
 el("contact-choice-general")?.addEventListener("change", () => {

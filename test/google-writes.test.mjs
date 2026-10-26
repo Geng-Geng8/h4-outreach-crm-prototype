@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readHarness, ACTOR, OTHER, SUPERVISOR } from "./read-only-harness.mjs";
+import { C } from "../src/schema.ts";
 
 test("outreach API: verified ownership, atomic activity, safe retry, stale protection and preserved notes/formulas", async (t) => {
   const h = await readHarness(t, { ENABLE_REAL_WRITES: "true", GOOGLE_ADAPTER_TEST: "true" });
@@ -107,9 +108,15 @@ test("school editor: real adapter saves atomically, replays safely, rejects stal
   assert.equal(stale.status, 409); assert.equal(stale.body.code, "CONFLICT_STALE_VERSION");
   const cold = await update({ ...input, requestId: crypto.randomUUID(), expectedRequestId: input.requestId, patch: { stage: "Cold" } });
   assert.equal(cold.status, 422); assert.equal(cold.body.code, "COLD_RULE_VIOLATION");
+  const explicitCold = await update({ ...input, requestId: crypto.randomUUID(), expectedRequestId: input.requestId, patch: { stage: "Cold", coldReason: "Timing / Scheduling Conflict" } });
+  assert.equal(explicitCold.status, 200);
+  assert.equal(h.demoSheets.tables.Schools[1][C.stage], "Cold");
+  assert.equal(h.demoSheets.tables.Schools[1][C.coldReason], "Timing / Scheduling Conflict");
+  assert.equal(h.demoSheets.tables.Schools[1][C.due], "");
+  assert.equal(h.demoSheets.tables.Schools[1][C.action], "Archived for season");
   const detail = await h.request(`/api/schools/detail?recordId=${row[0]}`, { token });
   const record = (await detail.json()).record;
-  assert.equal(record.contactName, "Example contact"); assert.equal(record.priority, "High"); assert.equal(record.stage, "Contacted");
+  assert.equal(record.contactName, "Example contact"); assert.equal(record.priority, "High"); assert.equal(record.stage, "Cold"); assert.equal(record.coldReason, "Timing / Scheduling Conflict");
 });
 
 test("real Google adapter: authenticated claim, RAW split batch, formula preservation and retry", async (t) => {

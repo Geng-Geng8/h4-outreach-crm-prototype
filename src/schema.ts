@@ -40,7 +40,7 @@ export const C = {
   id: 0, name: 1, board: 2, assigned: 3, contactName: 4, contactRole: 5,
   email: 6, goal: 7, stage: 8, contacted: 9, due: 10, action: 11,
   priority: 12, notes: 13, phone: 14, value: 15, region: 18, address: 22,
-  source: 23, osn: 24, owner: 25, count: 26, version: 27,
+  source: 23, osn: 24, owner: 25, count: 26, version: 27, coldReason: 28,
 } as const;
 
 export const ContactCol = {
@@ -128,7 +128,7 @@ export function record(row: Row) {
   return {
     recordId: row[C.id], schoolName: row[C.name], ownerEmail: row[C.owner],
     lastRequestId: row[C.version], stage: row[C.stage], followUpCount: row[C.count],
-    followUpDue: row[C.due], notes: row[C.notes],
+    followUpDue: row[C.due], notes: row[C.notes], coldReason: row[C.coldReason] ?? "",
   };
 }
 
@@ -147,5 +147,78 @@ export function editableRecord(row: Row) {
     contactName: row[C.contactName] ?? "", contactRole: row[C.contactRole] ?? "",
     email: row[C.email] ?? "", phone: row[C.phone] ?? "", priority: row[C.priority] ?? "",
     outreachGoal: row[C.goal] ?? "", nextAction: row[C.action] ?? "",
+    coldReason: row[C.coldReason] ?? "",
+  };
+}
+
+export const EXPLICIT_REJECTION_REASONS = [
+  "Not Interested",
+  "Explicit Rejection / Not Interested",
+  "No Budget / Funding",
+  "Timing / Scheduling Conflict",
+  "Outside Program Scope / Ineligible",
+  "Other (Declined)",
+] as const;
+
+export const DEFAULT_DECLINE_REASON = "Explicit Rejection / Not Interested";
+export const UNRESPONSIVE_COLD_REASON = "Unresponsive (2+ follow-ups completed with no reply)";
+
+export interface ColdEvaluationParams {
+  currentStage: string;
+  followUpCount: number;
+  followUpDue: string | null;
+  coldReason?: string;
+  isExplicitRejection?: boolean;
+  today?: string;
+}
+
+export function evaluateColdEligibility(params: ColdEvaluationParams): { allowed: boolean; reason: string } {
+  const PROTECTED_STAGES = new Set(["Interested", "Engaged", "Booked"]);
+
+  if (PROTECTED_STAGES.has(params.currentStage)) {
+    return {
+      allowed: false,
+      reason: `Schools in "${params.currentStage}" stage are protected. Change stage to Contacted first before marking Cold.`,
+    };
+  }
+
+  const explicitRejectionReasons = [
+    "Not Interested",
+    "Explicit Rejection / Not Interested",
+    "No Budget / Funding",
+    "Timing / Scheduling Conflict",
+    "Outside Program Scope / Ineligible",
+    "Other (Declined)",
+  ];
+
+  if (
+    params.isExplicitRejection ||
+    (params.coldReason && explicitRejectionReasons.includes(params.coldReason))
+  ) {
+    return {
+      allowed: true,
+      reason: "Eligible for Cold status (Explicit rejection / declined by school).",
+    };
+  }
+
+  // Unresponsive path
+  if (params.followUpCount < 2) {
+    return {
+      allowed: false,
+      reason: `Requires 2 unanswered follow-ups before marking Cold due to no response (currently ${params.followUpCount}/2), OR select an explicit decline reason.`,
+    };
+  }
+
+  const today = params.today || new Date().toISOString().slice(0, 10);
+  if (!params.followUpDue || today <= params.followUpDue) {
+    return {
+      allowed: false,
+      reason: `Response deadline (${params.followUpDue || "not set"}) must pass before marking Cold due to no response.`,
+    };
+  }
+
+  return {
+    allowed: true,
+    reason: "Eligible for Cold status (2 unanswered follow-ups completed & deadline passed).",
   };
 }

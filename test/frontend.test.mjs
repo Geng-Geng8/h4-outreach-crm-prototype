@@ -3291,6 +3291,84 @@ test("PR #12 multi-contact outreach: Add Contact shortcut preserves full outreac
   assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
 });
 
+test("Cold status workflow: selecting 'Not interested' outcome chip sets stage to Cold, clears followUpDue, archives nextAction, and saves coldReason", async (t) => {
+  const record = { recordId: "00000000-0000-4000-8000-000000000095", schoolName: "Highland Secondary", schoolBoard: "HWDSB", geographicRegion: "Hamilton", stage: "Contacted", contactName: "Mr. Adams", lastRequestId: "v1", followUpCount: 0 };
+  const requests = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record });
+    if (url.includes("/api/activities")) { requests.push(JSON.parse(init.body)); return Response.json({ ok: true, record: { ...record, stage: "Cold", coldReason: "Explicit Rejection / Not Interested", lastRequestId: "v2" } }); }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+  await context.openSchoolEditor(record.recordId, false, "activity");
+
+  // Step 2 & 3: Channel Email, apply 'Not interested' outcome suggestion chip
+  getEl("log-channel").value = "Email";
+  context.applySuggestion("log-outcome", "Not interested");
+
+  assert.equal(getEl("log-outcome").value, "Not interested");
+  assert.equal(getEl("edit-stage").value, "Cold");
+  assert.equal(getEl("field-coldReason").hidden, false);
+  assert.equal(getEl("edit-coldReason").value, "Explicit Rejection / Not Interested");
+  assert.equal(getEl("edit-followUpDue").value, "");
+  assert.equal(getEl("edit-nextAction").value, "Archived for season");
+  assert.equal(getEl("cold-warning").hidden, true, "Explicit rejection must not show cold warning error");
+
+  // Step 4: Summary
+  getEl("log-summary").value = "Educator replied they have no dance curriculum this year.";
+
+  // Save
+  await context.saveSchoolEdits({ preventDefault() {} });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].stage, "Cold");
+  assert.equal(requests[0].coldReason, "Explicit Rejection / Not Interested");
+  assert.equal(requests[0].isExplicitRejection, true);
+  assert.equal(requests[0].nextAction, "Archived for season");
+  assert.equal(requests[0].followUpDue, "");
+  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+});
+
+test("Cold status: Warm stage protection prevents marking Cold for warm stages", async (t) => {
+  const warmRecord = { recordId: "00000000-0000-4000-8000-000000000096", schoolName: "Warm Park SS", schoolBoard: "TDSB", geographicRegion: "Toronto", stage: "Interested", lastRequestId: "v1" };
+  const requests = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({ fetchHandler: async (url, init = {}) => {
+    if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+    if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [warmRecord], sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+    if (url.includes("/api/schools/detail")) return Response.json({ record: warmRecord });
+    if (url.includes("/api/schools/update")) { requests.push(JSON.parse(init.body)); return Response.json({ ok: true }); }
+    return new Response("Not found", { status: 404 });
+  } });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  // Core validation rejects warm stages
+  for (const warmStage of ["Interested", "Engaged", "Booked"]) {
+    const check = context.evaluateColdEligibility({
+      currentStage: warmStage,
+      followUpCount: 2,
+      followUpDue: "2026-10-14",
+      coldReason: "Explicit Rejection / Not Interested",
+    });
+    assert.equal(check.allowed, false);
+    assert.match(check.reason, /protected/i);
+  }
+
+  // In UI editor, attempting to set stage to Cold triggers protection warning and blocks save
+  await context.openSchoolEditor(warmRecord.recordId, false, "details");
+  getEl("edit-stage").value = "Cold";
+  context.updateColdWarning();
+  assert.equal(getEl("cold-warning").hidden, false);
+  assert.match(getEl("cold-warning").textContent, /protected/i);
+
+  await context.saveSchoolEdits({ preventDefault() {} });
+  assert.match(getEl("editor-status").textContent, /protected/i);
+  assert.equal(requests.length, 0, "Save must be blocked for protected warm stages");
+});
+
+
 
 
 

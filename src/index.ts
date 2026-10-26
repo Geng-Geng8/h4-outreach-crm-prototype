@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   ApiError, C, ContactCol, padded, record, editableRecord, contactRecord, schoolWrites,
-  assertStudentPrivacy,
+  assertStudentPrivacy, evaluateColdEligibility, DEFAULT_DECLINE_REASON, UNRESPONSIVE_COLD_REASON, EXPLICIT_REJECTION_REASONS,
   type Batch, type Row, type Snapshot, type ValueRange,
 } from "./schema";
 import { SyntheticSheets } from "./sheets";
@@ -475,18 +475,48 @@ export class SheetCoordinator extends DurableObject<Env> {
         const columns: Record<string, number> = {
           notes: C.notes, contactName: C.contactName, contactRole: C.contactRole,
           email: C.email, phone: C.phone, priority: C.priority, outreachGoal: C.goal,
-          followUpDue: C.due, nextAction: C.action, stage: C.stage,
+          followUpDue: C.due, nextAction: C.action, stage: C.stage, coldReason: C.coldReason,
         };
-        onlyKeys(patch, Object.keys(columns));
+        onlyKeys(patch, [...Object.keys(columns), "isExplicitRejection"]);
         if (!Object.keys(patch).length) throw new ApiError(422, "EMPTY_PATCH");
+        let isExplicitCold = false;
         if (patch.stage !== undefined) {
-          if (!["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Cold"].includes(String(patch.stage))) throw new ApiError(422, "INVALID_STAGE");
-          if (patch.stage === "Cold" && row[C.stage] !== "Cold" &&
-              (["Interested", "Engaged", "Booked"].includes(String(row[C.stage])) ||
-              !(Number(row[C.count]) >= 2) || !row[C.due] || day <= date(row[C.due]))) throw new ApiError(422, "COLD_RULE_VIOLATION");
+          const targetStage = String(patch.stage);
+          if (!["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Cold"].includes(targetStage)) throw new ApiError(422, "INVALID_STAGE");
+          if (targetStage === "Cold" && row[C.stage] !== "Cold") {
+            const isExplicit = Boolean(patch.isExplicitRejection) ||
+              (typeof patch.coldReason === "string" && EXPLICIT_REJECTION_REASONS.includes(patch.coldReason.trim() as any));
+            const coldReasonVal = patch.coldReason !== undefined && String(patch.coldReason).trim() !== ""
+              ? String(patch.coldReason).trim()
+              : (isExplicit ? DEFAULT_DECLINE_REASON : undefined);
+            const evaluation = evaluateColdEligibility({
+              currentStage: String(row[C.stage]),
+              followUpCount: Number(row[C.count]),
+              followUpDue: row[C.due] ? String(row[C.due]) : null,
+              coldReason: coldReasonVal,
+              isExplicitRejection: isExplicit,
+              today: day,
+            });
+            if (!evaluation.allowed) {
+              throw new ApiError(422, "COLD_RULE_VIOLATION", { reason: evaluation.reason });
+            }
+            if (isExplicit) {
+              isExplicitCold = true;
+              row[C.coldReason] = coldReasonVal || DEFAULT_DECLINE_REASON;
+              row[C.due] = "";
+              row[C.action] = "Archived for season";
+            } else {
+              row[C.coldReason] = coldReasonVal || UNRESPONSIVE_COLD_REASON;
+            }
+          } else if (targetStage !== "Cold" && row[C.stage] === "Cold" && patch.coldReason === undefined) {
+            row[C.coldReason] = "";
+          }
         }
         for (const [key, value] of Object.entries(patch)) {
+          if (key === "isExplicitRejection") continue;
           if (key === "priority" && !["High", "Medium", "Low", ""].includes(String(value))) throw new ApiError(422, "INVALID_PRIORITY");
+          if (isExplicitCold && key === "followUpDue" && (value === undefined || value === null || value === "")) continue;
+          if (isExplicitCold && key === "nextAction" && (value === undefined || value === null || value === "")) continue;
           row[columns[key]!] = key === "followUpDue" ? date(value) : text(value);
         }
 
@@ -730,7 +760,7 @@ export class SheetCoordinator extends DurableObject<Env> {
           },
         };
       } else {
-        onlyKeys(input, ["requestId", "recordId", "expectedRequestId", "channel", "activityType", "outcome", "summary", "stage", "followUpDue", "nextAction", "contactIds"]);
+        onlyKeys(input, ["requestId", "recordId", "expectedRequestId", "channel", "activityType", "outcome", "summary", "stage", "followUpDue", "nextAction", "contactIds", "coldReason", "isExplicitRejection"]);
         channel = text(input.channel, 30);
         if (!["Email", "Phone", "Follow-Up", "Social", "Meeting", "Reply", "App", "Text", "Visit"].includes(channel)) throw new ApiError(422, "INVALID_CHANNEL");
         activityType = text(input.activityType, 30);
@@ -774,18 +804,52 @@ export class SheetCoordinator extends DurableObject<Env> {
         const count = Number(row[C.count]);
         if (!Number.isInteger(count) || count < 0) throw new ApiError(422, "INVALID_STORED_COUNT");
         const originalStage = row[C.stage];
+        let isExplicitCold = false;
         if (input.stage !== undefined) {
           const stage = text(input.stage, 30);
           if (!["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Cold"].includes(stage)) throw new ApiError(422, "INVALID_STAGE");
-          if (stage === "Cold" && (["Interested", "Engaged", "Booked"].includes(String(originalStage)) ||
-            count < 2 || !row[C.due] || day <= date(row[C.due]))) throw new ApiError(422, "COLD_RULE_VIOLATION");
-          row[C.stage] = stage;
+          if (stage === "Cold") {
+            const isExplicit = Boolean(input.isExplicitRejection) ||
+              (typeof input.coldReason === "string" && EXPLICIT_REJECTION_REASONS.includes(input.coldReason.trim() as any)) ||
+              (typeof outcome === "string" && (
+                outcome.trim().toLowerCase() === "not interested" ||
+                outcome.trim().toLowerCase().includes("declined") ||
+                EXPLICIT_REJECTION_REASONS.some((r) => r.toLowerCase() === outcome.trim().toLowerCase())
+              ));
+            const coldReasonVal = input.coldReason !== undefined && String(input.coldReason).trim() !== ""
+              ? text(input.coldReason, 300)
+              : (isExplicit ? DEFAULT_DECLINE_REASON : undefined);
+            const evaluation = evaluateColdEligibility({
+              currentStage: String(originalStage),
+              followUpCount: count,
+              followUpDue: row[C.due] ? String(row[C.due]) : null,
+              coldReason: coldReasonVal,
+              isExplicitRejection: isExplicit,
+              today: day,
+            });
+            if (!evaluation.allowed) throw new ApiError(422, "COLD_RULE_VIOLATION", { reason: evaluation.reason });
+            row[C.stage] = "Cold";
+            if (isExplicit) {
+              isExplicitCold = true;
+              row[C.coldReason] = coldReasonVal || DEFAULT_DECLINE_REASON;
+              row[C.due] = "";
+              row[C.action] = "Archived for season";
+            } else {
+              row[C.coldReason] = coldReasonVal || UNRESPONSIVE_COLD_REASON;
+            }
+          } else {
+            row[C.stage] = stage;
+            if (originalStage === "Cold" && input.coldReason === undefined) {
+              row[C.coldReason] = "";
+            }
+          }
         }
         row[C.count] = count + (activityType === "FollowUp" ? 1 : 0);
         row[C.contacted] = day;
-        // The activity keeps its own summary. Never replace separately edited school notes.
-        if (input.followUpDue !== undefined) row[C.due] = date(input.followUpDue);
-        if (input.nextAction !== undefined) row[C.action] = text(input.nextAction);
+        if (!isExplicitCold) {
+          if (input.followUpDue !== undefined) row[C.due] = date(input.followUpDue);
+          if (input.nextAction !== undefined) row[C.action] = text(input.nextAction);
+        }
       }
     }
     if (path === "/api/schools/claim" || path === "/api/schools/update") {
