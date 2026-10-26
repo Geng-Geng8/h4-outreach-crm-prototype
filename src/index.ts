@@ -574,8 +574,9 @@ export class SheetCoordinator extends DurableObject<Env> {
         for (const [key, value] of Object.entries(patch)) {
           if (key === "isExplicitRejection") continue;
           if (key === "priority" && !["High", "Medium", "Low", ""].includes(String(value))) throw new ApiError(422, "INVALID_PRIORITY");
-          if (isExplicitCold && key === "followUpDue" && (value === undefined || value === null || value === "")) continue;
-          if (isExplicitCold && key === "nextAction" && (value === undefined || value === null || value === "")) continue;
+          if (isExplicitCold && (key === "followUpDue" || key === "nextAction")) {
+            continue;
+          }
           row[columns[key]!] = key === "followUpDue" ? date(value) : text(value);
         }
 

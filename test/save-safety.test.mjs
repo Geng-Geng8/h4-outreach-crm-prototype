@@ -278,12 +278,16 @@ test("Cold status Path A: explicit decline allowed immediately with 0 follow-ups
     isExplicitRejection: true,
     patch: {
       stage: "Cold",
+      followUpDue: "2026-12-15",
+      nextAction: "Should be ignored",
     },
   });
   assert.equal(res3.status, 200);
   const row3 = h.sheets.tables.Schools[1];
   assert.equal(row3[C.stage], "Cold");
   assert.equal(row3[C.coldReason], "Timing / Scheduling Conflict");
+  assert.equal(row3[C.due], "");
+  assert.equal(row3[C.action], "Archived for season");
 });
 
 test("Cold status Path B: unresponsive path saves default unresponsive reason in Column AC", async (t) => {

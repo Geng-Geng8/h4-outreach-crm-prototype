@@ -807,6 +807,7 @@ function closeSchoolEditor() {
       editDrafts.set(editorDraftKey(editing), { values, activity, selectedContactIds, primaryOwner: editing.primaryOwner, collaborators: editing.collaborators, assigneesChanged: Boolean(editing.assigneesChanged), pending: editing.pending, original: editing.original });
     } else editDrafts.delete(editorDraftKey(editing));
   }
+  if (typeof closeContactForm === "function") closeContactForm(true);
   if (el("unclaim-confirm-panel")) el("unclaim-confirm-panel").hidden = true;
   if (el("editor-unclaim-btn")) el("editor-unclaim-btn").hidden = false;
   editorSeq++; editorRead?.abort(); editing = null;
@@ -1587,6 +1588,7 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
   el("editor-save").disabled = true; el("editor-save").textContent = editorSaveLabel(editing);
   el("editor-reload").textContent = mode === "activity" ? "Reload school values" : "Reload saved values";
   el("editor-close").disabled = false; el("editor-reload").disabled = true;
+  if (typeof closeContactForm === "function") closeContactForm(true);
   for (const field of editFields) el(`edit-${field}`).value = "";
   editorInputs(true);
   renderSummarySuggestions();
