@@ -266,6 +266,24 @@ test("Cold status Path A: explicit decline allowed immediately with 0 follow-ups
   assert.equal(row2[C.coldReason], "No Budget / Funding");
   assert.equal(row2[C.due], "");
   assert.equal(row2[C.action], "Archived for season");
+
+  // Re-test with top-level coldReason and isExplicitRejection fields
+  row2[C.stage] = "Contacted";
+  const updatedVersion = row2[C.version];
+  const res3 = await h.post(UPDATE, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: updatedVersion,
+    coldReason: "Timing / Scheduling Conflict",
+    isExplicitRejection: true,
+    patch: {
+      stage: "Cold",
+    },
+  });
+  assert.equal(res3.status, 200);
+  const row3 = h.sheets.tables.Schools[1];
+  assert.equal(row3[C.stage], "Cold");
+  assert.equal(row3[C.coldReason], "Timing / Scheduling Conflict");
 });
 
 test("Cold status Path B: unresponsive path saves default unresponsive reason in Column AC", async (t) => {

@@ -469,9 +469,18 @@ export class SheetCoordinator extends DurableObject<Env> {
         throw new ApiError(409, "CONFLICT_STALE_VERSION", { currentServerRecord: record(row) });
       }
       if (path === "/api/schools/update") {
-        onlyKeys(input, ["requestId", "recordId", "expectedRequestId", "patch"]);
+        onlyKeys(input, ["requestId", "recordId", "expectedRequestId", "patch", "coldReason", "isExplicitRejection"]);
+        if (!input.patch && (input.coldReason !== undefined || input.isExplicitRejection !== undefined)) {
+          input.patch = {};
+        }
         if (!input.patch || typeof input.patch !== "object" || Array.isArray(input.patch)) throw new ApiError(422, "INVALID_PATCH");
         const patch = input.patch as Input;
+        if (input.coldReason !== undefined && patch.coldReason === undefined) {
+          patch.coldReason = input.coldReason;
+        }
+        if (input.isExplicitRejection !== undefined && patch.isExplicitRejection === undefined) {
+          patch.isExplicitRejection = input.isExplicitRejection;
+        }
         const columns: Record<string, number> = {
           notes: C.notes, contactName: C.contactName, contactRole: C.contactRole,
           email: C.email, phone: C.phone, priority: C.priority, outreachGoal: C.goal,
