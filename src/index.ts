@@ -26,7 +26,7 @@ type Result = { status: number; body: Record<string, unknown> };
 type Journal = { request_id: string; fingerprint: string; state: string; plan: string; result: string };
 type Plan = { batch: Batch; result: Result };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const paths = new Set(["/api/schools/claim", "/api/schools/update", "/api/schools/contacts", "/api/activities"]);
+const paths = new Set(["/api/schools/claim", "/api/schools/update", "/api/schools/contacts", "/api/schools/reassign", "/api/schools/unclaim", "/api/activities"]);
 
 function json(status: number, body: object): Response {
   return Response.json(body, { status, headers: { "cache-control": "no-store" } });
@@ -131,11 +131,40 @@ export class SheetCoordinator extends DurableObject<Env> {
           const matches = snapshot.Schools.slice(1).filter((row) => row[C.id] === id);
           if (matches.length !== 1) throw new ApiError(matches.length ? 503 : 404, "RECORD_NOT_FOUND");
           const row = padded(matches[0]);
-          if (actor.role !== "Supervisor" && String(row[C.owner]).toLowerCase() !== actor.email) throw new ApiError(403, "NOT_OWNER");
+          const ownerEmails = String(row[C.owner] ?? "").toLowerCase().split(",").map((e) => e.trim()).filter(Boolean);
+          if (actor.role !== "Supervisor" && !ownerEmails.includes(actor.email)) throw new ApiError(403, "NOT_OWNER");
           const contacts = (snapshot.Contacts?.slice(1) ?? [])
             .filter((cRow) => cRow[ContactCol.recordId] === id && String(cRow[ContactCol.active]).trim().toUpperCase() === "TRUE")
             .map(contactRecord);
-          return json(200, { ok: true, record: editableRecord(row), contacts });
+          const users = snapshot["CRM Users"].slice(1)
+            .filter((uRow) => {
+              const active = String(uRow[3] ?? "").trim().toUpperCase();
+              const role = String(uRow[2] ?? "").trim();
+              return ["", "TRUE"].includes(active) && ["Supervisor", "co-op"].includes(role);
+            })
+            .map((uRow) => ({
+              email: String(uRow[0]).trim().toLowerCase(),
+              name: String(uRow[1]).trim() || String(uRow[0]).trim(),
+              role: String(uRow[2]).trim() as Actor["role"],
+            }));
+          return json(200, { ok: true, record: editableRecord(row), contacts, users });
+        }
+        if (pathname === "/api/users" && request.method === "GET") {
+          if (!proofEnabled(this.env)) throw new ApiError(503, "LOCAL_PROOF_DISABLED");
+          const snapshot = await this.sheets().read();
+          actorFrom(snapshot, request.headers.get("x-proof-actor")?.trim().toLowerCase() ?? "");
+          const users = snapshot["CRM Users"].slice(1)
+            .filter((uRow) => {
+              const active = String(uRow[3] ?? "").trim().toUpperCase();
+              const role = String(uRow[2] ?? "").trim();
+              return ["", "TRUE"].includes(active) && ["Supervisor", "co-op"].includes(role);
+            })
+            .map((uRow) => ({
+              email: String(uRow[0]).trim().toLowerCase(),
+              name: String(uRow[1]).trim() || String(uRow[0]).trim(),
+              role: String(uRow[2]).trim() as Actor["role"],
+            }));
+          return json(200, { ok: true, users });
         }
         if (request.method === "GET" && pathname === "/api/schools/demo-status") {
           if (!proofEnabled(this.env)) throw new ApiError(503, "LOCAL_PROOF_DISABLED");
@@ -144,7 +173,9 @@ export class SheetCoordinator extends DurableObject<Env> {
           const claimedOsns = new Set<string>();
           for (const row of snapshot.Schools.slice(1)) {
             const osn = String(row[C.osn] ?? "").trim();
-            if (osn) claimedOsns.add(osn);
+            const owner = String(row[C.owner] ?? "").trim();
+            const status = String(row[C.engagementStatus] ?? "").trim();
+            if (osn && owner !== "" && status !== "Available") claimedOsns.add(osn);
           }
           return json(200, { ok: true, claimedOsns: Array.from(claimedOsns) });
         }
@@ -437,23 +468,41 @@ export class SheetCoordinator extends DurableObject<Env> {
       const entries = snapshot["School Directory"].slice(1).filter((entry) => String(entry[0]) === osn);
       if (entries.length !== 1 || entries[0]?.[14] !== "Available") throw new ApiError(422, "SCHOOL_UNAVAILABLE");
       const entry = entries[0]!;
+      const isClaimedSchool = (cand: Row) => {
+        const engStatus = String(cand[C.engagementStatus] ?? "").trim();
+        if (engStatus === "Available" && !cand[C.owner]) return false;
+        return true;
+      };
       if (snapshot.Schools.slice(1).some((candidate) =>
-        String(candidate[C.osn] ?? "") === osn ||
-        (candidate[C.name] !== undefined && candidate[C.name] !== "" && sameName(candidate[C.name], entry[1])))) {
+        isClaimedSchool(candidate) && (
+          String(candidate[C.osn] ?? "") === osn ||
+          (candidate[C.name] !== undefined && candidate[C.name] !== "" && sameName(candidate[C.name], entry[1]))
+        ))) {
         throw new ApiError(409, "SCHOOL_ALREADY_CLAIMED");
       }
       rowNumber = 0;
       for (let number = 2; number <= 500; number++) {
-        if (writableBlank(padded(snapshot.Schools[number - 1]))) { rowNumber = number; break; }
+        const cand = padded(snapshot.Schools[number - 1]);
+        if (String(cand[C.osn] ?? "") === osn && (!cand[C.owner] || cand[C.engagementStatus] === "Available")) {
+          rowNumber = number;
+          break;
+        }
+      }
+      if (!rowNumber) {
+        for (let number = 2; number <= 500; number++) {
+          if (writableBlank(padded(snapshot.Schools[number - 1]))) { rowNumber = number; break; }
+        }
       }
       if (!rowNumber) throw new ApiError(422, "PREFORMATTED_ROWS_FULL");
-      row = padded(undefined);
-      row[C.id] = crypto.randomUUID(); row[C.name] = entry[1] ?? ""; row[C.board] = entry[2] ?? "";
+      row = padded(snapshot.Schools[rowNumber - 1]);
+      if (!row[C.id]) row[C.id] = crypto.randomUUID();
+      row[C.name] = entry[1] ?? ""; row[C.board] = entry[2] ?? "";
       row[C.assigned] = actor.name; row[C.owner] = actor.email; row[C.osn] = osn;
       row[C.email] = entry[8] ?? ""; row[C.phone] = entry[9] ?? "";
       row[C.region] = entry[11] ?? ""; row[20] = entry[12] ?? "";
       row[C.address] = entry[6] ?? ""; row[C.source] = entry[13] ?? "";
       row[C.stage] = "Not Contacted"; row[C.count] = 0;
+      row[C.engagementStatus] = "Claimed";
       activityType = outcome = "Claimed";
     } else {
       if (typeof input.recordId !== "string" || !uuid.test(input.recordId) ||
@@ -464,7 +513,8 @@ export class SheetCoordinator extends DurableObject<Env> {
         .filter(({ candidate, number }) => number > 1 && candidate[C.id] === input.recordId);
       if (matches.length !== 1) throw new ApiError(matches.length ? 503 : 404, matches.length ? "DUPLICATE_RECORD_ID" : "RECORD_NOT_FOUND");
       row = padded(matches[0]!.candidate); rowNumber = matches[0]!.number;
-      if (actor.role !== "Supervisor" && String(row[C.owner]).toLowerCase() !== actor.email) throw new ApiError(403, "NOT_OWNER");
+      const ownerEmails = String(row[C.owner] ?? "").toLowerCase().split(",").map((e) => e.trim()).filter(Boolean);
+      if (actor.role !== "Supervisor" && !ownerEmails.includes(actor.email)) throw new ApiError(403, "NOT_OWNER");
       if (row[C.version] !== input.expectedRequestId) {
         throw new ApiError(409, "CONFLICT_STALE_VERSION", { currentServerRecord: record(row) });
       }
@@ -768,6 +818,53 @@ export class SheetCoordinator extends DurableObject<Env> {
             body: { ok: true, code: "SUCCESS", requestId, record: editableRecord(row), contact: contactResult },
           },
         };
+      } else if (path === "/api/schools/reassign") {
+        onlyKeys(input, ["requestId", "recordId", "expectedRequestId", "newOwnerEmails", "newOwnerNames"]);
+        let emailsList: string[] = [];
+        if (Array.isArray(input.newOwnerEmails)) {
+          emailsList = input.newOwnerEmails.map((e) => text(e, 300).trim()).filter(Boolean);
+        } else if (typeof input.newOwnerEmails === "string") {
+          emailsList = text(input.newOwnerEmails, 1000).split(",").map((e) => e.trim()).filter(Boolean);
+        } else {
+          throw new ApiError(422, "INVALID_OWNER_EMAILS");
+        }
+        if (!emailsList.length) throw new ApiError(422, "OWNER_EMAILS_REQUIRED");
+
+        let namesList: string[] = [];
+        if (Array.isArray(input.newOwnerNames)) {
+          namesList = input.newOwnerNames.map((n) => text(n, 300).trim()).filter(Boolean);
+        } else if (typeof input.newOwnerNames === "string") {
+          namesList = text(input.newOwnerNames, 1000).split(",").map((n) => n.trim()).filter(Boolean);
+        }
+        if (namesList.length === 0 && snapshot["CRM Users"]) {
+          namesList = emailsList.map((em) => {
+            const match = snapshot["CRM Users"].slice(1).find((u) => String(u[0]).toLowerCase() === em.toLowerCase());
+            return match ? String(match[1]).trim() : em;
+          });
+        }
+        const newAssigneeNamesStr = namesList.join(", ");
+        const newAssigneeEmailsStr = emailsList.join(", ");
+
+        row[C.assigned] = newAssigneeNamesStr;
+        row[C.owner] = newAssigneeEmailsStr;
+        activityType = "Reassign";
+        outcome = "Reassigned";
+        channel = "App";
+        summary = `Reassigned to ${newAssigneeNamesStr}`;
+      } else if (path === "/api/schools/unclaim") {
+        onlyKeys(input, ["requestId", "recordId", "expectedRequestId"]);
+        row[C.assigned] = "";
+        row[C.owner] = "";
+        row[C.stage] = "Not Contacted";
+        row[C.engagementStatus] = "Available";
+        row[C.due] = "";
+        row[C.count] = 0;
+        row[C.action] = "";
+        row[C.coldReason] = "";
+        activityType = "Unclaim";
+        outcome = "Unclaimed";
+        channel = "App";
+        summary = `School released back to directory by ${actor.name}`;
       } else {
         onlyKeys(input, ["requestId", "recordId", "expectedRequestId", "channel", "activityType", "outcome", "summary", "stage", "followUpDue", "nextAction", "contactIds", "coldReason", "isExplicitRejection"]);
         channel = text(input.channel, 30);
@@ -861,7 +958,7 @@ export class SheetCoordinator extends DurableObject<Env> {
         }
       }
     }
-    if (path === "/api/schools/claim" || path === "/api/schools/update") {
+    if (path === "/api/schools/claim" || path === "/api/schools/update" || path === "/api/schools/reassign" || path === "/api/schools/unclaim") {
       contactedPerson = String(row[C.contactName] ?? "");
       contactIdsStr = "";
     }
@@ -880,7 +977,7 @@ export class SheetCoordinator extends DurableObject<Env> {
         ...contactRanges,
         { range: `'Activity Log'!A${activityNumber}:P${activityNumber}`, values: [activity] },
       ] },
-      result: { status: 200, body: { ok: true, code: "SUCCESS", requestId, record: record(row) } },
+      result: { status: 200, body: { ok: true, code: "SUCCESS", requestId, record: path === "/api/schools/reassign" ? editableRecord(row) : record(row) } },
     };
   }
 }

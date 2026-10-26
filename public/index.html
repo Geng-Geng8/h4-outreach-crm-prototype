@@ -320,6 +320,32 @@
               </div>
             </div>
           </section>
+          <section id="assignment-section" class="editor-wide assignment-section" aria-labelledby="assignment-heading">
+            <div class="assignment-header">
+              <div>
+                <h3 id="assignment-heading" class="assignment-heading">Assignee &amp; Collaborators</h3>
+                <p class="assignment-sub">Primary owner and co-assignees collaborating on this school.</p>
+              </div>
+            </div>
+            <div class="assignment-grid">
+              <label id="field-primary-owner" class="assignment-field">
+                <span class="field-label-text">Primary Owner</span>
+                <select id="edit-primary-owner" class="assignee-select" aria-label="Primary assigned owner"></select>
+                <span class="field-help">Main point of contact. Can be reassigned by the owner or a supervisor.</span>
+              </label>
+              <div id="collaborators-block" class="assignment-field">
+                <span class="field-label-text">Co-Assignees / Collaborators</span>
+                <div id="collaborators-list" class="collaborators-chip-list" role="list"></div>
+                <div class="collaborator-add-row">
+                  <select id="add-collaborator-select" class="add-collaborator-select" aria-label="Add collaborator">
+                    <option value="">Select team member…</option>
+                  </select>
+                  <button type="button" id="add-collaborator-btn" class="button secondary compact-button">+ Add Collaborator</button>
+                </div>
+                <span class="field-help">Collaborators can view and update this school on their dashboards.</span>
+              </div>
+            </div>
+          </section>
           <div class="legacy-contact-fields" hidden aria-hidden="true">
             <label id="field-contactName">Contact name<input id="edit-contactName" maxlength="300" autocomplete="off"></label>
             <label id="field-contactRole">Contact role<input id="edit-contactRole" maxlength="300" autocomplete="off"></label>
@@ -380,7 +406,19 @@
             </div>
           </section>
         </div>
-        <div class="editor-actions"><p id="editor-feedback" class="editor-feedback" role="status" aria-live="polite"></p><button type="button" id="editor-reload" class="button secondary">Reload saved values</button><button type="submit" id="editor-save" class="button">Save changes</button></div>
+        <div class="editor-actions">
+          <p id="editor-feedback" class="editor-feedback" role="status" aria-live="polite"></p>
+          <div id="unclaim-confirm-panel" class="unclaim-confirm-panel" hidden>
+            <p class="unclaim-confirm-msg">Are you sure you want to release this school back to the directory?</p>
+            <div class="unclaim-confirm-actions">
+              <button type="button" id="unclaim-cancel-btn" class="button secondary compact-button">Cancel</button>
+              <button type="button" id="unclaim-confirm-btn" class="button danger compact-button">Yes, release school</button>
+            </div>
+          </div>
+          <button type="button" id="editor-unclaim-btn" class="button secondary danger-button">Release / Unclaim School</button>
+          <button type="button" id="editor-reload" class="button secondary">Reload saved values</button>
+          <button type="submit" id="editor-save" class="button">Save changes</button>
+        </div>
       </form>
     </dialog>
 

@@ -1394,4 +1394,158 @@
   color: #b3261e;
 }
 
+/* Assignment & Collaboration Section */
+.assignment-section {
+  margin-top: 18px;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #d8e2d4;
+  border-radius: 10px;
+}
+.assignment-header {
+  margin-bottom: 12px;
+}
+.assignment-heading {
+  margin: 0 0 2px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #153528;
+}
+.assignment-sub {
+  margin: 0;
+  font-size: 12.5px;
+  color: #4b6354;
+}
+.assignment-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+@media (min-width: 600px) {
+  .assignment-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.assignment-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field-label-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e3328;
+}
+.assignee-select,
+.add-collaborator-select {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  border: 1.5px solid #cad7c5;
+  border-radius: 6px;
+  background: #fbfdfa;
+  color: #153528;
+}
+.assignee-select:focus,
+.add-collaborator-select:focus {
+  outline: 2px solid #1f6b43;
+  background: #ffffff;
+}
+.collaborators-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
+  margin-bottom: 6px;
+}
+.collaborator-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #f1f6ef;
+  border: 1px solid #cad7c5;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #153528;
+}
+.collaborator-chip-remove {
+  background: transparent;
+  border: 0;
+  padding: 0 2px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  color: #738a7c;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+.collaborator-chip-remove:hover {
+  color: #b3261e;
+  background: #fee;
+}
+.collaborator-chip-empty {
+  font-size: 12.5px;
+  font-style: italic;
+  color: #738a7c;
+  padding: 4px 0;
+}
+.collaborator-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.collaborator-add-row select {
+  flex: 1;
+}
+
+/* Danger Button & Unclaim Confirmation Panel */
+.danger-button {
+  color: #a8201a !important;
+  border-color: #f1c3c0 !important;
+  background: #fff8f7 !important;
+}
+.danger-button:hover:not(:disabled) {
+  background: #fde8e7 !important;
+  border-color: #e09692 !important;
+}
+.unclaim-confirm-panel {
+  width: 100%;
+  padding: 12px 14px;
+  background: #fff2f1;
+  border: 1px solid #f8c1bd;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.unclaim-confirm-msg {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #921c17;
+}
+.unclaim-confirm-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.button.danger {
+  background: #ba1a1a;
+  color: #ffffff;
+  border-color: #ba1a1a;
+}
+.button.danger:hover:not(:disabled) {
+  background: #921313;
+  border-color: #921313;
+}
+
+
 

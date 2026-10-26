@@ -3368,6 +3368,180 @@ test("Cold status: Warm stage protection prevents marking Cold for warm stages",
   assert.equal(requests.length, 0, "Save must be blocked for protected warm stages");
 });
 
+test("co-assignee collaboration: school with multiple owners appears in dashboards of both assigned users via isAssignedToMe", async (t) => {
+  const sharedRecord = {
+    recordId: "00000000-0000-4000-8000-000000000050",
+    schoolName: "Shared High School",
+    schoolBoard: "TDSB",
+    geographicRegion: "Central",
+    stage: "Not Contacted",
+    assignedTo: "Alex, Sam",
+    ownerEmail: "alex@example.test, sam@example.test",
+    lastRequestId: "v1",
+  };
+  const unsharedRecord = {
+    recordId: "00000000-0000-4000-8000-000000000051",
+    schoolName: "Sam Only School",
+    schoolBoard: "TDSB",
+    geographicRegion: "North",
+    stage: "Not Contacted",
+    assignedTo: "Sam",
+    ownerEmail: "sam@example.test",
+    lastRequestId: "v2",
+  };
+
+  const { context, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: [sharedRecord, unsharedRecord],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  assert.equal(context.isAssignedToMe(sharedRecord), true);
+  assert.equal(context.isAssignedToMe(unsharedRecord), false);
+});
+
+test("school editor: assignee selector loads CRM users, supports changing primary owner, and adding/removing collaborators", async (t) => {
+  const schoolRecord = {
+    recordId: "00000000-0000-4000-8000-000000000060",
+    schoolName: "Oakridge Secondary",
+    schoolBoard: "TDSB",
+    geographicRegion: "West",
+    stage: "Not Contacted",
+    assignedTo: "Alex, Sam",
+    ownerEmail: "alex@example.test, sam@example.test",
+    lastRequestId: "v60",
+    notes: "Collab test notes",
+  };
+  const mockUsers = [
+    { email: "alex@example.test", name: "Alex", role: "co-op" },
+    { email: "sam@example.test", name: "Sam", role: "co-op" },
+    { email: "morgan@example.test", name: "Morgan", role: "Supervisor" },
+  ];
+
+  let reassignPayload = null;
+  const { context, getEl, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: [schoolRecord],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/schools/detail")) {
+        return Response.json({ ok: true, record: schoolRecord, users: mockUsers });
+      }
+      if (url.includes("/api/schools/reassign")) {
+        reassignPayload = JSON.parse(init.body);
+        return Response.json({
+          ok: true,
+          code: "SUCCESS",
+          record: {
+            ...schoolRecord,
+            assignedTo: reassignPayload.newOwnerNames.join(", "),
+            ownerEmail: reassignPayload.newOwnerEmails.join(", "),
+            lastRequestId: "v61",
+          },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  await context.openSchoolEditor(schoolRecord.recordId, false, "details");
+  assert.equal(getEl("assignment-section").hidden, false);
+  assert.equal(getEl("edit-primary-owner").value, "alex@example.test");
+
+  const chipList = getEl("collaborators-list");
+  assert.equal(chipList.children.length, 1);
+  assert.match(chipList.children[0].children[0]?.textContent || chipList.children[0].textContent, /Sam/);
+
+  const addSelect = getEl("add-collaborator-select");
+  addSelect.value = "morgan@example.test";
+  getEl("add-collaborator-btn").click();
+
+  assert.equal(chipList.children.length, 2);
+
+  await context.saveSchoolEdits({ preventDefault() {} });
+  assert.ok(reassignPayload);
+  assert.deepEqual(reassignPayload.newOwnerEmails, ["alex@example.test", "sam@example.test", "morgan@example.test"]);
+  assert.deepEqual(reassignPayload.newOwnerNames, ["Alex", "Sam", "Morgan"]);
+  assert.equal(getEl("save-toast").textContent, "✓ School reassigned");
+  assert.equal(getEl("school-editor").open, false);
+});
+
+test("school editor: release / unclaim school flow prompts inline confirmation and calls /api/schools/unclaim on confirm", async (t) => {
+  const schoolRecord = {
+    recordId: "00000000-0000-4000-8000-000000000070",
+    schoolName: "Birchmount Secondary",
+    schoolBoard: "TDSB",
+    geographicRegion: "East",
+    stage: "Not Contacted",
+    assignedTo: "Alex",
+    ownerEmail: "alex@example.test",
+    lastRequestId: "v70",
+  };
+
+  let unclaimCalled = false;
+  let unclaimPayload = null;
+  const { context, getEl, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: [schoolRecord],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/schools/detail")) {
+        return Response.json({ ok: true, record: schoolRecord });
+      }
+      if (url.includes("/api/schools/unclaim")) {
+        unclaimCalled = true;
+        unclaimPayload = JSON.parse(init.body);
+        return Response.json({ ok: true, code: "SUCCESS" });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+
+  await context.openSchoolEditor(schoolRecord.recordId, false, "details");
+  assert.equal(getEl("editor-unclaim-btn").hidden, false);
+  assert.equal(getEl("unclaim-confirm-panel").hidden, true);
+
+  getEl("editor-unclaim-btn").click();
+  assert.equal(getEl("unclaim-confirm-panel").hidden, false);
+  assert.equal(getEl("editor-unclaim-btn").hidden, true);
+
+  getEl("unclaim-cancel-btn").click();
+  assert.equal(getEl("unclaim-confirm-panel").hidden, true);
+  assert.equal(getEl("editor-unclaim-btn").hidden, false);
+
+  getEl("editor-unclaim-btn").click();
+  await context.unclaimSchool();
+  assert.equal(unclaimCalled, true);
+  assert.equal(unclaimPayload.recordId, schoolRecord.recordId);
+  assert.equal(unclaimPayload.expectedRequestId, schoolRecord.lastRequestId);
+  assert.equal(getEl("save-toast").textContent, "✓ School released to directory");
+  assert.equal(getEl("school-editor").open, false);
+});
+
 
 
 

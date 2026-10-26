@@ -41,6 +41,7 @@ export const C = {
   email: 6, goal: 7, stage: 8, contacted: 9, due: 10, action: 11,
   priority: 12, notes: 13, phone: 14, value: 15, region: 18, address: 22,
   source: 23, osn: 24, owner: 25, count: 26, version: 27, coldReason: 28,
+  engagementStatus: 31,
 } as const;
 
 export const ContactCol = {

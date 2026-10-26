@@ -167,13 +167,15 @@ export class GoogleSheetsReadOnly {
       const row = base![index]!;
       if (!row[0]) continue;
       const owner = value(owners?.[index]?.[0]).trim().toLowerCase();
-      if (user.role !== "Supervisor" && owner !== user.email) continue;
+      const ownerEmails = owner.split(",").map((e) => e.trim()).filter(Boolean);
+      const isMySchool = ownerEmails.includes(user.email);
+      if (user.role !== "Supervisor" && !isMySchool) continue;
       summaries.push({
         recordId: value(row[0]), schoolName: value(row[1]), schoolBoard: value(row[2]), ownerEmail: owner,
         assignedTo: value(row[3]), stage: value(stages?.[index]?.[0]),
         lastContacted: value(stages?.[index]?.[1]), followUpDue: value(stages?.[index]?.[2]), nextAction: value(stages?.[index]?.[3]),
         priority: value(priorities?.[index]?.[0]), geographicRegion: value(regions?.[index]?.[0]),
-        isMySchool: owner === user.email,
+        isMySchool,
       });
     }
     return { schools: summaries, users: users ?? [] };
@@ -197,12 +199,15 @@ export class GoogleSheetsReadOnly {
     for (let index = 1; index < (base?.length ?? 0); index++) {
       const row = base![index]!;
       if (!row[0]) continue;
+      const owner = value(owners?.[index]?.[0]).trim().toLowerCase();
+      const ownerEmails = owner.split(",").map((e) => e.trim()).filter(Boolean);
+      const canEdit = user.role === "Supervisor" || ownerEmails.includes(user.email);
       summaries.push({
         recordId: value(row[0]), schoolName: value(row[1]), schoolBoard: value(row[2]),
         assignedTo: value(row[3]), stage: value(progress?.[index]?.[0]),
         lastContacted: value(progress?.[index]?.[1]), followUpDue: value(progress?.[index]?.[2]),
         priority: value(priorities?.[index]?.[0]), geographicRegion: value(regions?.[index]?.[0]),
-        canEdit: user.role === "Supervisor" || value(owners?.[index]?.[0]).trim().toLowerCase() === user.email,
+        canEdit,
       });
     }
     return summaries;
@@ -226,10 +231,43 @@ export class GoogleSheetsReadOnly {
     }
     // Ownership is joined by verified email, never by non-unique display names.
     return { students, schools: schools.map(({ ownerEmail: email, ...school }) => {
-      const owner = owners.get(email);
-      return { ...school, studentId: owner?.student ? owner.id : "",
-        assignmentIssue: !email ? "Unassigned school" : !owner ? "Owner is not listed in CRM Users" : !owner.active ? "Owner is inactive" : "" };
+      const ownerList = email.split(",").map((e) => e.trim()).filter(Boolean);
+      const studentOwner = ownerList.map((e) => owners.get(e)).find((o) => o?.student);
+      const owner = owners.get(email) ?? studentOwner ?? owners.get(ownerList[0] ?? "");
+      let issue = "";
+      if (!ownerList.length) {
+        issue = "Unassigned school";
+      } else {
+        const issues = ownerList.map((e) => {
+          const o = owners.get(e);
+          if (!o) return "Owner is not listed in CRM Users";
+          if (!o.active) return "Owner is inactive";
+          return "";
+        }).filter(Boolean);
+        issue = issues[0] || "";
+      }
+      return {
+        ...school,
+        studentId: studentOwner ? studentOwner.id : (owner?.student ? owner.id : ""),
+        assignmentIssue: issue,
+      };
     }) };
+  }
+
+  async activeUsers(): Promise<CrmUser[]> {
+    const [users] = await this.read(["'CRM Users'!A1:D1000"]);
+    checkHeader(users?.values?.[0], HEADERS["CRM Users"]);
+    return (users?.values ?? []).slice(1)
+      .filter((row) => {
+        const active = value(row[3]).trim().toUpperCase();
+        const role = value(row[2]).trim();
+        return ["TRUE", ""].includes(active) && ["Supervisor", "co-op"].includes(role);
+      })
+      .map((row) => ({
+        email: value(row[0]).trim().toLowerCase(),
+        name: value(row[1]).trim() || value(row[0]).trim(),
+        role: value(row[2]).trim() as CrmUser["role"],
+      }));
   }
 
   async directory(): Promise<DirectoryEntry[]> {
@@ -237,17 +275,21 @@ export class GoogleSheetsReadOnly {
       "'School Directory'!A:O",
       "'Schools'!A:B",
       "'Schools'!Y:Y",
+      "'Schools'!Z:Z",
     ]);
-    const [dirRange, schoolsBase, schoolsOsn] = ranges.map((r) => r.values ?? []);
+    const [dirRange, schoolsBase, schoolsOsn, schoolsOwner] = ranges.map((r) => r.values ?? []);
     checkDirectoryHeader(dirRange?.[0]);
     checkHeader(schoolsBase?.[0], ["Record ID", "School / Organization"]);
     checkHeader(schoolsOsn?.[0], ["Ontario School Number"]);
+    checkHeader(schoolsOwner?.[0], ["Owner Email"]);
 
     const claimedOsns = new Set<string>();
     const claimedNames: string[] = [];
     for (let i = 1; i < (schoolsBase?.length ?? 0); i++) {
       const row = schoolsBase![i];
       if (!row || !value(row[0])) continue;
+      const owner = value(schoolsOwner?.[i]?.[0]).trim();
+      if (!owner) continue;
       const name = value(row[1]).trim();
       const osn = value(schoolsOsn?.[i]?.[0]).trim();
       if (osn) claimedOsns.add(osn);

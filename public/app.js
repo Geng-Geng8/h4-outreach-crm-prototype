@@ -50,6 +50,20 @@ const pipelineStages = ["Not Contacted", "Contacted", "Interested", "Engaged", "
 const otherStage = "Other / not set";
 const stageKey = (school) => pipelineStages.includes(school.stage) ? school.stage : otherStage;
 const assignee = (school) => school.assignedTo?.trim() || "Unassigned";
+
+function isAssignedToMe(school) {
+  if (!school) return false;
+  const userEmail = (currentUser?.email || (credential ? parseJwtPayload(credential)?.email : "") || "").trim().toLowerCase();
+  if (school.ownerEmail) {
+    return (school.ownerEmail || "")
+      .toLowerCase()
+      .split(",")
+      .map((e) => e.trim())
+      .includes(userEmail);
+  }
+  if (school.isMySchool !== undefined) return Boolean(school.isMySchool);
+  return !isSupervisor;
+}
 const editFields = ["contactName", "contactRole", "email", "phone", "stage", "priority", "outreachGoal", "followUpDue", "nextAction", "notes", "coldReason"];
 const outreachFields = ["channel", "activityType", "outcome", "summary"];
 const EXPLICIT_REJECTION_REASONS = [
@@ -295,8 +309,14 @@ function renderSchools() {
 function editorInputs(disabled) {
   for (const field of editFields) el(`edit-${field}`).disabled = disabled;
   for (const field of outreachFields) el(`log-${field}`).disabled = disabled;
+  if (el("edit-primary-owner")) el("edit-primary-owner").disabled = disabled;
+  if (el("add-collaborator-select")) el("add-collaborator-select").disabled = disabled;
+  if (el("add-collaborator-btn")) el("add-collaborator-btn").disabled = disabled;
+  if (el("editor-unclaim-btn")) el("editor-unclaim-btn").disabled = disabled;
+  if (el("unclaim-cancel-btn")) el("unclaim-cancel-btn").disabled = disabled;
+  if (el("unclaim-confirm-btn")) el("unclaim-confirm-btn").disabled = disabled;
   if (typeof document?.querySelectorAll === "function") {
-    const buttons = document.querySelectorAll(".suggestion-chip, #log-contact-edit, #return-to-activity, #save-contact-return");
+    const buttons = document.querySelectorAll(".suggestion-chip, #log-contact-edit, #return-to-activity, #save-contact-return, .collaborator-chip-remove");
     for (const btn of buttons) btn.disabled = disabled;
   }
 }
@@ -725,10 +745,12 @@ function closeSchoolEditor() {
     const values = editorValues();
     const activity = outreachValues();
     const selectedContactIds = getSelectedContactTokens();
-    if (editing.pending || (editing.mode === "activity" ? activity.outcome || activity.summary || values.nextAction || values.followUpDue || selectedContactIds.length > 0 : editFields.some((key) => values[key] !== String(editing.original[key] ?? "")))) {
-      editDrafts.set(editorDraftKey(editing), { values, activity, selectedContactIds, pending: editing.pending, original: editing.original });
+    if (editing.pending || editing.assigneesChanged || (editing.mode === "activity" ? activity.outcome || activity.summary || values.nextAction || values.followUpDue || selectedContactIds.length > 0 : editFields.some((key) => values[key] !== String(editing.original[key] ?? "")))) {
+      editDrafts.set(editorDraftKey(editing), { values, activity, selectedContactIds, primaryOwner: editing.primaryOwner, collaborators: editing.collaborators, assigneesChanged: Boolean(editing.assigneesChanged), pending: editing.pending, original: editing.original });
     } else editDrafts.delete(editorDraftKey(editing));
   }
+  if (el("unclaim-confirm-panel")) el("unclaim-confirm-panel").hidden = true;
+  if (el("editor-unclaim-btn")) el("editor-unclaim-btn").hidden = false;
   editorSeq++; editorRead?.abort(); editing = null;
   el("school-editor").close();
 }
@@ -871,6 +893,162 @@ function renderSchoolContacts(contacts = []) {
 
     card.append(actions);
     container.append(card);
+  }
+}
+
+function renderAssigneeSection(canEdit) {
+  const primarySelect = el("edit-primary-owner");
+  const collabsList = el("collaborators-list");
+  const addSelect = el("add-collaborator-select");
+  const addBtn = el("add-collaborator-btn");
+
+  if (!primarySelect || !editing) return;
+
+  const users = editing.crmUsers || [];
+
+  primarySelect.replaceChildren();
+  const currentPrimaryEmail = (editing.primaryOwner?.email || "").toLowerCase();
+  let foundPrimary = false;
+
+  for (const user of users) {
+    const opt = document.createElement("option");
+    opt.value = user.email;
+    opt.textContent = `${user.name} (${user.role === "Supervisor" ? "Supervisor" : "Student"})`;
+    if (user.email.toLowerCase() === currentPrimaryEmail) {
+      opt.selected = true;
+      foundPrimary = true;
+    }
+    primarySelect.append(opt);
+  }
+
+  if (!foundPrimary && editing.primaryOwner?.email) {
+    const opt = document.createElement("option");
+    opt.value = editing.primaryOwner.email;
+    opt.textContent = editing.primaryOwner.name ? `${editing.primaryOwner.name} (${editing.primaryOwner.email})` : editing.primaryOwner.email;
+    opt.selected = true;
+    primarySelect.append(opt);
+  }
+
+  primarySelect.value = currentPrimaryEmail;
+  primarySelect.disabled = !canEdit;
+
+  collabsList.replaceChildren();
+  const collabs = editing.collaborators || [];
+  if (collabs.length === 0) {
+    const emptySpan = document.createElement("span");
+    emptySpan.className = "collaborators-empty";
+    emptySpan.textContent = "No co-assignees assigned.";
+    collabsList.append(emptySpan);
+  } else {
+    for (const collab of collabs) {
+      const chip = document.createElement("span");
+      chip.className = "collaborator-chip";
+      const nameText = document.createElement("span");
+      nameText.textContent = collab.name || collab.email;
+      chip.append(nameText);
+
+      if (canEdit) {
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "collaborator-chip-remove";
+        removeBtn.setAttribute("aria-label", `Remove collaborator ${collab.name || collab.email}`);
+        removeBtn.textContent = "×";
+        removeBtn.onclick = () => {
+          editing.assigneesChanged = true;
+          editing.collaborators = (editing.collaborators || []).filter((c) => c.email.toLowerCase() !== collab.email.toLowerCase());
+          renderAssigneeSection(canEdit);
+        };
+        chip.append(removeBtn);
+      }
+      collabsList.append(chip);
+    }
+  }
+
+  addSelect.replaceChildren();
+  const defaultOpt = document.createElement("option");
+  defaultOpt.value = "";
+  defaultOpt.textContent = "Select team member…";
+  addSelect.append(defaultOpt);
+
+  const assignedEmails = new Set([
+    currentPrimaryEmail,
+    ...collabs.map((c) => c.email.toLowerCase()),
+  ]);
+
+  const availableUsers = users.filter((u) => !assignedEmails.has(u.email.toLowerCase()));
+
+  for (const user of availableUsers) {
+    const opt = document.createElement("option");
+    opt.value = user.email;
+    opt.textContent = `${user.name} (${user.role === "Supervisor" ? "Supervisor" : "Student"})`;
+    addSelect.append(opt);
+  }
+
+  addSelect.disabled = !canEdit || availableUsers.length === 0;
+  if (addBtn) addBtn.disabled = !canEdit || availableUsers.length === 0;
+}
+
+async function unclaimSchool() {
+  if (!credential || !editing?.original || editing.busy) return;
+  const session = sessionVersion, edit = editing;
+  edit.busy = true;
+  editorInputs(true);
+  el("editor-save").disabled = true;
+  el("editor-close").disabled = true;
+  el("editor-reload").disabled = true;
+  editorFeedback("Releasing school back to directory…");
+
+  try {
+    const payload = {
+      recordId: edit.id,
+      expectedRequestId: edit.original.lastRequestId,
+      requestId: crypto.randomUUID(),
+    };
+    const response = await apiFetch("./api/schools/unclaim", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      credentials: "omit",
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (session !== sessionVersion || editing !== edit || !credential) return;
+
+    if (response.ok) {
+      edit.saved = true;
+      editDrafts.delete(editorDraftKey(edit));
+      editDrafts.delete(`activity:${edit.id}`);
+      edit.busy = false;
+      closeSchoolEditor();
+      showSaveToast("✓ School released to directory");
+      await refresh();
+      if (directory.length > 0) await loadDirectory();
+    } else if (response.status === 401 || response.status === 403) {
+      forgetSession();
+      status("Your access changed. Please sign in again.");
+      el("google-button").hidden = false;
+      if (config?.ready) await showGoogleButton();
+    } else if (response.status === 409 || data.code === "CONFLICT_STALE_VERSION") {
+      edit.busy = false;
+      edit.stale = true;
+      editorFeedback("Someone changed this school. Your draft is kept. Reload school values and review before saving.", "error");
+    } else {
+      editorFeedback(data.message || "Failed to release school. Please try again.", "error");
+    }
+  } catch {
+    if (session === sessionVersion && editing === edit) {
+      editorFeedback("Connection interrupted. Retry releasing school.", "error");
+    }
+  } finally {
+    if (session === sessionVersion && editing === edit) {
+      edit.busy = false;
+      editorInputs(false);
+      el("editor-save").disabled = !!edit.stale;
+      el("editor-close").disabled = false;
+      el("editor-reload").disabled = false;
+      if (el("unclaim-confirm-panel")) el("unclaim-confirm-panel").hidden = true;
+      if (el("editor-unclaim-btn")) el("editor-unclaim-btn").hidden = false;
+    }
   }
 }
 
@@ -1325,6 +1503,9 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
   el("outreach-fields").hidden = mode !== "activity";
   for (const field of detailOnlyFields) el(`field-${field}`).hidden = mode === "activity";
   if (el("contacts-management")) el("contacts-management").hidden = mode === "activity";
+  if (el("assignment-section")) el("assignment-section").hidden = mode === "activity";
+  if (el("editor-unclaim-btn")) el("editor-unclaim-btn").hidden = true;
+  if (el("unclaim-confirm-panel")) el("unclaim-confirm-panel").hidden = true;
   closeContactForm(true);
   if (el("activity-step-5")) el("activity-step-5").classList.toggle("flow-step", mode === "activity");
   if (el("activity-step-5-header")) el("activity-step-5-header").hidden = mode !== "activity";
@@ -1407,6 +1588,33 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
       el("edit-coldReason").value = data.record.coldReason || (data.record.stage === "Cold" ? DEFAULT_DECLINE_REASON : "");
     }
     updateColdWarning();
+
+    editing.crmUsers = data.users || [];
+    const rawOwnerEmails = String(data.record.ownerEmail || "").split(",").map((e) => e.trim()).filter(Boolean);
+    const rawAssignedNames = String(data.record.assignedTo || "").split(",").map((n) => n.trim()).filter(Boolean);
+
+    const primaryEmail = rawOwnerEmails[0] || (currentUser?.email || "");
+    const primaryName = rawAssignedNames[0] || (currentUser?.name || primaryEmail);
+    const initialCollaborators = [];
+    for (let i = 1; i < Math.max(rawOwnerEmails.length, rawAssignedNames.length); i++) {
+      const email = rawOwnerEmails[i] || "";
+      const name = rawAssignedNames[i] || email;
+      if (email || name) {
+        initialCollaborators.push({ email, name });
+      }
+    }
+
+    editing.primaryOwner = draft?.primaryOwner ?? { email: primaryEmail, name: primaryName };
+    editing.collaborators = draft?.collaborators ?? initialCollaborators;
+    editing.assigneesChanged = Boolean(draft?.assigneesChanged);
+
+    const canEditAssignment = isSupervisor || isAssignedToMe(data.record);
+    renderAssigneeSection(canEditAssignment);
+
+    if (el("assignment-section")) el("assignment-section").hidden = mode === "activity";
+    if (el("editor-unclaim-btn")) el("editor-unclaim-btn").hidden = mode === "activity" || !canEditAssignment;
+    if (el("unclaim-confirm-panel")) el("unclaim-confirm-panel").hidden = true;
+
     const staleDraft = draft?.original && draft.original.lastRequestId !== data.record.lastRequestId && !editing.pending;
     editing.stale = !!staleDraft;
 
@@ -1470,6 +1678,83 @@ async function saveSchoolEdits(event) {
         ...(isCold ? { coldReason: coldReasonVal, isExplicitRejection } : {}),
       };
     } else {
+      const origEmails = String(edit.original.ownerEmail || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+      const origNames = String(edit.original.assignedTo || "").split(",").map((n) => n.trim()).filter(Boolean);
+
+      const newEmails = [
+        edit.primaryOwner?.email,
+        ...(edit.collaborators || []).map((c) => c.email),
+      ].filter(Boolean).map((e) => e.trim().toLowerCase());
+
+      const newNames = [
+        edit.primaryOwner?.name,
+        ...(edit.collaborators || []).map((c) => c.name),
+      ].filter(Boolean).map((n) => n.trim());
+
+      const assigneesChanged = Boolean(
+        edit.assigneesChanged &&
+        edit.primaryOwner &&
+        (newEmails.join(",") !== origEmails.join(",") || newNames.join(",") !== origNames.join(","))
+      );
+
+      if (assigneesChanged) {
+        edit.busy = true; editorInputs(true);
+        el("editor-save").disabled = true; el("editor-close").disabled = true; el("editor-reload").disabled = true;
+        el("editor-save").textContent = "Saving…";
+        editorFeedback("Saving…");
+
+        try {
+          const reassignPayload = {
+            recordId: edit.id,
+            expectedRequestId: edit.original.lastRequestId,
+            requestId: crypto.randomUUID(),
+            newOwnerEmails: newEmails,
+            newOwnerNames: newNames,
+          };
+          const reassignResponse = await apiFetch("./api/schools/reassign", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
+            credentials: "omit", cache: "no-store",
+            body: JSON.stringify(reassignPayload),
+          });
+          const reassignData = await reassignResponse.json();
+          if (session !== sessionVersion || editing !== edit || !credential) return;
+
+          if (!reassignResponse.ok) {
+            edit.busy = false;
+            editorInputs(false);
+            if (reassignResponse.status === 409 || reassignData.code === "CONFLICT_STALE_VERSION") {
+              edit.stale = true;
+              editorFeedback("Someone changed this school. Your draft is kept. Reload school values and review before saving.", "error");
+            } else if (reassignResponse.status === 401 || reassignResponse.status === 403) {
+              forgetSession(); status("Your access changed. Please sign in again.");
+              el("google-button").hidden = false;
+              if (config?.ready) await showGoogleButton();
+            } else {
+              editorFeedback(reassignData.message || "Failed to reassign school. Your draft is kept.", "error");
+            }
+            el("editor-save").disabled = !!edit.stale;
+            el("editor-save").textContent = editorSaveLabel(edit);
+            el("editor-close").disabled = false;
+            el("editor-reload").disabled = false;
+            return;
+          }
+
+          edit.original = { ...edit.original, ...reassignData.record, lastRequestId: reassignData.record.lastRequestId };
+        } catch {
+          if (session === sessionVersion && editing === edit) {
+            edit.busy = false;
+            editorInputs(false);
+            el("editor-save").disabled = false;
+            el("editor-save").textContent = editorSaveLabel(edit);
+            el("editor-close").disabled = false;
+            el("editor-reload").disabled = false;
+            editorFeedback("Connection interrupted. Retry saving changes; your draft is kept.", "error");
+          }
+          return;
+        }
+      }
+
       const patch = Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== String(edit.original[key] ?? "")));
       if (values.stage === "Cold") {
         const coldReasonVal = values.coldReason || el("edit-coldReason")?.value || DEFAULT_DECLINE_REASON;
@@ -1482,6 +1767,15 @@ async function saveSchoolEdits(event) {
         }
       }
       if (!Object.keys(patch).length) {
+        if (assigneesChanged) {
+          edit.busy = false;
+          edit.saved = true;
+          editDrafts.delete(editorDraftKey(edit));
+          closeSchoolEditor();
+          showSaveToast("✓ School reassigned");
+          await refresh();
+          return;
+        }
         if (edit.mode === "details" && editDrafts.has(`activity:${edit.id}`)) {
           openSchoolEditor(edit.id, false, "activity");
           return;
@@ -1571,8 +1865,8 @@ function getUnresolvedBulkCount(batch) {
 function getEligibleBulkSchools() {
   return schools.filter((school) => {
     if (school.canEdit === false) return false;
-    if (isSupervisor && school.isMySchool !== true) return false;
-    if (school.isMySchool === false) return false;
+    if (isSupervisor && !isAssignedToMe(school)) return false;
+    if (!isAssignedToMe(school)) return false;
     if (["Booked", "Cold"].includes(school.stage)) return false;
     return true;
   });
@@ -1984,9 +2278,13 @@ async function executeBulkBatch(isRetry = false) {
         }
 
         if (isSupervisor) {
-          const authEmail = (currentUser?.email || parseJwtPayload(credential)?.email || "").trim().toLowerCase();
-          const schoolOwnerEmail = (typeof schoolDetail.ownerEmail === "string" ? schoolDetail.ownerEmail : "").trim().toLowerCase();
-          if (!authEmail || !schoolOwnerEmail || authEmail !== schoolOwnerEmail) {
+          const authEmail = (currentUser?.email || (credential ? parseJwtPayload(credential)?.email : "") || "").trim().toLowerCase();
+          const ownerEmails = (typeof schoolDetail.ownerEmail === "string" ? schoolDetail.ownerEmail : "")
+            .toLowerCase()
+            .split(",")
+            .map((e) => e.trim())
+            .filter(Boolean);
+          if (!authEmail || !ownerEmails.includes(authEmail)) {
             item.status = "conflict";
             item.error = "Supervisors can only bulk-log schools they personally own.";
             item.code = "NOT_OWNER";
@@ -2503,7 +2801,7 @@ function renderDashboard() {
   const stage = el("dashboard-stage").value, owner = el("dashboard-owner").value;
   const query = el("dashboard-search").value.trim().toLowerCase();
   const overdueOnly = el("dashboard-overdue").checked;
-  const visible = teamSchools.filter((school) => (!stage || stageKey(school) === stage) && (!owner || assignee(school) === owner)
+  const visible = teamSchools.filter((school) => (!stage || stageKey(school) === stage) && (!owner || assignee(school).split(",").map((s) => s.trim()).includes(owner))
     && (!overdueOnly || overdue(school)) && [school.schoolName, school.schoolBoard, school.geographicRegion].some((text) => (text || "").toLowerCase().includes(query)))
     .sort((a, b) => Number(overdue(b)) - Number(overdue(a)) || a.schoolName.localeCompare(b.schoolName));
   el("dashboard-rows").replaceChildren();
@@ -2545,7 +2843,7 @@ async function loadDashboard() {
     }
     if (!response.ok || !data.ok || !Array.isArray(data.schools)) throw new Error();
     teamSchools = data.schools; dashboardLoaded = true;
-    dashboardOptions("dashboard-owner", "Everyone", [...new Set(teamSchools.map(assignee))].sort());
+    dashboardOptions("dashboard-owner", "Everyone", [...new Set(teamSchools.flatMap((s) => (s.assignedTo || "").split(",").map((n) => n.trim()).filter(Boolean)))].sort());
     dashboardOptions("dashboard-stage", "All stages", [...pipelineStages, ...(teamSchools.some((s) => stageKey(s) === otherStage) ? [otherStage] : [])]);
     renderDashboard(); el("dashboard-content").hidden = false;
     el("dashboard-status").textContent = "Up to date · whole team · dates use Ontario time";
@@ -2996,6 +3294,48 @@ el("editor-form").addEventListener("submit", saveSchoolEdits);
 el("editor-close").addEventListener("click", closeSchoolEditor);
 el("editor-reload").addEventListener("click", () => { if (editing) openSchoolEditor(editing.id, true, editing.mode); });
 el("school-editor").addEventListener("cancel", (event) => { event.preventDefault(); closeSchoolEditor(); });
+el("edit-primary-owner")?.addEventListener("change", (e) => {
+  if (!editing) return;
+  editing.assigneesChanged = true;
+  const newEmail = e.target.value.toLowerCase();
+  const foundUser = (editing.crmUsers || []).find((u) => u.email.toLowerCase() === newEmail);
+  editing.primaryOwner = {
+    email: newEmail,
+    name: foundUser ? foundUser.name : (editing.primaryOwner?.name || newEmail),
+  };
+  editing.collaborators = (editing.collaborators || []).filter((c) => c.email.toLowerCase() !== newEmail);
+  const canEdit = isSupervisor || isAssignedToMe(editing.original);
+  renderAssigneeSection(canEdit);
+});
+el("add-collaborator-btn")?.addEventListener("click", () => {
+  if (!editing) return;
+  const select = el("add-collaborator-select");
+  const selectedEmail = select?.value.trim().toLowerCase();
+  if (!selectedEmail) return;
+  editing.assigneesChanged = true;
+  const foundUser = (editing.crmUsers || []).find((u) => u.email.toLowerCase() === selectedEmail);
+  const newCollab = {
+    email: selectedEmail,
+    name: foundUser ? foundUser.name : selectedEmail,
+  };
+  if (!editing.collaborators) editing.collaborators = [];
+  if (!editing.collaborators.some((c) => c.email.toLowerCase() === selectedEmail)) {
+    editing.collaborators.push(newCollab);
+  }
+  const canEdit = isSupervisor || isAssignedToMe(editing.original);
+  renderAssigneeSection(canEdit);
+});
+el("editor-unclaim-btn")?.addEventListener("click", () => {
+  el("unclaim-confirm-panel").hidden = false;
+  el("editor-unclaim-btn").hidden = true;
+});
+el("unclaim-cancel-btn")?.addEventListener("click", () => {
+  el("unclaim-confirm-panel").hidden = true;
+  el("editor-unclaim-btn").hidden = false;
+});
+el("unclaim-confirm-btn")?.addEventListener("click", async () => {
+  await unclaimSchool();
+});
 el("editor-form").addEventListener("click", (event) => {
   const chip = event.target.closest?.(".suggestion-chip");
   if (!chip) return;
