@@ -823,9 +823,9 @@ export class SheetCoordinator extends DurableObject<Env> {
         onlyKeys(input, ["requestId", "recordId", "expectedRequestId", "newOwnerEmails", "newOwnerNames"]);
         let emailsList: string[] = [];
         if (Array.isArray(input.newOwnerEmails)) {
-          emailsList = input.newOwnerEmails.map((e) => text(e, 300).trim()).filter(Boolean);
+          emailsList = input.newOwnerEmails.map((e) => text(e, 300).trim().toLowerCase()).filter(Boolean);
         } else if (typeof input.newOwnerEmails === "string") {
-          emailsList = text(input.newOwnerEmails, 1000).split(",").map((e) => e.trim()).filter(Boolean);
+          emailsList = text(input.newOwnerEmails, 1000).split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
         } else {
           throw new ApiError(422, "INVALID_OWNER_EMAILS");
         }

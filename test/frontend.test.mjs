@@ -3668,9 +3668,158 @@ test("student default Schools tab: toggle is hidden and only student's assigned 
   assert.equal(getEl("school-list").children.length, 1);
 });
 
+test("co-assignee addition marks form dirty and persists multi-assignee to Columns D and Z", async (t) => {
+  const schoolRecord = {
+    recordId: "00000000-0000-4000-8000-000000000088",
+    schoolName: "Birchmount Park",
+    schoolBoard: "TDSB",
+    geographicRegion: "East",
+    stage: "Contacted",
+    assignedTo: "Eliana",
+    ownerEmail: "eliana@example.test",
+    lastRequestId: "v88",
+    notes: "Initial notes",
+  };
+  const mockUsers = [
+    { email: "eliana@example.test", name: "Eliana", role: "co-op" },
+    { email: "glen@example.test", name: "Glen", role: "Supervisor" },
+  ];
 
+  let reassignPayload = null;
+  const { context, getEl, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Glen", email: "glen@example.test", role: "Supervisor" },
+          schools: [schoolRecord],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/schools/detail")) {
+        return Response.json({ ok: true, record: schoolRecord, users: mockUsers });
+      }
+      if (url.includes("/api/schools/reassign")) {
+        reassignPayload = JSON.parse(init.body);
+        return Response.json({
+          ok: true,
+          code: "SUCCESS",
+          record: {
+            ...schoolRecord,
+            assignedTo: reassignPayload.newOwnerNames.join(", "),
+            ownerEmail: reassignPayload.newOwnerEmails.join(", "),
+            lastRequestId: "v89",
+          },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+  await signIn("glen@example.test");
 
+  await context.openSchoolEditor(schoolRecord.recordId, false, "details");
+  assert.equal(getEl("edit-primary-owner").value, "eliana@example.test");
 
+  // Before adding collaborator: form is not dirty, collaborators list shows empty state
+  assert.equal(context.hasFormChanges(), false);
+  assert.equal(context.isDirty(), false);
+  const chipList = getEl("collaborators-list");
+  assert.equal(chipList.children.length, 1);
+  assert.match(chipList.children[0].textContent, /no co-assignees/i);
 
+  // Select Glen in dropdown and click "+ Add Collaborator"
+  const addSelect = getEl("add-collaborator-select");
+  addSelect.value = "glen@example.test";
+  getEl("add-collaborator-btn").click();
 
+  // Active collaborator chip is rendered with remove button
+  assert.equal(chipList.children.length, 1);
+  const chip = chipList.children[0];
+  const chipName = chip.children[0]?.textContent || chip.textContent;
+  assert.match(chipName, /Glen/);
+  const removeBtn = chip.children[1];
+  assert.ok(removeBtn);
+  assert.equal(removeBtn.textContent, "✕");
 
+  // Form is flagged dirty
+  assert.equal(context.hasFormChanges(), true);
+  assert.equal(context.isDirty(), true);
+  assert.equal(getEl("editor-form").getAttribute("data-dirty"), "true");
+  assert.equal(getEl("editor-save").disabled, false);
+
+  // Clicking Save changes persists Primary + Collaborator to Columns D and Z without "No changes to save" toast
+  await context.saveSchoolEdits({ preventDefault() {} });
+  assert.ok(reassignPayload, "Expected /api/schools/reassign to be called");
+  assert.deepEqual(reassignPayload.newOwnerNames, ["Eliana", "Glen"]);
+  assert.deepEqual(reassignPayload.newOwnerEmails, ["eliana@example.test", "glen@example.test"]);
+  assert.notEqual(getEl("save-toast").textContent, "No changes to save");
+  assert.equal(getEl("save-toast").textContent, "✓ School reassigned");
+  assert.equal(getEl("school-editor").open, false);
+});
+
+test("school editor: auto-commits selected collaborator when Save changes is clicked directly", async (t) => {
+  const schoolRecord = {
+    recordId: "00000000-0000-4000-8000-000000000089",
+    schoolName: "Danforth Collegiate",
+    schoolBoard: "TDSB",
+    geographicRegion: "Toronto",
+    stage: "Not Contacted",
+    assignedTo: "Eliana",
+    ownerEmail: "eliana@example.test",
+    lastRequestId: "v90",
+  };
+  const mockUsers = [
+    { email: "eliana@example.test", name: "Eliana", role: "co-op" },
+    { email: "glen@example.test", name: "Glen", role: "Supervisor" },
+  ];
+
+  let reassignPayload = null;
+  const { context, getEl, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Glen", email: "glen@example.test", role: "Supervisor" },
+          schools: [schoolRecord],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/schools/detail")) {
+        return Response.json({ ok: true, record: schoolRecord, users: mockUsers });
+      }
+      if (url.includes("/api/schools/reassign")) {
+        reassignPayload = JSON.parse(init.body);
+        return Response.json({
+          ok: true,
+          code: "SUCCESS",
+          record: {
+            ...schoolRecord,
+            assignedTo: reassignPayload.newOwnerNames.join(", "),
+            ownerEmail: reassignPayload.newOwnerEmails.join(", "),
+            lastRequestId: "v91",
+          },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+  await signIn("glen@example.test");
+
+  await context.openSchoolEditor(schoolRecord.recordId, false, "details");
+  const addSelect = getEl("add-collaborator-select");
+  addSelect.value = "glen@example.test";
+
+  // Form dirty check recognizes the uncommitted selection
+  assert.equal(context.hasFormChanges(), true);
+  assert.equal(context.isDirty(), true);
+
+  // Directly click save without clicking "+ Add Collaborator" button
+  await context.saveSchoolEdits({ preventDefault() {} });
+  assert.ok(reassignPayload, "Expected reassign to be called with auto-committed collaborator");
+  assert.deepEqual(reassignPayload.newOwnerNames, ["Eliana", "Glen"]);
+  assert.deepEqual(reassignPayload.newOwnerEmails, ["eliana@example.test", "glen@example.test"]);
+  assert.equal(getEl("save-toast").textContent, "✓ School reassigned");
+  assert.equal(getEl("school-editor").open, false);
+});
