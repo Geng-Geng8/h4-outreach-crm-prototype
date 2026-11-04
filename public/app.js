@@ -47,7 +47,7 @@ const pendingClaims = new Map(); // osn -> requestId
 let teamSchools = [], dashboardLoaded = false, dashboardSeq = 0, dashboardRequest;
 let overviewStudents = [], schoolScopeFilter = null, schoolStageFilter = "", schoolScopeLabel = "", homeShowAll = false;
 let supervisorSchoolScope = "mine";
-const pipelineStages = ["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Cold"];
+const pipelineStages = ["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Completed", "Cold"];
 const otherStage = "Other / not set";
 const stageKey = (school) => pipelineStages.includes(school.stage) ? school.stage : otherStage;
 const assignee = (school) => school.assignedTo?.trim() || "Unassigned";
@@ -393,7 +393,7 @@ function applySuggestion(targetId, value) {
 
   if (targetId === "log-outcome" && value.toLowerCase() === "not interested") {
     const origStage = editing?.original?.stage;
-    if (!origStage || !["Interested", "Engaged", "Booked"].includes(origStage)) {
+    if (!origStage || !["Interested", "Engaged", "Booked", "Completed"].includes(origStage)) {
       if (el("edit-stage")) el("edit-stage").value = "Cold";
       if (el("edit-coldReason")) el("edit-coldReason").value = DEFAULT_DECLINE_REASON;
       if (el("edit-followUpDue")) el("edit-followUpDue").value = "";
@@ -498,7 +498,7 @@ function renderSummarySuggestions() {
 }
 
 function evaluateColdEligibility(params) {
-  const PROTECTED_STAGES = new Set(["Interested", "Engaged", "Booked"]);
+  const PROTECTED_STAGES = new Set(["Interested", "Engaged", "Booked", "Completed"]);
 
   if (PROTECTED_STAGES.has(params.currentStage)) {
     return {
@@ -1734,7 +1734,7 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     el("editor-title").textContent = data.record.schoolName;
     el("editor-meta").textContent = [data.record.schoolBoard, `Assigned to ${data.record.assignedTo || "you"}`].filter(Boolean).join(" · ");
     const day = new Date().toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
-    const isProtected = ["Interested", "Engaged", "Booked"].includes(data.record.stage);
+    const isProtected = ["Interested", "Engaged", "Booked", "Completed"].includes(data.record.stage);
     const cold = el("edit-stage").querySelector?.('option[value="Cold"]');
     if (cold) cold.disabled = isProtected;
     editing.coldAllowed = !isProtected;
@@ -2831,7 +2831,7 @@ function renderPipeline(id, records, onSelect) {
   }
 }
 function appendNextAction(card, school) {
-  const suggested = school.stage === "Not Contacted" ? "Make your first contact" : school.stage === "Booked" ? "Confirm workshop details" : school.stage === "Cold" ? "No outreach planned" : "Plan your next follow-up";
+  const suggested = school.stage === "Not Contacted" ? "Make your first contact" : school.stage === "Booked" ? "Confirm workshop details" : school.stage === "Completed" ? "Send invoice / feedback survey" : school.stage === "Cold" ? "No outreach planned" : "Plan your next follow-up";
   card.append(dashboardNode("p", school.nextAction?.trim() ? `Next: ${school.nextAction}` : `Suggested: ${suggested}`, "action-next"));
   const due = dueState(school);
   card.append(dashboardNode("p", school.followUpDue ? `Follow-up: ${school.followUpDue}${due === "overdue" ? " · Overdue" : due === "today" ? " · Today" : ""}` : "No follow-up reminder set", due === "overdue" ? "action-date dashboard-due" : "action-date"));
@@ -2840,6 +2840,7 @@ function schoolBadge(stage, label = stage || "Stage not set") {
   const badge = dashboardNode("span", label, "school-stage");
   if (["Interested", "Engaged"].includes(stage)) badge.classList.add("warm");
   if (stage === "Booked") badge.classList.add("booked");
+  if (stage === "Completed") badge.classList.add("completed", "badge-completed");
   if (stage === "Cold") badge.classList.add("cold");
   return badge;
 }
@@ -3550,6 +3551,12 @@ el("log-activityType")?.addEventListener("change", () => {
 });
 el("edit-stage")?.addEventListener("change", () => {
   const stage = el("edit-stage")?.value;
+  if (stage === "Completed") {
+    if (el("edit-nextAction") && (!el("edit-nextAction").value.trim() || el("edit-nextAction").value === "Follow up if no reply" || el("edit-nextAction").value === "Confirm workshop details")) {
+      el("edit-nextAction").value = "Send invoice / feedback survey";
+    }
+    updateSuggestionStates();
+  }
   if (stage === "Cold") {
     const reasonInput = el("edit-coldReason");
     if (reasonInput && !reasonInput.value) reasonInput.value = DEFAULT_DECLINE_REASON;

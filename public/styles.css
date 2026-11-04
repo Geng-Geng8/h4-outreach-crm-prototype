@@ -679,6 +679,14 @@ footer span span {
   border-color: #9ee1c7;
   font-weight: 800;
 }
+.school-stage.completed,
+.school-stage.badge-completed,
+.badge-completed {
+  background: #f3e8ff;
+  color: #581c87;
+  border-color: #d8b4fe;
+  font-weight: 800;
+}
 .school-stage.cold {
   background: #edf1f6;
   color: #4a5c71;
@@ -944,10 +952,11 @@ button.dashboard-metric:hover { border-color: var(--brand-pine); box-shadow: var
   .action-next { font-size: 14px; }
   .action-date { font-size: 13px; }
 }
-.dashboard-pipeline { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 9px; }
+.dashboard-pipeline { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 9px; }
 .pipeline-step { text-align: left; border: 1px solid var(--line); border-top: 3px solid #a7b99a; border-radius: var(--radius-md); padding: 16px 14px; background: white; color: var(--text-main); min-height: 109px; }
 .pipeline-step:nth-child(3), .pipeline-step:nth-child(4) { border-top-color: var(--accent-gold); }
 .pipeline-step:nth-child(5) { border-top-color: var(--brand-pine); }
+.pipeline-step:nth-child(6) { border-top-color: #581c87; }
 .pipeline-step:last-child { border-top-color: #8d9b9c; }
 .pipeline-step span { display: block; font-size: 11px; min-height: 30px; }
 .pipeline-step strong { display: block; font-size: 28px; margin-top: 10px; }

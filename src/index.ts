@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   ApiError, C, ContactCol, padded, record, editableRecord, contactRecord, schoolWrites,
   assertStudentPrivacy, evaluateColdEligibility, DEFAULT_DECLINE_REASON, UNRESPONSIVE_COLD_REASON, EXPLICIT_REJECTION_REASONS,
+  VALID_STAGES,
   type Batch, type Row, type Snapshot, type ValueRange,
 } from "./schema";
 import { SyntheticSheets } from "./sheets";
@@ -541,7 +542,7 @@ export class SheetCoordinator extends DurableObject<Env> {
         let isExplicitCold = false;
         if (patch.stage !== undefined) {
           const targetStage = String(patch.stage);
-          if (!["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Cold"].includes(targetStage)) throw new ApiError(422, "INVALID_STAGE");
+          if (!VALID_STAGES.includes(targetStage as any)) throw new ApiError(422, "INVALID_STAGE");
           if (targetStage === "Cold" && row[C.stage] !== "Cold") {
             const isExplicit = Boolean(patch.isExplicitRejection) ||
               (typeof patch.coldReason === "string" && EXPLICIT_REJECTION_REASONS.includes(patch.coldReason.trim() as any));
@@ -914,7 +915,7 @@ export class SheetCoordinator extends DurableObject<Env> {
         let isExplicitCold = false;
         if (input.stage !== undefined) {
           const stage = text(input.stage, 30);
-          if (!["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Cold"].includes(stage)) throw new ApiError(422, "INVALID_STAGE");
+          if (!VALID_STAGES.includes(stage as any)) throw new ApiError(422, "INVALID_STAGE");
           if (stage === "Cold") {
             const isExplicit = Boolean(input.isExplicitRejection) ||
               (typeof input.coldReason === "string" && EXPLICIT_REJECTION_REASONS.includes(input.coldReason.trim() as any)) ||

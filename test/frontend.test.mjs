@@ -358,8 +358,8 @@ test("supervisors land on H4 Overview; totals use dates, student drill-down surv
   const sam = h.getEl("overview-students").children.find((row) => row.children[0].children[0].textContent === "Sam");
   assert.equal(sam.children[1].textContent, "1"); assert.equal(sam.children[4].textContent, "1");
   h.context.renderPipeline("overview-pipeline", [...records, { stage: "Legacy stage" }], () => {});
-  assert.equal(h.getEl("overview-pipeline").children.length, 7);
-  assert.equal(h.getEl("overview-pipeline").children[6].children[1].textContent, "1");
+  assert.equal(h.getEl("overview-pipeline").children.length, 8);
+  assert.equal(h.getEl("overview-pipeline").children[7].children[1].textContent, "1");
   h.context.renderHome();
   sam.children[5].children[0].click(); assert.equal(h.getEl("school-list").children.length, 1);
   assert.equal(h.getEl("school-count").textContent, "1"); assert.equal(h.getEl("school-count-label").textContent, "of 4 schools");
@@ -3345,7 +3345,7 @@ test("Cold status: Warm stage protection prevents marking Cold for warm stages",
   await signIn("alex@example.test");
 
   // Core validation rejects warm stages
-  for (const warmStage of ["Interested", "Engaged", "Booked"]) {
+  for (const warmStage of ["Interested", "Engaged", "Booked", "Completed"]) {
     const check = context.evaluateColdEligibility({
       currentStage: warmStage,
       followUpCount: 2,
@@ -3822,4 +3822,103 @@ test("school editor: auto-commits selected collaborator when Save changes is cli
   assert.deepEqual(reassignPayload.newOwnerEmails, ["eliana@example.test", "glen@example.test"]);
   assert.equal(getEl("save-toast").textContent, "✓ School reassigned");
   assert.equal(getEl("school-editor").open, false);
+});
+
+
+test("pipeline: Completed stage displays badge, defaults nextAction, appears in pipeline summary and filters", async (t) => {
+  const completedRecord = {
+    recordId: "00000000-0000-4000-8000-000000000099",
+    schoolName: "Delivered Workshop High",
+    schoolBoard: "TDSB",
+    geographicRegion: "Toronto",
+    stage: "Completed",
+    lastRequestId: "v10",
+    assignedTo: "Morgan",
+    ownerEmail: "morgan@example.test",
+    nextAction: "Send invoice / feedback survey",
+    followUpDue: "2026-11-20",
+    canEdit: true,
+  };
+  const bookedRecord = {
+    recordId: "00000000-0000-4000-8000-000000000098",
+    schoolName: "Booked School Academy",
+    schoolBoard: "TDSB",
+    geographicRegion: "Toronto",
+    stage: "Booked",
+    lastRequestId: "v11",
+    assignedTo: "Morgan",
+    ownerEmail: "morgan@example.test",
+    nextAction: "Confirm workshop details",
+    followUpDue: "2026-11-10",
+    canEdit: true,
+  };
+
+  const { getEl, signIn, context, cleanup } = setupEnv({
+    fetchHandler: async (url) => {
+      if (url.includes("/api/config")) {
+        return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      }
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Morgan", email: "morgan@example.test", role: "Supervisor" },
+          schools: [completedRecord, bookedRecord],
+          overview: { students: [{ id: "alex", name: "Alex", active: true }] },
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/dashboard")) {
+        return Response.json({ ok: true, schools: [completedRecord, bookedRecord] });
+      }
+      if (url.includes("/api/schools/detail")) {
+        return Response.json({ record: bookedRecord, users: [{ email: "alex@example.test", name: "Alex" }] });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+  await signIn("morgan@example.test");
+
+  // 1. Overview pipeline shows Completed card next to Booked
+  const pipelineEl = getEl("overview-pipeline");
+  const pipelineSteps = Array.from(pipelineEl.children);
+  const bookedStepIdx = pipelineSteps.findIndex((el) => el.children[0].textContent === "Booked");
+  const completedStepIdx = pipelineSteps.findIndex((el) => el.children[0].textContent === "Completed");
+  assert.ok(bookedStepIdx !== -1, "Booked card exists in pipeline");
+  assert.ok(completedStepIdx !== -1, "Completed card exists in pipeline");
+  assert.equal(completedStepIdx, bookedStepIdx + 1, "Completed card is positioned immediately next to Booked");
+  assert.equal(pipelineSteps[completedStepIdx].children[1].textContent, "1");
+
+  // 2. School badge in Schools view has .badge-completed
+  context.renderSchools();
+  const schoolCards = getEl("school-list").children;
+  assert.equal(schoolCards.length, 2);
+  const completedBadge = schoolCards[0].children[0].children[0];
+  assert.ok(completedBadge.classList.contains("badge-completed"), "Completed badge has badge-completed class");
+  assert.equal(completedBadge.textContent, "Completed");
+
+  // 3. Team Progress view shows badge-completed and stage filter includes Completed
+  await context.switchTab("dashboard");
+  await context.loadDashboard();
+  const stageSelect = getEl("dashboard-stage");
+  const stageOptions = Array.from(stageSelect.children).map((opt) => opt.value);
+  assert.ok(stageOptions.includes("Completed"), "Dashboard stage filter includes Completed");
+
+  // Filter dashboard by Completed
+  stageSelect.value = "Completed";
+  context.renderDashboard();
+  assert.equal(getEl("dashboard-count").textContent, "Showing 1 of 2 claimed schools");
+  const tableBadge = getEl("dashboard-rows").children[0].children[2].children[0];
+  assert.ok(tableBadge.classList.contains("badge-completed"), "Dashboard row badge has badge-completed class");
+
+  // 4. Edit modal stage dropdown has Completed option and defaults nextAction to invoice/survey
+  const html = await readFile("public/index.html", "utf8");
+  assert.match(html, /<select id="edit-stage">[\s\S]*?<option>Completed<\/option>/, "Edit stage dropdown options include Completed");
+
+  await context.openSchoolEditor(bookedRecord.recordId, false, "details");
+  const editStageSelect = getEl("edit-stage");
+
+  // Changing stage to Completed suggests/defaults nextAction
+  editStageSelect.value = "Completed";
+  editStageSelect.dispatchEvent(new Event("change"));
+  assert.equal(getEl("edit-nextAction").value, "Send invoice / feedback survey");
 });

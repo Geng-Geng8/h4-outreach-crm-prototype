@@ -210,7 +210,7 @@ test("user text is transmitted literally with RAW and forged ownership is reject
 test("Cold guard rejects warm stages, insufficient follow-ups, missing/current/future due dates", async (t) => {
   const h = await harness(t);
   for (const [stage, count, due] of [
-    ["Interested", 2, "2026-10-14"], ["Engaged", 2, "2026-10-14"], ["Booked", 2, "2026-10-14"],
+    ["Interested", 2, "2026-10-14"], ["Engaged", 2, "2026-10-14"], ["Booked", 2, "2026-10-14"], ["Completed", 2, "2026-10-14"],
     ["Contacted", 1, "2026-10-14"], ["Contacted", 2, ""],
     ["Contacted", 2, "2026-10-15"], ["Contacted", 2, "2026-10-16"],
   ]) {
@@ -312,7 +312,7 @@ test("Cold status Path C: warm stages reject Cold even with explicit rejection",
   const h = await harness(t);
   const row = h.sheets.tables.Schools[1];
 
-  for (const warmStage of ["Interested", "Engaged", "Booked"]) {
+  for (const warmStage of ["Interested", "Engaged", "Booked", "Completed"]) {
     row[C.stage] = warmStage;
     row[C.count] = 0;
     row[C.due] = "";

@@ -152,6 +152,18 @@ export function editableRecord(row: Row) {
   };
 }
 
+export const VALID_STAGES = [
+  "Not Contacted",
+  "Contacted",
+  "Interested",
+  "Engaged",
+  "Booked",
+  "Completed",
+  "Cold",
+] as const;
+
+export type Stage = (typeof VALID_STAGES)[number];
+
 export const EXPLICIT_REJECTION_REASONS = [
   "Not Interested",
   "Explicit Rejection / Not Interested",
@@ -174,7 +186,7 @@ export interface ColdEvaluationParams {
 }
 
 export function evaluateColdEligibility(params: ColdEvaluationParams): { allowed: boolean; reason: string } {
-  const PROTECTED_STAGES = new Set(["Interested", "Engaged", "Booked"]);
+  const PROTECTED_STAGES = new Set(["Interested", "Engaged", "Booked", "Completed"]);
 
   if (PROTECTED_STAGES.has(params.currentStage)) {
     return {

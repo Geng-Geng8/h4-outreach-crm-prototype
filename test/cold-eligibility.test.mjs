@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { evaluateColdEligibility, EXPLICIT_REJECTION_REASONS } from "../src/schema.ts";
 
 test("evaluateColdEligibility: rejects protected warm stages regardless of other params", () => {
-  for (const stage of ["Interested", "Engaged", "Booked"]) {
+  for (const stage of ["Interested", "Engaged", "Booked", "Completed"]) {
     // Explicit rejection attempt
     const res1 = evaluateColdEligibility({
       currentStage: stage,
