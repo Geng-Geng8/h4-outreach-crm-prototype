@@ -535,6 +535,7 @@ export class SheetCoordinator extends DurableObject<Env> {
         const columns: Record<string, number> = {
           notes: C.notes, contactName: C.contactName, contactRole: C.contactRole,
           email: C.email, phone: C.phone, priority: C.priority, outreachGoal: C.goal,
+          goal: C.goal,
           followUpDue: C.due, nextAction: C.action, stage: C.stage, coldReason: C.coldReason,
         };
         onlyKeys(patch, [...Object.keys(columns), "isExplicitRejection"]);
@@ -578,7 +579,7 @@ export class SheetCoordinator extends DurableObject<Env> {
           if (isExplicitCold && (key === "followUpDue" || key === "nextAction")) {
             continue;
           }
-          row[columns[key]!] = key === "followUpDue" ? date(value) : text(value);
+          row[columns[key]!] = key === "followUpDue" ? date(value) : (key === "outreachGoal" || key === "goal") ? text(value, 300) : text(value);
         }
 
         // Enforce one source of truth: synchronize Contacts when contact fields are patched

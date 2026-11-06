@@ -977,6 +977,48 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       close() { this.open = false; },
       focus() { this.focused = true; },
       children,
+      get options() { return children; },
+      get firstChild() { return children[0] ?? null; },
+      get firstElementChild() { return children[0] ?? null; },
+      prepend: function (...args) {
+        for (const child of args) {
+          if (child && typeof child === "object") child.parentElement = this;
+        }
+        children.unshift(...args);
+      },
+      insertBefore: function (newChild, refChild) {
+        if (newChild && typeof newChild === "object") newChild.parentElement = this;
+        const index = children.indexOf(refChild);
+        if (index === -1) {
+          children.push(newChild);
+        } else {
+          children.splice(index, 0, newChild);
+        }
+        return newChild;
+      },
+      removeChild: function (child) {
+        const index = children.indexOf(child);
+        if (index !== -1) {
+          children.splice(index, 1);
+          child.parentElement = null;
+        }
+        return child;
+      },
+      remove: function () {
+        if (this.parentElement) {
+          this.parentElement.removeChild(this);
+        }
+      },
+      querySelector: function (sel) {
+        if (sel.startsWith('option[data-legacy="true"]')) {
+          return children.find((c) => c.getAttribute?.("data-legacy") === "true" || c.dataset?.legacy === "true") || null;
+        }
+        if (sel.startsWith('option[value=')) {
+          const val = sel.match(/option\[value="([^"]*)"\]/)?.[1] ?? "";
+          return children.find((c) => c.value === val) || null;
+        }
+        return null;
+      },
       replaceChildren: function (...args) {
         children.length = 0;
         this.append(...args);
@@ -1033,7 +1075,12 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
         });
       });
     },
-    getElementById: (id) => missingIds.includes(id) ? null : getEl(id),
+    getElementById: (id) => {
+      if (missingIds.includes(id)) return null;
+      if (id === "edit-outreachGoal" && elements.has("edit-goal")) return getEl("edit-goal");
+      if (id === "edit-goal" && elements.has("edit-outreachGoal")) return getEl("edit-outreachGoal");
+      return getEl(id);
+    },
     createElement: (tag) => {
       const el = makeElement("", tag);
       createdElements.add(el);
@@ -3921,4 +3968,117 @@ test("pipeline: Completed stage displays badge, defaults nextAction, appears in 
   editStageSelect.value = "Completed";
   editStageSelect.dispatchEvent(new Event("change"));
   assert.equal(getEl("edit-nextAction").value, "Send invoice / feedback survey");
+});
+
+test("outreach goal: standardized 13-tag dropdown with legacy tag injection and official tag selection", async (t) => {
+  // 1. Template validation
+  const html = await readFile("public/index.html", "utf8");
+  assert.match(html, /<select id="edit-goal" class="form-select">/);
+  assert.match(html, /<option value="">Select a program tag\.\.\.<\/option>/);
+  const expectedTags = [
+    "Board Partnership", "SHSM", "Dance Workshops", "Co-op Workshops",
+    "Volunteer Workshops", "After-School Program", "Keynotes", "Leadership Programs",
+    "B Thee Rise", "Cypher Program", "Competitive Arts", "Filipino Projects", "Misc",
+  ];
+  for (const tag of expectedTags) {
+    assert.match(html, new RegExp(`<option value="${tag}">${tag}</option>`));
+  }
+
+  // 2. Official tag: opens with official tag, no legacy injected, changes mark dirty, saves Column H
+  let savedOfficialPatch = null;
+  const officialRecord = { ...reloadRecord, outreachGoal: "Dance Workshops" };
+  const hOfficial = setupEnv({
+    fetchHandler: (url, init) => {
+      if (url.includes("/api/config")) return reloadFetch(url);
+      if (url.includes("/api/schools/detail")) return Promise.resolve(Response.json({ ok: true, record: officialRecord }));
+      if (url.includes("/api/schools/update")) {
+        const body = JSON.parse(init.body);
+        savedOfficialPatch = body.patch;
+        return Promise.resolve(Response.json({ ok: true, code: "SUCCESS", requestId: body.requestId, record: { ...officialRecord, ...body.patch, lastRequestId: body.requestId } }));
+      }
+      return Promise.resolve(Response.json(reloadPayload()));
+    },
+  });
+  t.after(hOfficial.cleanup);
+  await hOfficial.signIn("alex@example.test");
+  await hOfficial.context.openSchoolEditor(officialRecord.recordId, false, "details");
+
+  const goalSelect = hOfficial.getEl("edit-goal");
+  assert.equal(goalSelect.value, "Dance Workshops");
+  const hasLegacy = (goalSelect.children || []).some((c) => c.getAttribute?.("data-legacy") === "true" || (c.textContent && c.textContent.includes("(Legacy)")));
+  assert.equal(hasLegacy, false, "Official tag must not inject a legacy option");
+
+  // Changing to another official tag triggers dirty state and enables save
+  goalSelect.value = "SHSM";
+  goalSelect.dispatchEvent({ target: goalSelect, type: "change", bubbles: true });
+  assert.equal(hOfficial.context.isDirty(), true);
+  assert.equal(hOfficial.getEl("editor-save").disabled, false);
+
+  await hOfficial.context.saveSchoolEdits({ preventDefault() {} });
+  assert.ok(savedOfficialPatch);
+  assert.equal(savedOfficialPatch.outreachGoal, "SHSM");
+
+  // 3. Legacy tag: dynamically injects temporary option at top, visible and selectable
+  let savedLegacyPatch = null;
+  const legacyRecord = { ...reloadRecord, outreachGoal: "Book Workshop date" };
+  const hLegacy = setupEnv({
+    fetchHandler: (url, init) => {
+      if (url.includes("/api/config")) return reloadFetch(url);
+      if (url.includes("/api/schools/detail")) return Promise.resolve(Response.json({ ok: true, record: legacyRecord }));
+      if (url.includes("/api/schools/update")) {
+        const body = JSON.parse(init.body);
+        savedLegacyPatch = body.patch;
+        return Promise.resolve(Response.json({ ok: true, code: "SUCCESS", requestId: body.requestId, record: { ...legacyRecord, ...body.patch, lastRequestId: body.requestId } }));
+      }
+      return Promise.resolve(Response.json(reloadPayload()));
+    },
+  });
+  t.after(hLegacy.cleanup);
+  await hLegacy.signIn("alex@example.test");
+  await hLegacy.context.openSchoolEditor(legacyRecord.recordId, false, "details");
+
+  const legacyGoalSelect = hLegacy.getEl("edit-goal");
+  assert.equal(legacyGoalSelect.value, "Book Workshop date");
+  const topChild = legacyGoalSelect.children[0];
+  assert.equal(topChild.value, "Book Workshop date");
+  assert.equal(topChild.textContent, "Book Workshop date (Legacy)");
+  assert.equal(topChild.getAttribute("data-legacy"), "true");
+
+  // Selecting an official tag marks dirty and saves the new official tag
+  legacyGoalSelect.value = "Filipino Projects";
+  legacyGoalSelect.dispatchEvent({ target: legacyGoalSelect, type: "change", bubbles: true });
+  assert.equal(hLegacy.context.isDirty(), true);
+
+  await hLegacy.context.saveSchoolEdits({ preventDefault() {} });
+  assert.ok(savedLegacyPatch);
+  assert.equal(savedLegacyPatch.outreachGoal, "Filipino Projects");
+
+  // 4. Temporary legacy option cleanup: opening a school with empty goal or official tag clears legacy option
+  const emptyRecord = { ...reloadRecord, recordId: "empty-goal-school", outreachGoal: "" };
+  const hCleanup = setupEnv({
+    fetchHandler: (url) => {
+      if (url.includes("/api/config")) return reloadFetch(url);
+      if (url.includes("/api/schools/detail")) {
+        const id = new URL(url, "http://localhost").searchParams.get("recordId");
+        if (id === "legacy-school") return Promise.resolve(Response.json({ ok: true, record: { ...reloadRecord, recordId: id, outreachGoal: "Custom legacy goal" } }));
+        return Promise.resolve(Response.json({ ok: true, record: emptyRecord }));
+      }
+      return Promise.resolve(Response.json(reloadPayload()));
+    },
+  });
+  t.after(hCleanup.cleanup);
+  await hCleanup.signIn("alex@example.test");
+
+  // Open legacy school first
+  await hCleanup.context.openSchoolEditor("legacy-school", false, "details");
+  assert.equal(hCleanup.getEl("edit-goal").value, "Custom legacy goal");
+  assert.equal(hCleanup.getEl("edit-goal").children[0].textContent, "Custom legacy goal (Legacy)");
+
+  // Close and open empty-goal school: legacy option must be removed
+  hCleanup.context.closeSchoolEditor();
+  await hCleanup.context.openSchoolEditor("empty-goal-school", false, "details");
+  const currentSelect = hCleanup.getEl("edit-goal");
+  assert.equal(currentSelect.value, "");
+  const remainingLegacy = (currentSelect.children || []).some((c) => c.getAttribute?.("data-legacy") === "true");
+  assert.equal(remainingLegacy, false, "Legacy option must be removed when opening another school");
 });

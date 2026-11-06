@@ -147,10 +147,28 @@ export function editableRecord(row: Row) {
     schoolBoard: row[C.board], assignedTo: row[C.assigned],
     contactName: row[C.contactName] ?? "", contactRole: row[C.contactRole] ?? "",
     email: row[C.email] ?? "", phone: row[C.phone] ?? "", priority: row[C.priority] ?? "",
-    outreachGoal: row[C.goal] ?? "", nextAction: row[C.action] ?? "",
+    outreachGoal: row[C.goal] ?? "", goal: row[C.goal] ?? "", nextAction: row[C.action] ?? "",
     coldReason: row[C.coldReason] ?? "",
   };
 }
+
+export const PROGRAM_TAGS = [
+  "Board Partnership",
+  "SHSM",
+  "Dance Workshops",
+  "Co-op Workshops",
+  "Volunteer Workshops",
+  "After-School Program",
+  "Keynotes",
+  "Leadership Programs",
+  "B Thee Rise",
+  "Cypher Program",
+  "Competitive Arts",
+  "Filipino Projects",
+  "Misc",
+] as const;
+
+export type ProgramTag = (typeof PROGRAM_TAGS)[number];
 
 export const VALID_STAGES = [
   "Not Contacted",

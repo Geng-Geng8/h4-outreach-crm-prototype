@@ -1,4 +1,11 @@
-const el = (id) => document.getElementById(id);
+const el = (id) => {
+  const node = document.getElementById(id);
+  if (!node && id === "edit-outreachGoal") return document.getElementById("edit-goal");
+  if (!node && id === "edit-goal") return document.getElementById("edit-outreachGoal");
+  if (!node && id === "field-goal") return document.getElementById("field-outreachGoal");
+  if (!node && id === "field-outreachGoal") return document.getElementById("field-goal");
+  return node;
+};
 // Pages supplies a public API origin; the local preview stays on the same origin.
 const apiOrigin = document.querySelector?.('meta[name="h4-api-origin"]')?.content?.trim().replace(/\/$/, "") ?? "";
 let connectionAttempt = 0, connectionProbe;
@@ -92,6 +99,83 @@ const EXPLICIT_REJECTION_REASONS = [
 const DEFAULT_DECLINE_REASON = "Explicit Rejection / Not Interested";
 const UNRESPONSIVE_COLD_REASON = "Unresponsive (2+ follow-ups completed with no reply)";
 const detailOnlyFields = ["contactName", "contactRole", "email", "phone", "priority", "outreachGoal", "notes"];
+const PROGRAM_TAGS = [
+  "Board Partnership",
+  "SHSM",
+  "Dance Workshops",
+  "Co-op Workshops",
+  "Volunteer Workshops",
+  "After-School Program",
+  "Keynotes",
+  "Leadership Programs",
+  "B Thee Rise",
+  "Cypher Program",
+  "Competitive Arts",
+  "Filipino Projects",
+  "Misc",
+];
+if (typeof window !== "undefined") {
+  window.PROGRAM_TAGS = PROGRAM_TAGS;
+}
+
+function populateGoalDropdown(currentGoal = "") {
+  const select = el("edit-goal");
+  if (!select) return;
+
+  // Ensure default placeholder and 13 official tags exist
+  const existingOptions = select.options ? Array.from(select.options) : (select.children ? Array.from(select.children) : []);
+  if (existingOptions.length === 0) {
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a program tag...";
+    select.append(placeholder);
+    for (const tag of PROGRAM_TAGS) {
+      const opt = document.createElement("option");
+      opt.value = tag;
+      opt.textContent = tag;
+      select.append(opt);
+    }
+  }
+
+  // Remove any previously injected legacy option
+  const legacyOption = select.querySelector
+    ? select.querySelector('option[data-legacy="true"]')
+    : (select.children || []).find((c) => c.getAttribute?.("data-legacy") === "true" || c.dataset?.legacy === "true");
+  if (legacyOption) {
+    if (typeof legacyOption.remove === "function") {
+      legacyOption.remove();
+    } else if (typeof select.removeChild === "function") {
+      select.removeChild(legacyOption);
+    } else if (Array.isArray(select.children)) {
+      const idx = select.children.indexOf(legacyOption);
+      if (idx !== -1) select.children.splice(idx, 1);
+    }
+  }
+
+  const val = String(currentGoal ?? "").trim();
+  // Legacy Value Handler: If currentGoal exists and is non-empty, but NOT one of the 13 official tags
+  if (val && !PROGRAM_TAGS.includes(val)) {
+    const opt = document.createElement("option");
+    opt.value = val;
+    opt.textContent = `${val} (Legacy)`;
+    opt.setAttribute("data-legacy", "true");
+    if (opt.dataset) opt.dataset.legacy = "true";
+
+    // Insert at top of select list
+    if (typeof select.prepend === "function") {
+      select.prepend(opt);
+    } else if (select.firstChild && typeof select.insertBefore === "function") {
+      select.insertBefore(opt, select.firstChild);
+    } else if (Array.isArray(select.children)) {
+      select.children.unshift(opt);
+      opt.parentElement = select;
+    } else {
+      select.append(opt);
+    }
+  }
+
+  select.value = val;
+}
 let editing = null, editorSeq = 0, editorRead;
 let saveToastTimer;
 const editDrafts = new Map();
@@ -189,7 +273,11 @@ function forgetSession() {
   editorSeq++; editorRead?.abort(); editing = null; editDrafts.clear();
   clearTimeout(saveToastTimer); el("save-toast").hidden = true;
   el("school-editor").close?.();
-  for (const field of editFields) el(`edit-${field}`).value = "";
+  for (const field of editFields) {
+    const input = el(`edit-${field}`);
+    if (input) input.value = "";
+  }
+  populateGoalDropdown("");
   for (const field of outreachFields) el(`log-${field}`).value = "";
   updateSuggestionStates?.();
   el("editor-title").textContent = "Edit school"; el("editor-meta").textContent = ""; el("editor-status").textContent = "";
@@ -788,6 +876,9 @@ function hasFormChanges(edit = editing) {
   }
 
   const values = editorValues();
+  const goalVal = el("edit-goal")?.value ?? el("edit-outreachGoal")?.value ?? values.outreachGoal ?? "";
+  const origGoal = String(edit.original.outreachGoal ?? edit.original.goal ?? "");
+  if (goalVal !== origGoal) return true;
   return editFields.some((key) => values[key] !== String(edit.original[key] ?? ""));
 }
 
@@ -852,7 +943,16 @@ function returnToActivity(force = false) {
 }
 
 function editorValues() {
-  const vals = Object.fromEntries(editFields.map((field) => [field, el(`edit-${field}`)?.value ?? ""]));
+  const vals = Object.fromEntries(editFields.map((field) => {
+    let input = el(`edit-${field}`);
+    if (!input && (field === "outreachGoal" || field === "goal")) {
+      input = el("edit-goal") || el("edit-outreachGoal");
+    }
+    return [field, input?.value ?? ""];
+  }));
+  const goalVal = el("edit-goal")?.value ?? el("edit-outreachGoal")?.value ?? vals.outreachGoal ?? "";
+  vals.outreachGoal = goalVal;
+  vals.goal = goalVal;
   if (vals.stage !== "Cold" && !editing?.original?.coldReason) {
     vals.coldReason = "";
   }
@@ -1683,7 +1783,11 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
   el("editor-reload").textContent = mode === "activity" ? "Reload school values" : "Reload saved values";
   el("editor-close").disabled = false; el("editor-reload").disabled = true;
   if (typeof closeContactForm === "function") closeContactForm(true);
-  for (const field of editFields) el(`edit-${field}`).value = "";
+  for (const field of editFields) {
+    const input = el(`edit-${field}`);
+    if (input) input.value = "";
+  }
+  populateGoalDropdown("");
   editorInputs(true);
   renderSummarySuggestions();
   updateSuggestionStates();
@@ -1705,7 +1809,26 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     editing.original = draft?.original ?? data.record; editing.pending = draft?.pending ?? null;
     editing.contacts = data.contacts || [];
     try { renderSchoolContacts(editing.contacts); } catch {}
-    for (const field of editFields) el(`edit-${field}`).value = draft?.values[field] ?? String(data.record[field] ?? "");
+    for (const field of editFields) {
+      const input = el(`edit-${field}`);
+      if (input) input.value = draft?.values[field] ?? String(data.record[field] ?? "");
+    }
+    const goalVal = draft?.values?.outreachGoal ?? draft?.values?.goal ?? data.record.outreachGoal ?? data.record.goal ?? "";
+    populateGoalDropdown(goalVal);
+    if (data.record) {
+      if (data.record.outreachGoal !== undefined && data.record.goal === undefined) data.record.goal = data.record.outreachGoal;
+      if (data.record.goal !== undefined && data.record.outreachGoal === undefined) data.record.outreachGoal = data.record.goal;
+    }
+    if (editing.original) {
+      if (editing.original.outreachGoal !== undefined && editing.original.goal === undefined) editing.original.goal = editing.original.outreachGoal;
+      if (editing.original.goal !== undefined && editing.original.outreachGoal === undefined) editing.original.outreachGoal = editing.original.goal;
+    }
+    const goalEl = el("edit-goal");
+    if (goalEl && !goalEl._dirtyBound) {
+      goalEl._dirtyBound = true;
+      goalEl.addEventListener("change", () => updateDirtyState());
+      goalEl.addEventListener("input", () => updateDirtyState());
+    }
     if (mode === "activity") {
       const activity = retainedActivity ?? draft?.activity;
       if (activity) for (const field of outreachFields) el(`log-${field}`).value = activity[field];
@@ -1933,6 +2056,16 @@ async function saveSchoolEdits(event) {
       }
 
       const patch = Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== String(edit.original[key] ?? "")));
+      const goalEl = el("edit-goal") || el("edit-outreachGoal");
+      const selectedGoal = goalEl?.value ?? values.outreachGoal ?? "";
+      const origGoal = String(edit.original.outreachGoal ?? edit.original.goal ?? "");
+      if (selectedGoal !== origGoal) {
+        patch.outreachGoal = selectedGoal;
+        patch.goal = selectedGoal;
+      } else {
+        delete patch.outreachGoal;
+        delete patch.goal;
+      }
       if (values.stage === "Cold") {
         const coldReasonVal = values.coldReason || el("edit-coldReason")?.value || DEFAULT_DECLINE_REASON;
         if (!patch.coldReason) patch.coldReason = coldReasonVal;
@@ -3518,6 +3651,12 @@ el("editor-form")?.addEventListener("input", () => {
   updateDirtyState();
 });
 el("editor-form")?.addEventListener("change", () => {
+  updateDirtyState();
+});
+el("edit-goal")?.addEventListener("change", () => {
+  updateDirtyState();
+});
+el("edit-goal")?.addEventListener("input", () => {
   updateDirtyState();
 });
 el("editor-unclaim-btn")?.addEventListener("click", () => {

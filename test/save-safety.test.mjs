@@ -396,3 +396,45 @@ test("a burst of ten competing claims yields one saved school and one audit entr
   assert.equal(logs(h).length, 1); assert.equal(h.sheets.attempts, 1);
   assert.equal(h.sheets.maxInFlight, 1);
 });
+
+test("write validation permits official program tags and legacy tags to Column H while preserving formulas Q/R", async (t) => {
+  const { PROGRAM_TAGS } = await import("../src/schema.ts");
+  assert.equal(PROGRAM_TAGS.length, 13);
+  assert.ok(PROGRAM_TAGS.includes("Board Partnership"));
+  assert.ok(PROGRAM_TAGS.includes("SHSM"));
+  assert.ok(PROGRAM_TAGS.includes("Dance Workshops"));
+  assert.ok(PROGRAM_TAGS.includes("Filipino Projects"));
+
+  const h = await harness(t);
+  const formulas = h.sheets.tables.Schools[1].slice(16, 18);
+
+  // 1. Update with official tag
+  const req1 = {
+    requestId: randomUUID(), recordId: RECORD, expectedRequestId: VERSION,
+    patch: { outreachGoal: "Dance Workshops" },
+  };
+  const res1 = await h.post(UPDATE, req1);
+  assert.equal(res1.status, 200);
+  assert.equal(h.sheets.tables.Schools[1][C.goal], "Dance Workshops");
+  assert.deepEqual(h.sheets.tables.Schools[1].slice(16, 18), formulas, "Q & R formulas must be preserved");
+
+  // 2. Update with legacy tag
+  const req2 = {
+    requestId: randomUUID(), recordId: RECORD, expectedRequestId: req1.requestId,
+    patch: { outreachGoal: "Book Workshop date" },
+  };
+  const res2 = await h.post(UPDATE, req2);
+  assert.equal(res2.status, 200);
+  assert.equal(h.sheets.tables.Schools[1][C.goal], "Book Workshop date");
+  assert.deepEqual(h.sheets.tables.Schools[1].slice(16, 18), formulas, "Q & R formulas must be preserved");
+
+  // 3. Update using goal alias
+  const req3 = {
+    requestId: randomUUID(), recordId: RECORD, expectedRequestId: req2.requestId,
+    patch: { goal: "Filipino Projects" },
+  };
+  const res3 = await h.post(UPDATE, req3);
+  assert.equal(res3.status, 200);
+  assert.equal(h.sheets.tables.Schools[1][C.goal], "Filipino Projects");
+  assert.deepEqual(h.sheets.tables.Schools[1].slice(16, 18), formulas, "Q & R formulas must be preserved");
+});
