@@ -1503,6 +1503,88 @@
   flex: 1;
 }
 
+/* Program Track Chips & Controls in Modal */
+.program-tracks-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.program-chips-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 30px;
+  align-items: center;
+}
+.program-chips-list:empty::before {
+  content: "No program tracks assigned yet.";
+  font-size: 12.5px;
+  font-style: italic;
+  color: #738a7c;
+}
+.program-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 10px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #3730a3;
+}
+.program-chip.is-completed {
+  background: #f3e8ff;
+  border-color: #d8b4fe;
+  color: #581c87;
+}
+.program-chip-toggle {
+  background: transparent;
+  border: 0;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 12px;
+}
+.program-chip-toggle:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.program-chip-remove {
+  background: transparent;
+  border: 0;
+  padding: 2px 5px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.75;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+.program-chip-remove:hover:not(:disabled) {
+  opacity: 1;
+  color: #b3261e;
+  background: #fee2e2;
+}
+.program-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.program-add-row #add-program-select {
+  flex: 2 1 180px;
+}
+.program-add-row #add-program-status {
+  flex: 1 1 130px;
+}
+
 /* Danger Button & Unclaim Confirmation Panel */
 .danger-button {
   color: #a8201a !important;

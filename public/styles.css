@@ -700,6 +700,26 @@ footer span span {
   display: inline-flex;
   align-items: center;
 }
+.badge-program {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 3px 9px;
+  margin-left: 6px;
+  margin-top: 4px;
+  border-radius: var(--radius-full);
+  background: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+  line-height: 1.35;
+}
+.badge-program.badge-program-completed {
+  background: #f3e8ff;
+  color: #581c87;
+  border-color: #d8b4fe;
+}
 
 /* Badges for Directory & Demo */
 .badge-available {

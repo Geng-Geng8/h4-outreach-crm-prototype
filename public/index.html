@@ -357,24 +357,34 @@
             <label id="field-phone">Phone<input id="edit-phone" type="tel" maxlength="100" autocomplete="off"></label>
           </div>
           <label id="field-priority">Priority<select id="edit-priority"><option value="">Not set</option><option>High</option><option>Medium</option><option>Low</option></select></label>
-          <label id="field-outreachGoal">Outreach goal
-            <select id="edit-goal" class="form-select">
-              <option value="">Select a program tag...</option>
-              <option value="Board Partnership">Board Partnership</option>
-              <option value="SHSM">SHSM</option>
-              <option value="Dance Workshops">Dance Workshops</option>
-              <option value="Co-op Workshops">Co-op Workshops</option>
-              <option value="Volunteer Workshops">Volunteer Workshops</option>
-              <option value="After-School Program">After-School Program</option>
-              <option value="Keynotes">Keynotes</option>
-              <option value="Leadership Programs">Leadership Programs</option>
-              <option value="B Thee Rise">B Thee Rise</option>
-              <option value="Cypher Program">Cypher Program</option>
-              <option value="Competitive Arts">Competitive Arts</option>
-              <option value="Filipino Projects">Filipino Projects</option>
-              <option value="Misc">Misc</option>
-            </select>
-          </label>
+          <div id="field-outreachGoal" class="program-tracks-field editor-wide">
+            <span class="field-label-text">Outreach goal / Program tracks</span>
+            <input type="hidden" id="edit-goal">
+            <div id="program-chips-list" class="program-chips-list" role="list"></div>
+            <div class="program-add-row">
+              <select id="add-program-select" class="form-select" aria-label="Select a program">
+                <option value="">Select a program...</option>
+                <option value="Board Partnership">Board Partnership</option>
+                <option value="SHSM">SHSM</option>
+                <option value="Dance Workshops">Dance Workshops</option>
+                <option value="Co-op Workshops">Co-op Workshops</option>
+                <option value="Volunteer Workshops">Volunteer Workshops</option>
+                <option value="After-School Program">After-School Program</option>
+                <option value="Keynotes">Keynotes</option>
+                <option value="Leadership Programs">Leadership Programs</option>
+                <option value="B Thee Rise">B Thee Rise</option>
+                <option value="Cypher Program">Cypher Program</option>
+                <option value="Competitive Arts">Competitive Arts</option>
+                <option value="Filipino Projects">Filipino Projects</option>
+                <option value="Misc">Misc</option>
+              </select>
+              <select id="add-program-status" class="form-select" aria-label="Program status">
+                <option value="Active">Active Pitch</option>
+                <option value="Completed">Completed ✓</option>
+              </select>
+              <button type="button" id="add-program-btn" class="button secondary compact-button">+ Add Program</button>
+            </div>
+          </div>
           <label id="field-notes" class="editor-wide">Notes / reply<textarea id="edit-notes" maxlength="4000" rows="5"></textarea></label>
 
           <section id="activity-step-5" class="editor-wide step-five-container">

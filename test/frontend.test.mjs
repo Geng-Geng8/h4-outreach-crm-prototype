@@ -3970,11 +3970,17 @@ test("pipeline: Completed stage displays badge, defaults nextAction, appears in 
   assert.equal(getEl("edit-nextAction").value, "Send invoice / feedback survey");
 });
 
-test("outreach goal: standardized 13-tag dropdown with legacy tag injection and official tag selection", async (t) => {
+test("outreach goal: multi-program track chips with active/completed states, auto-commit, badges, and legacy chip support", async (t) => {
   // 1. Template validation
   const html = await readFile("public/index.html", "utf8");
-  assert.match(html, /<select id="edit-goal" class="form-select">/);
-  assert.match(html, /<option value="">Select a program tag\.\.\.<\/option>/);
+  assert.match(html, /<input type="hidden" id="edit-goal">/);
+  assert.match(html, /id="program-chips-list"/);
+  assert.match(html, /<select id="add-program-select"/);
+  assert.match(html, /<option value="">Select a program\.\.\.<\/option>/);
+  assert.match(html, /<select id="add-program-status"/);
+  assert.match(html, /<option value="Active">Active Pitch<\/option>/);
+  assert.match(html, /<option value="Completed">Completed ✓<\/option>/);
+  assert.match(html, /id="add-program-btn"/);
   const expectedTags = [
     "Board Partnership", "SHSM", "Dance Workshops", "Co-op Workshops",
     "Volunteer Workshops", "After-School Program", "Keynotes", "Leadership Programs",
@@ -3984,41 +3990,151 @@ test("outreach goal: standardized 13-tag dropdown with legacy tag injection and 
     assert.match(html, new RegExp(`<option value="${tag}">${tag}</option>`));
   }
 
-  // 2. Official tag: opens with official tag, no legacy injected, changes mark dirty, saves Column H
-  let savedOfficialPatch = null;
-  const officialRecord = { ...reloadRecord, outreachGoal: "Dance Workshops" };
-  const hOfficial = setupEnv({
+  // 2. Adding multiple programs ("Dance Workshops (Completed)" and "SHSM"), toggling status, and serializing to Column H
+  let savedMultiPatch = null;
+  const emptyGoalRecord = { ...reloadRecord, outreachGoal: "" };
+  const hMulti = setupEnv({
     fetchHandler: (url, init) => {
       if (url.includes("/api/config")) return reloadFetch(url);
-      if (url.includes("/api/schools/detail")) return Promise.resolve(Response.json({ ok: true, record: officialRecord }));
+      if (url.includes("/api/schools/detail")) return Promise.resolve(Response.json({ ok: true, record: emptyGoalRecord }));
       if (url.includes("/api/schools/update")) {
         const body = JSON.parse(init.body);
-        savedOfficialPatch = body.patch;
-        return Promise.resolve(Response.json({ ok: true, code: "SUCCESS", requestId: body.requestId, record: { ...officialRecord, ...body.patch, lastRequestId: body.requestId } }));
+        savedMultiPatch = body.patch;
+        return Promise.resolve(Response.json({ ok: true, code: "SUCCESS", requestId: body.requestId, record: { ...emptyGoalRecord, ...body.patch, lastRequestId: body.requestId } }));
       }
       return Promise.resolve(Response.json(reloadPayload()));
     },
   });
-  t.after(hOfficial.cleanup);
-  await hOfficial.signIn("alex@example.test");
-  await hOfficial.context.openSchoolEditor(officialRecord.recordId, false, "details");
+  t.after(hMulti.cleanup);
+  await hMulti.signIn("alex@example.test");
+  await hMulti.context.openSchoolEditor(emptyGoalRecord.recordId, false, "details");
 
-  const goalSelect = hOfficial.getEl("edit-goal");
-  assert.equal(goalSelect.value, "Dance Workshops");
-  const hasLegacy = (goalSelect.children || []).some((c) => c.getAttribute?.("data-legacy") === "true" || (c.textContent && c.textContent.includes("(Legacy)")));
-  assert.equal(hasLegacy, false, "Official tag must not inject a legacy option");
+  const goalInput = hMulti.getEl("edit-goal");
+  const chipsList = hMulti.getEl("program-chips-list");
+  const addSelect = hMulti.getEl("add-program-select");
+  const statusSelect = hMulti.getEl("add-program-status");
+  const addBtn = hMulti.getEl("add-program-btn");
 
-  // Changing to another official tag triggers dirty state and enables save
-  goalSelect.value = "SHSM";
-  goalSelect.dispatchEvent({ target: goalSelect, type: "change", bubbles: true });
-  assert.equal(hOfficial.context.isDirty(), true);
-  assert.equal(hOfficial.getEl("editor-save").disabled, false);
+  assert.equal(goalInput.value, "");
+  assert.equal(chipsList.children.length, 0);
 
-  await hOfficial.context.saveSchoolEdits({ preventDefault() {} });
-  assert.ok(savedOfficialPatch);
-  assert.equal(savedOfficialPatch.outreachGoal, "SHSM");
+  // Add "Dance Workshops" as Completed
+  addSelect.value = "Dance Workshops";
+  statusSelect.value = "Completed";
+  addBtn.click();
 
-  // 3. Legacy tag: dynamically injects temporary option at top, visible and selectable
+  assert.equal(goalInput.value, "Dance Workshops (Completed)");
+  assert.equal(chipsList.children.length, 1);
+  assert.equal(chipsList.children[0].classList.contains("is-completed"), true);
+  assert.equal(hMulti.context.isDirty(), true);
+
+  // Add "SHSM" as Active
+  addSelect.value = "SHSM";
+  statusSelect.value = "Active";
+  addBtn.click();
+
+  assert.equal(goalInput.value, "Dance Workshops (Completed), SHSM");
+  assert.equal(chipsList.children.length, 2);
+  assert.equal(chipsList.children[1].classList.contains("is-active"), true);
+
+  // Toggle SHSM chip to Completed and back to Active
+  const shsmToggleBtn = chipsList.children[1].children[0];
+  shsmToggleBtn.click();
+  assert.equal(goalInput.value, "Dance Workshops (Completed), SHSM (Completed)");
+  assert.equal(chipsList.children[1].classList.contains("is-completed"), true);
+
+  // Toggle back to Active
+  chipsList.children[1].children[0].click();
+  assert.equal(goalInput.value, "Dance Workshops (Completed), SHSM");
+  assert.equal(chipsList.children[1].classList.contains("is-active"), true);
+
+  // Save and verify Column H serialization
+  await hMulti.context.saveSchoolEdits({ preventDefault() {} });
+  assert.ok(savedMultiPatch);
+  assert.equal(savedMultiPatch.outreachGoal, "Dance Workshops (Completed), SHSM");
+
+  // 3. Auto-commit on direct Save: selecting in #add-program-select marks dirty and auto-commits on Save
+  let savedAutoPatch = null;
+  const existingRecord = { ...reloadRecord, outreachGoal: "Dance Workshops (Completed)" };
+  const hAuto = setupEnv({
+    fetchHandler: (url, init) => {
+      if (url.includes("/api/config")) return reloadFetch(url);
+      if (url.includes("/api/schools/detail")) return Promise.resolve(Response.json({ ok: true, record: existingRecord }));
+      if (url.includes("/api/schools/update")) {
+        const body = JSON.parse(init.body);
+        savedAutoPatch = body.patch;
+        return Promise.resolve(Response.json({ ok: true, code: "SUCCESS", requestId: body.requestId, record: { ...existingRecord, ...body.patch, lastRequestId: body.requestId } }));
+      }
+      return Promise.resolve(Response.json(reloadPayload()));
+    },
+  });
+  t.after(hAuto.cleanup);
+  await hAuto.signIn("alex@example.test");
+  await hAuto.context.openSchoolEditor(existingRecord.recordId, false, "details");
+
+  assert.equal(hAuto.context.isDirty(), false);
+  const autoSelect = hAuto.getEl("add-program-select");
+  const autoStatus = hAuto.getEl("add-program-status");
+  autoSelect.value = "SHSM";
+  autoStatus.value = "Active";
+  autoSelect.dispatchEvent({ target: autoSelect, type: "change", bubbles: true });
+
+  // Selecting in dropdown without clicking + Add Program still marks dirty
+  assert.equal(hAuto.context.isDirty(), true);
+  assert.equal(hAuto.getEl("editor-save").disabled, false);
+
+  // Clicking Save directly auto-commits the selected program into Column H
+  await hAuto.context.saveSchoolEdits({ preventDefault() {} });
+  assert.ok(savedAutoPatch);
+  assert.equal(savedAutoPatch.outreachGoal, "Dance Workshops (Completed), SHSM");
+
+  // 4. School cards and dashboard table rows render distinct badges for active vs. completed programs
+  const multiProgramSchool = {
+    ...reloadRecord,
+    schoolName: "Madonna Catholic SS",
+    stage: "Engaged",
+    outreachGoal: "Dance Workshops (Completed), SHSM",
+  };
+  const hBadges = setupEnv({
+    fetchHandler: (url) => {
+      if (url.includes("/api/config")) return reloadFetch(url);
+      if (url.includes("/api/dashboard")) {
+        return Promise.resolve(Response.json({
+          ok: true,
+          today: "2026-04-17",
+          summary: { totalClaimed: 1, contacted: 1, warm: 1, booked: 0, overdueFollowUps: 0, byStage: { Engaged: 1 } },
+          owners: ["Alex Rivera"],
+          schools: [multiProgramSchool],
+        }));
+      }
+      return Promise.resolve(Response.json({
+        ...reloadPayload(),
+        schools: [multiProgramSchool],
+      }));
+    },
+  });
+  t.after(hBadges.cleanup);
+  await hBadges.signIn("alex@example.test");
+
+  const cardBtn = hBadges.getEl("school-list").children[0].children[0];
+  const cardProgramBadges = cardBtn.children.filter((c) => c.classList?.contains("badge-program"));
+  assert.equal(cardProgramBadges.length, 2, "School card should render 2 program badges");
+  assert.equal(cardProgramBadges[0].className, "badge badge-program badge-program-completed");
+  assert.equal(cardProgramBadges[0].textContent, "✓ Dance Workshops");
+  assert.equal(cardProgramBadges[1].className, "badge badge-program");
+  assert.equal(cardProgramBadges[1].textContent, "SHSM");
+
+  await hBadges.context.loadDashboard();
+  const dashRow = hBadges.getEl("dashboard-rows").children[0];
+  const stageCell = dashRow.children[2];
+  const rowProgramBadges = stageCell.children.filter((c) => c.classList?.contains("badge-program"));
+  assert.equal(rowProgramBadges.length, 2, "Dashboard table row should render 2 program badges");
+  assert.equal(rowProgramBadges[0].className, "badge badge-program badge-program-completed");
+  assert.equal(rowProgramBadges[0].textContent, "✓ Dance Workshops");
+  assert.equal(rowProgramBadges[1].className, "badge badge-program");
+  assert.equal(rowProgramBadges[1].textContent, "SHSM");
+
+  // 5. Legacy text strings in outreachGoal render as removable chips without data loss
   let savedLegacyPatch = null;
   const legacyRecord = { ...reloadRecord, outreachGoal: "Book Workshop date" };
   const hLegacy = setupEnv({
@@ -4037,48 +4153,28 @@ test("outreach goal: standardized 13-tag dropdown with legacy tag injection and 
   await hLegacy.signIn("alex@example.test");
   await hLegacy.context.openSchoolEditor(legacyRecord.recordId, false, "details");
 
-  const legacyGoalSelect = hLegacy.getEl("edit-goal");
-  assert.equal(legacyGoalSelect.value, "Book Workshop date");
-  const topChild = legacyGoalSelect.children[0];
-  assert.equal(topChild.value, "Book Workshop date");
-  assert.equal(topChild.textContent, "Book Workshop date (Legacy)");
-  assert.equal(topChild.getAttribute("data-legacy"), "true");
+  const legacyInput = hLegacy.getEl("edit-goal");
+  const legacyChips = hLegacy.getEl("program-chips-list");
+  assert.equal(legacyInput.value, "Book Workshop date");
+  assert.equal(legacyChips.children.length, 1);
+  assert.equal(legacyChips.children[0].getAttribute("data-program"), "Book Workshop date");
+  assert.equal(legacyChips.children[0].children[0].textContent, "Book Workshop date");
 
-  // Selecting an official tag marks dirty and saves the new official tag
-  legacyGoalSelect.value = "Filipino Projects";
-  legacyGoalSelect.dispatchEvent({ target: legacyGoalSelect, type: "change", bubbles: true });
+  // Add an official program alongside the legacy chip (preserving legacy text without data loss)
+  hLegacy.getEl("add-program-select").value = "Cypher Program";
+  hLegacy.getEl("add-program-status").value = "Active";
+  hLegacy.getEl("add-program-btn").click();
+  assert.equal(legacyInput.value, "Book Workshop date, Cypher Program");
+  assert.equal(legacyChips.children.length, 2);
+
+  // Removing the legacy chip via its ✕ button leaves only Cypher Program
+  const legacyRemoveBtn = legacyChips.children[0].children[1];
+  legacyRemoveBtn.click();
+  assert.equal(legacyInput.value, "Cypher Program");
+  assert.equal(legacyChips.children.length, 1);
   assert.equal(hLegacy.context.isDirty(), true);
 
   await hLegacy.context.saveSchoolEdits({ preventDefault() {} });
   assert.ok(savedLegacyPatch);
-  assert.equal(savedLegacyPatch.outreachGoal, "Filipino Projects");
-
-  // 4. Temporary legacy option cleanup: opening a school with empty goal or official tag clears legacy option
-  const emptyRecord = { ...reloadRecord, recordId: "empty-goal-school", outreachGoal: "" };
-  const hCleanup = setupEnv({
-    fetchHandler: (url) => {
-      if (url.includes("/api/config")) return reloadFetch(url);
-      if (url.includes("/api/schools/detail")) {
-        const id = new URL(url, "http://localhost").searchParams.get("recordId");
-        if (id === "legacy-school") return Promise.resolve(Response.json({ ok: true, record: { ...reloadRecord, recordId: id, outreachGoal: "Custom legacy goal" } }));
-        return Promise.resolve(Response.json({ ok: true, record: emptyRecord }));
-      }
-      return Promise.resolve(Response.json(reloadPayload()));
-    },
-  });
-  t.after(hCleanup.cleanup);
-  await hCleanup.signIn("alex@example.test");
-
-  // Open legacy school first
-  await hCleanup.context.openSchoolEditor("legacy-school", false, "details");
-  assert.equal(hCleanup.getEl("edit-goal").value, "Custom legacy goal");
-  assert.equal(hCleanup.getEl("edit-goal").children[0].textContent, "Custom legacy goal (Legacy)");
-
-  // Close and open empty-goal school: legacy option must be removed
-  hCleanup.context.closeSchoolEditor();
-  await hCleanup.context.openSchoolEditor("empty-goal-school", false, "details");
-  const currentSelect = hCleanup.getEl("edit-goal");
-  assert.equal(currentSelect.value, "");
-  const remainingLegacy = (currentSelect.children || []).some((c) => c.getAttribute?.("data-legacy") === "true");
-  assert.equal(remainingLegacy, false, "Legacy option must be removed when opening another school");
+  assert.equal(savedLegacyPatch.outreachGoal, "Cypher Program");
 });

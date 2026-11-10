@@ -118,63 +118,205 @@ if (typeof window !== "undefined") {
   window.PROGRAM_TAGS = PROGRAM_TAGS;
 }
 
-function populateGoalDropdown(currentGoal = "") {
-  const select = el("edit-goal");
-  if (!select) return;
-
-  // Ensure default placeholder and 13 official tags exist
-  const existingOptions = select.options ? Array.from(select.options) : (select.children ? Array.from(select.children) : []);
-  if (existingOptions.length === 0) {
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = "Select a program tag...";
-    select.append(placeholder);
-    for (const tag of PROGRAM_TAGS) {
-      const opt = document.createElement("option");
-      opt.value = tag;
-      opt.textContent = tag;
-      select.append(opt);
+function parseProgramTracks(rawGoal) {
+  const parts = String(rawGoal ?? "")
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const tracks = [];
+  for (const part of parts) {
+    let name = part;
+    let status = "Active";
+    const completedMatch = part.match(/^(.*?)\s*\(Completed(?:\s*✓)?\)$/i);
+    const activeMatch = part.match(/^(.*?)\s*\(Active\)$/i);
+    if (completedMatch) {
+      name = completedMatch[1].trim();
+      status = "Completed";
+    } else if (activeMatch) {
+      name = activeMatch[1].trim();
+      status = "Active";
     }
-  }
-
-  // Remove any previously injected legacy option
-  const legacyOption = select.querySelector
-    ? select.querySelector('option[data-legacy="true"]')
-    : (select.children || []).find((c) => c.getAttribute?.("data-legacy") === "true" || c.dataset?.legacy === "true");
-  if (legacyOption) {
-    if (typeof legacyOption.remove === "function") {
-      legacyOption.remove();
-    } else if (typeof select.removeChild === "function") {
-      select.removeChild(legacyOption);
-    } else if (Array.isArray(select.children)) {
-      const idx = select.children.indexOf(legacyOption);
-      if (idx !== -1) select.children.splice(idx, 1);
-    }
-  }
-
-  const val = String(currentGoal ?? "").trim();
-  // Legacy Value Handler: If currentGoal exists and is non-empty, but NOT one of the 13 official tags
-  if (val && !PROGRAM_TAGS.includes(val)) {
-    const opt = document.createElement("option");
-    opt.value = val;
-    opt.textContent = `${val} (Legacy)`;
-    opt.setAttribute("data-legacy", "true");
-    if (opt.dataset) opt.dataset.legacy = "true";
-
-    // Insert at top of select list
-    if (typeof select.prepend === "function") {
-      select.prepend(opt);
-    } else if (select.firstChild && typeof select.insertBefore === "function") {
-      select.insertBefore(opt, select.firstChild);
-    } else if (Array.isArray(select.children)) {
-      select.children.unshift(opt);
-      opt.parentElement = select;
+    if (!name) continue;
+    const existing = tracks.find((t) => t.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      existing.name = name;
+      existing.status = status;
     } else {
-      select.append(opt);
+      tracks.push({ name, status });
     }
   }
+  return tracks;
+}
 
-  select.value = val;
+function serializeProgramTracks(tracks) {
+  return (tracks || [])
+    .filter((t) => t && t.name && String(t.name).trim())
+    .map((t) => {
+      const cleanName = String(t.name).trim();
+      return t.status === "Completed" ? `${cleanName} (Completed)` : cleanName;
+    })
+    .join(", ");
+}
+
+function createProgramBadges(rawGoal) {
+  const tracks = parseProgramTracks(rawGoal);
+  return tracks.map((track) => {
+    const badge = document.createElement("span");
+    badge.className = track.status === "Completed"
+      ? "badge badge-program badge-program-completed"
+      : "badge badge-program";
+    badge.textContent = track.status === "Completed"
+      ? `✓ ${track.name}`
+      : track.name;
+    return badge;
+  });
+}
+
+function ensureProgramControlsPopulated() {
+  const addSelect = el("add-program-select");
+  if (addSelect) {
+    const existingOptions = addSelect.options
+      ? Array.from(addSelect.options)
+      : (addSelect.children ? Array.from(addSelect.children) : []);
+    if (existingOptions.length === 0) {
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Select a program...";
+      addSelect.append(placeholder);
+      for (const tag of PROGRAM_TAGS) {
+        const opt = document.createElement("option");
+        opt.value = tag;
+        opt.textContent = tag;
+        addSelect.append(opt);
+      }
+    }
+  }
+  const statusSelect = el("add-program-status");
+  if (statusSelect) {
+    const existingStatus = statusSelect.options
+      ? Array.from(statusSelect.options)
+      : (statusSelect.children ? Array.from(statusSelect.children) : []);
+    if (existingStatus.length === 0) {
+      const activeOpt = document.createElement("option");
+      activeOpt.value = "Active";
+      activeOpt.textContent = "Active Pitch";
+      const completedOpt = document.createElement("option");
+      completedOpt.value = "Completed";
+      completedOpt.textContent = "Completed ✓";
+      statusSelect.append(activeOpt, completedOpt);
+      statusSelect.value = "Active";
+    }
+  }
+}
+
+function renderProgramChips() {
+  const container = el("program-chips-list");
+  if (!container) return;
+  if (typeof container.replaceChildren === "function") {
+    container.replaceChildren();
+  } else {
+    container.innerHTML = "";
+  }
+  const goalInput = el("edit-goal");
+  const tracks = parseProgramTracks(goalInput?.value ?? "");
+  for (const track of tracks) {
+    const chip = document.createElement("span");
+    chip.className = `program-chip ${track.status === "Completed" ? "is-completed" : "is-active"}`;
+    chip.setAttribute("role", "listitem");
+    chip.setAttribute("data-program", track.name);
+    chip.setAttribute("data-status", track.status);
+    if (chip.dataset) {
+      chip.dataset.program = track.name;
+      chip.dataset.status = track.status;
+    }
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "program-chip-toggle";
+    toggleBtn.textContent = track.status === "Completed" ? `✓ ${track.name} (Completed)` : track.name;
+    toggleBtn.setAttribute("aria-label", `Toggle status for ${track.name}`);
+    toggleBtn.title = track.status === "Completed" ? "Click to mark Active" : "Click to mark Completed";
+    toggleBtn.addEventListener("click", (e) => {
+      e?.stopPropagation?.();
+      const currentTracks = parseProgramTracks(el("edit-goal")?.value ?? "");
+      const target = currentTracks.find((t) => t.name.toLowerCase() === track.name.toLowerCase());
+      if (target) {
+        target.status = target.status === "Completed" ? "Active" : "Completed";
+        const input = el("edit-goal");
+        if (input) input.value = serializeProgramTracks(currentTracks);
+        renderProgramChips();
+        updateDirtyState();
+      }
+    });
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "program-chip-remove";
+    removeBtn.textContent = "✕";
+    removeBtn.setAttribute("aria-label", `Remove ${track.name}`);
+    removeBtn.title = `Remove ${track.name}`;
+    removeBtn.addEventListener("click", (e) => {
+      e?.stopPropagation?.();
+      const currentTracks = parseProgramTracks(el("edit-goal")?.value ?? "").filter(
+        (t) => t.name.toLowerCase() !== track.name.toLowerCase()
+      );
+      const input = el("edit-goal");
+      if (input) input.value = serializeProgramTracks(currentTracks);
+      renderProgramChips();
+      updateDirtyState();
+    });
+
+    chip.append(toggleBtn, removeBtn);
+    container.append(chip);
+  }
+}
+
+function addProgramFromControls() {
+  ensureProgramControlsPopulated();
+  const addSelect = el("add-program-select");
+  const statusSelect = el("add-program-status");
+  const programName = String(addSelect?.value ?? "").trim();
+  if (!programName) return false;
+  const statusVal = String(statusSelect?.value ?? "Active").trim() === "Completed" ? "Completed" : "Active";
+  const goalInput = el("edit-goal");
+  const tracks = parseProgramTracks(goalInput?.value ?? "");
+  const existing = tracks.find((t) => t.name.toLowerCase() === programName.toLowerCase());
+  if (existing) {
+    existing.name = programName;
+    existing.status = statusVal;
+  } else {
+    tracks.push({ name: programName, status: statusVal });
+  }
+  if (goalInput) {
+    goalInput.value = serializeProgramTracks(tracks);
+  }
+  if (addSelect) addSelect.value = "";
+  if (statusSelect) statusSelect.value = "Active";
+  renderProgramChips();
+  updateDirtyState();
+  return true;
+}
+
+function populateGoalDropdown(currentGoal = "") {
+  ensureProgramControlsPopulated();
+  const addSelect = el("add-program-select");
+  const statusSelect = el("add-program-status");
+  if (addSelect) addSelect.value = "";
+  if (statusSelect) statusSelect.value = "Active";
+
+  const goalInput = el("edit-goal");
+  const tracks = parseProgramTracks(currentGoal);
+  if (goalInput) {
+    goalInput.value = serializeProgramTracks(tracks);
+  }
+  renderProgramChips();
+}
+
+if (typeof window !== "undefined") {
+  window.parseProgramTracks = parseProgramTracks;
+  window.serializeProgramTracks = serializeProgramTracks;
+  window.addProgramFromControls = addProgramFromControls;
+  window.renderProgramChips = renderProgramChips;
 }
 let editing = null, editorSeq = 0, editorRead;
 let saveToastTimer;
@@ -439,6 +581,7 @@ function renderSchools() {
     card.onclick = () => openSchoolEditor(school.recordId);
     const stage = schoolBadge(school.stage);
     const priority = document.createElement("span"); priority.className = "school-priority"; priority.textContent = school.priority ? `${school.priority} priority` : "";
+    const programBadges = createProgramBadges(school.outreachGoal ?? school.goal);
     const heading = document.createElement("h2"); heading.textContent = school.schoolName;
     const meta = document.createElement("p"); meta.className = "school-meta"; meta.textContent = [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · ") || "Location not listed";
     const assignment = document.createElement("p"); assignment.className = "assignment"; assignment.textContent = school.assignedTo ? `Assigned to ${school.assignedTo}` : "Unassigned";
@@ -447,7 +590,7 @@ function renderSchools() {
     log.textContent = "Log outreach"; log.setAttribute("aria-label", `Log outreach for ${school.schoolName}`);
     log.onclick = () => openSchoolEditor(school.recordId, false, "activity");
     log.disabled = config?.writesEnabled !== true;
-    card.append(stage, priority, heading, meta, assignment); appendNextAction(card, school); card.append(editHint);
+    card.append(stage, priority, ...programBadges, heading, meta, assignment); appendNextAction(card, school); card.append(editHint);
     container.append(card, log); el("school-list").append(container);
   }
   el("empty-state").hidden = visible.length > 0;
@@ -461,11 +604,14 @@ function editorInputs(disabled) {
   if (el("edit-primary-owner")) el("edit-primary-owner").disabled = disabled;
   if (el("add-collaborator-select")) el("add-collaborator-select").disabled = disabled;
   if (el("add-collaborator-btn")) el("add-collaborator-btn").disabled = disabled;
+  if (el("add-program-select")) el("add-program-select").disabled = disabled;
+  if (el("add-program-status")) el("add-program-status").disabled = disabled;
+  if (el("add-program-btn")) el("add-program-btn").disabled = disabled;
   if (el("editor-unclaim-btn")) el("editor-unclaim-btn").disabled = disabled;
   if (el("unclaim-cancel-btn")) el("unclaim-cancel-btn").disabled = disabled;
   if (el("unclaim-confirm-btn")) el("unclaim-confirm-btn").disabled = disabled;
   if (typeof document?.querySelectorAll === "function") {
-    const buttons = document.querySelectorAll(".suggestion-chip, #log-contact-edit, #return-to-activity, #save-contact-return, .collaborator-chip-remove");
+    const buttons = document.querySelectorAll(".suggestion-chip, #log-contact-edit, #return-to-activity, #save-contact-return, .collaborator-chip-remove, .program-chip-toggle, .program-chip-remove");
     for (const btn of buttons) btn.disabled = disabled;
   }
 }
@@ -879,6 +1025,22 @@ function hasFormChanges(edit = editing) {
   const goalVal = el("edit-goal")?.value ?? el("edit-outreachGoal")?.value ?? values.outreachGoal ?? "";
   const origGoal = String(edit.original.outreachGoal ?? edit.original.goal ?? "");
   if (goalVal !== origGoal) return true;
+
+  // Check uncommitted program selection in #add-program-select
+  const pendingProgram = el("add-program-select")?.value?.trim();
+  if (pendingProgram) {
+    const pendingStatus = el("add-program-status")?.value === "Completed" ? "Completed" : "Active";
+    const previewTracks = parseProgramTracks(goalVal);
+    const existing = previewTracks.find((t) => t.name.toLowerCase() === pendingProgram.toLowerCase());
+    if (existing) {
+      existing.name = pendingProgram;
+      existing.status = pendingStatus;
+    } else {
+      previewTracks.push({ name: pendingProgram, status: pendingStatus });
+    }
+    if (serializeProgramTracks(previewTracks) !== origGoal) return true;
+  }
+
   return editFields.some((key) => values[key] !== String(edit.original[key] ?? ""));
 }
 
@@ -1958,6 +2120,13 @@ async function saveSchoolEdits(event) {
         ...(isCold ? { coldReason: coldReasonVal, isExplicitRejection } : {}),
       };
     } else {
+      if (el("add-program-select")?.value?.trim()) {
+        addProgramFromControls();
+        const updatedGoal = el("edit-goal")?.value ?? "";
+        values.outreachGoal = updatedGoal;
+        values.goal = updatedGoal;
+      }
+
       const addSelect = el("add-collaborator-select");
       const uncommittedEmail = addSelect?.value?.trim().toLowerCase();
       if (uncommittedEmail) {
@@ -3123,7 +3292,8 @@ function renderDashboard() {
     cell("School").append(dashboardNode("strong", school.schoolName), dashboardNode("span", [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · "), "dashboard-school-meta"));
     cell("Assigned to").textContent = assignee(school);
     const badge = schoolBadge(school.stage, school.stage === "Not Contacted" ? "Claimed / not contacted" : school.stage || "Stage not set");
-    cell("Stage").append(badge);
+    const programBadges = createProgramBadges(school.outreachGoal ?? school.goal);
+    cell("Stage").append(badge, ...programBadges);
     cell("Last contact").textContent = school.lastContacted || "Not recorded";
     const due = cell("Follow-up due"); due.textContent = school.followUpDue || "Not scheduled";
     if (overdue(school)) { due.className = "dashboard-due"; due.append(dashboardNode("span", "Overdue", "dashboard-school-meta")); }
@@ -3658,6 +3828,16 @@ el("edit-goal")?.addEventListener("change", () => {
 });
 el("edit-goal")?.addEventListener("input", () => {
   updateDirtyState();
+});
+el("add-program-select")?.addEventListener("change", () => {
+  updateDirtyState();
+});
+el("add-program-status")?.addEventListener("change", () => {
+  updateDirtyState();
+});
+el("add-program-btn")?.addEventListener("click", () => {
+  if (!editing) return;
+  addProgramFromControls();
 });
 el("editor-unclaim-btn")?.addEventListener("click", () => {
   el("unclaim-confirm-panel").hidden = false;
