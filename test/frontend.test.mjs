@@ -325,7 +325,7 @@ test("students land on My Outreach with correct priorities, quick actions and a 
   assert.equal(h.getEl("school-editor").open, true); assert.equal(h.getEl("edit-followUpDue").focused, true);
   h.getEl("edit-followUpDue").value = "2099-02-01"; await h.context.saveSchoolEdits({ preventDefault() {} });
   assert.equal(saves.length, 1); assert.equal(saves[0].patch.followUpDue, "2099-02-01");
-  assert.equal(h.getEl("save-toast").textContent, "✓ Saved"); assert.equal(h.getEl("school-editor").open, false);
+  assert.equal(h.getEl("save-toast").textContent, "Saved to Google Sheet!"); assert.equal(h.getEl("school-editor").open, false);
   assert.equal(h.getEl("home-metrics").children[1].children[0].textContent, "1");
   await h.context.openAction("overdue", "contact"); assert.equal(h.getEl("edit-contactName").focused, true);
   h.context.closeSchoolEditor(); await h.context.openAction("overdue", "log"); assert.equal(h.getEl("outreach-fields").hidden, false);
@@ -506,7 +506,7 @@ test("Log outreach validates required text, locks double taps, retries the same 
   getEl("log-activityType").value = "FollowUp";
   const first = context.saveSchoolEdits({ preventDefault() {} });
   await context.saveSchoolEdits({ preventDefault() {} }); assert.equal(requests.length, 1);
-  assert.equal(getEl("editor-save").textContent, "Saving…");
+  assert.equal(getEl("editor-save").textContent, "Saving to Google Sheet...");
   resolveSave(Response.json({ code: "COMMIT_UNCERTAIN" }, { status: 503 })); await first;
   context.closeSchoolEditor(); await context.openSchoolEditor(record.recordId, false, "activity");
   assert.equal(getEl("log-summary").value, "Asked about a workshop."); assert.equal(getEl("log-summary").disabled, true);
@@ -514,7 +514,7 @@ test("Log outreach validates required text, locks double taps, retries the same 
   assert.deepEqual(requests[0], requests[1]); assert.equal(requests[0].activityType, "FollowUp");
   assert.equal(requests[0].notes, undefined); assert.equal(requests[0].stage, "Contacted");
   resolveSave(Response.json({ ok: true, record: { ...record, lastRequestId: requests[0].requestId } })); await retry;
-  assert.equal(getEl("school-editor").open, false); assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("school-editor").open, false); assert.equal(getEl("save-toast").textContent, "Saved to Google Sheet!");
 });
 
 test("outreach conflict keeps the message, reloads current school values and clears private drafts on sign-out", async (t) => {
@@ -598,7 +598,7 @@ test("student-friendly outreach flow: displays existing contact, applies outcome
   assert.equal(requests[0].nextAction, "Follow up if no reply");
   assert.equal(requests[0].followUpDue, "2026-10-21");
   assert.equal(requests[0].stage, "Contacted");
-  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("save-toast").textContent, "Saved to Google Sheet!");
 });
 
 test("student-friendly outreach flow: missing contact displays fallback and save validation requires outcome and summary", async (t) => {
@@ -728,7 +728,7 @@ test("contact-editing round trip: add contact before entering text keeps return 
   assert.equal(activityRequests[0].nextAction, "Follow up if no reply");
   assert.equal(activityRequests[0].followUpDue, "2026-10-30");
   assert.equal(activityRequests[0].stage, "Contacted");
-  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("save-toast").textContent, "Saved to Google Sheet!");
 });
 
 test("contact-editing round trip: add contact on empty outreach form retains return button, and returning preserves full draft across contact editor cancel", async (t) => {
@@ -807,7 +807,7 @@ test("editor shows Saving immediately, keeps failed drafts open, then closes wit
   await signIn("alex@example.test"); await context.openSchoolEditor(record.recordId);
   getEl("edit-notes").value = "Changed note";
   const attempt = context.saveSchoolEdits({ preventDefault() {} });
-  assert.equal(getEl("editor-save").textContent, "Saving…");
+  assert.equal(getEl("editor-save").textContent, "Saving to Google Sheet...");
   assert.equal(getEl("editor-save").disabled, true);
   assert.equal(getEl("school-editor").open, true);
   resolveSave(Response.json({ code: "COMMIT_UNCERTAIN" }, { status: 503 })); await attempt;
@@ -821,7 +821,7 @@ test("editor shows Saving immediately, keeps failed drafts open, then closes wit
   resolveSave(Response.json({ ok: true, record })); await retry;
   assert.equal(getEl("school-editor").open, false);
   assert.equal(getEl("save-toast").hidden, false);
-  assert.equal(getEl("save-toast").textContent, "✓ Saved");
+  assert.equal(getEl("save-toast").textContent, "Saved to Google Sheet!");
 });
 
 test("editor shows validation beside Save, and unchanged values close with a clear tag", async (t) => {
@@ -909,7 +909,7 @@ test("a definitely rejected directory claim starts a fresh request on retry", as
   assert.equal(getEl("dir-feedback").textContent, "School claimed successfully");
 });
 
-function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = [], storage = new Map(), onPrompt, timerDelay = (ms) => ms }) {
+function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = [], storage = new Map(), localStorageMap = new Map(), onPrompt, timerDelay = (ms) => ms }) {
   let googleOptions;
   const windowListeners = new Map();
   const activeTimers = new Set();
@@ -976,6 +976,7 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       showModal() { this.open = true; },
       close() { this.open = false; },
       focus() { this.focused = true; },
+      scrollIntoView(opts) { this.scrolledIntoView = true; this.scrollIntoViewOptions = opts; },
       children,
       get options() { return children; },
       get firstChild() { return children[0] ?? null; },
@@ -1116,6 +1117,14 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       setItem: (key, value) => storage.set(key, String(value)),
       removeItem: (key) => storage.delete(key),
     },
+    localStorage: {
+      getItem: (key) => localStorageMap.get(key) ?? null,
+      setItem: (key, value) => localStorageMap.set(key, String(value)),
+      removeItem: (key) => localStorageMap.delete(key),
+      clear: () => localStorageMap.clear(),
+      key: (i) => Array.from(localStorageMap.keys())[i] ?? null,
+      get length() { return localStorageMap.size; },
+    },
     crypto: webcrypto,
     el: (id) => getEl(id),
     fetch: fetchHandler,
@@ -1152,6 +1161,7 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
     console,
   };
 
+  window.localStorage = context.localStorage;
   vm.createContext(context);
   getEl("workspace").hidden = true;
   getEl("session-restore").hidden = true;
@@ -1178,7 +1188,7 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
   }
 
   return { context, getEl, signIn, cleanup, googleOptions: () => googleOptions,
-    dispatchWindow: (event) => Promise.all((windowListeners.get(event) ?? []).map((callback) => callback({}))),
+    dispatchWindow: (event, evObj = {}) => Promise.all((windowListeners.get(event) ?? []).map((callback) => callback(evObj))), localStorageMap,
   };
 }
 
@@ -1456,7 +1466,7 @@ test("Scenario A: Grade 9 first email outreach: selects 'No reply yet', sets fol
   assert.equal(requests[0].nextAction, "Follow up if no reply");
   assert.equal(requests[0].followUpDue, "2026-10-24");
   assert.equal(requests[0].stage, "Contacted");
-  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("save-toast").textContent, "Saved to Google Sheet!");
   assert.equal(getEl("school-editor").open, false);
 });
 
@@ -1502,7 +1512,7 @@ test("Scenario B: School responds: records outcome, custom text, summarizes disc
   assert.equal(requests[0].stage, "Interested");
   assert.equal(requests[0].nextAction, "Send available November workshop dates");
   assert.equal(requests[0].followUpDue, "2026-10-28");
-  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("save-toast").textContent, "Saved to Google Sheet!");
   assert.equal(getEl("school-editor").open, false);
 });
 
@@ -1670,7 +1680,7 @@ test("Scenario: Grade 9 first email outreach using quick summary suggestion pill
   assert.equal(requests[0].nextAction, "Follow up if no reply");
   assert.equal(requests[0].followUpDue, "2026-10-25");
   assert.equal(requests[0].stage, "Contacted");
-  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("save-toast").textContent, "Saved to Google Sheet!");
   assert.equal(getEl("school-editor").open, false);
 });
 
@@ -3202,7 +3212,7 @@ test("PR #12 multi-contact outreach: renders contacts as checkboxes, enforces mu
   getEl("log-summary").value = "Offered free introductory workshops to dance and leadership clubs.";
   await context.saveSchoolEdits({ preventDefault() {} });
 
-  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("save-toast").textContent, "Saved to Google Sheet!");
 });
 
 test("PR #12 multi-contact outreach: Add Contact shortcut preserves full outreach draft across contact creation", async (t) => {
@@ -3335,7 +3345,7 @@ test("PR #12 multi-contact outreach: Add Contact shortcut preserves full outreac
   assert.equal(activities[0].summary, "Offered dance workshop series for fall semester.");
   assert.equal(activities[0].nextAction, "Check for reply in 3 days");
   assert.equal(activities[0].followUpDue, "2026-10-22");
-  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("save-toast").textContent, "Saved to Google Sheet!");
 });
 
 test("Cold status workflow: selecting 'Not interested' outcome chip sets stage to Cold, clears followUpDue, archives nextAction, and saves coldReason", async (t) => {
@@ -3375,7 +3385,7 @@ test("Cold status workflow: selecting 'Not interested' outcome chip sets stage t
   assert.equal(requests[0].isExplicitRejection, true);
   assert.equal(requests[0].nextAction, "Archived for season");
   assert.equal(requests[0].followUpDue, "");
-  assert.equal(getEl("save-toast").textContent, "✓ Outreach saved");
+  assert.equal(getEl("save-toast").textContent, "Saved to Google Sheet!");
 });
 
 test("Cold status: Warm stage protection prevents marking Cold for warm stages", async (t) => {
@@ -4522,6 +4532,221 @@ test("Programs defensive guards: missing DOM elements, HTMLCollection without .i
   assert.equal(buckets.needsAttention[0].schoolName, "Slash Date Overdue School");
   assert.equal(buckets.active.length, 2, "Empty due date and Booked stage with past date belong in Active pipeline");
 });
+
+test("LocalStorage DraftManager & Verified Save Lock: debounced auto-save, restore banner, discard draft, 14-day expiry, beforeunload, API error retention, and cleanup on 200 OK", async (t) => {
+  const indexHtml = await readFile("public/index.html", "utf8");
+  assert.match(indexHtml, /id="draft-restore-banner"/);
+  assert.match(indexHtml, /id="draft-discard-btn"/);
+  assert.match(indexHtml, /id="draft-autosave-status"/);
+
+  const localStorageMap = new Map();
+  let record = {
+    recordId: "draft-rec-101",
+    schoolName: "Agincourt Collegiate",
+    schoolBoard: "TDSB",
+    geographicRegion: "Scarborough",
+    stage: "Not Contacted",
+    priority: "Medium",
+    notes: "Original sheet notes",
+    nextAction: "Initial step",
+    followUpDue: "2026-11-20",
+    lastRequestId: "v-101",
+    assignedTo: "Alex",
+    ownerEmail: "alex@example.test",
+  };
+  let resolveSave = null;
+  let shouldRejectNetwork = false;
+  const activityRequests = [];
+  const updateRequests = [];
+
+  const h = setupEnv({
+    localStorageMap,
+    timerDelay: (ms) => (ms === 300 ? 10 : ms),
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) {
+        return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      }
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: [record],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/schools/detail")) {
+        return Response.json({ ok: true, record });
+      }
+      if (url.includes("/api/activities")) {
+        activityRequests.push(JSON.parse(init.body));
+        if (shouldRejectNetwork) throw new TypeError("Failed to fetch");
+        return new Promise((resolve) => {
+          resolveSave = resolve;
+        });
+      }
+      if (url.includes("/api/schools/update")) {
+        updateRequests.push(JSON.parse(init.body));
+        if (shouldRejectNetwork) throw new TypeError("Failed to fetch");
+        return new Promise((resolve) => {
+          resolveSave = resolve;
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(h.cleanup);
+  await h.signIn("alex@example.test");
+
+  const { DraftManager } = h.context.window;
+  assert.ok(DraftManager, "DraftManager is exposed on window");
+
+  // 1. Direct DraftManager unit checks: saveDraft, loadDraft, clearDraft, and 14-day expiration
+  DraftManager.saveDraft("outreach", "test-rec", { outcome: "Interested", summary: "Direct save" });
+  const rawStored = JSON.parse(localStorageMap.get("h4_crm_draft_outreach_test-rec"));
+  assert.equal(rawStored.payload.outcome, "Interested");
+  assert.equal(typeof rawStored.updatedAt, "number");
+
+  const loaded = DraftManager.loadDraft("outreach", "test-rec");
+  assert.equal(loaded.payload.outcome, "Interested");
+  assert.equal(loaded.summary, "Direct save");
+
+  // Expired draft (> 14 days old) is ignored and removed from localStorage
+  const fifteenDaysAgo = Date.now() - 15 * 24 * 60 * 60 * 1000;
+  localStorageMap.set(
+    "h4_crm_draft_outreach_expired-rec",
+    JSON.stringify({ payload: { outcome: "Old" }, updatedAt: fifteenDaysAgo })
+  );
+  assert.equal(DraftManager.loadDraft("outreach", "expired-rec"), null);
+  assert.equal(localStorageMap.has("h4_crm_draft_outreach_expired-rec"), false);
+
+  DraftManager.clearDraft("outreach", "test-rec");
+  assert.equal(DraftManager.loadDraft("outreach", "test-rec"), null);
+
+  // 2. Real-time debounced auto-save while typing in Log Outreach modal
+  await h.context.openSchoolEditor(record.recordId, false, "activity");
+  assert.equal(h.getEl("draft-restore-banner").hidden, true);
+  assert.equal(h.getEl("draft-autosave-status").hidden, true);
+
+  h.getEl("log-outcome").value = "Spoke with department head";
+  h.getEl("log-outcome").dispatchEvent(new h.context.Event("input", { bubbles: true }));
+  h.getEl("log-summary").value = "Discussed hip hop workshop dates for December.";
+  h.getEl("log-summary").dispatchEvent(new h.context.Event("input", { bubbles: true }));
+
+  // Wait for debounced auto-save
+  await until(() => localStorageMap.has(`h4_crm_draft_activity_${record.recordId}`));
+  assert.equal(h.getEl("draft-autosave-status").hidden, false);
+  assert.equal(h.getEl("draft-autosave-status").textContent, "Draft auto-saved on this device");
+
+  // 3. Accidental tab close protection (beforeunload) when modal has unsaved changes
+  let preventedUnload = false;
+  const unloadEvent = {
+    preventDefault() {
+      preventedUnload = true;
+    },
+    returnValue: "",
+  };
+  await h.dispatchWindow("beforeunload", unloadEvent);
+  assert.equal(preventedUnload, true, "beforeunload must warn when modal has unsaved changes");
+  assert.ok(unloadEvent.returnValue);
+
+  // 4. Close and reopen modal -> restores cached draft from localStorage and shows banner
+  h.context.closeSchoolEditor();
+  // Clear in-memory map to prove restoration comes from localStorage DraftManager
+  await h.context.openSchoolEditor(record.recordId, false, "activity");
+  assert.equal(h.getEl("draft-restore-banner").hidden, false);
+  assert.equal(h.getEl("draft-restore-text").textContent, "Restored your unsaved draft from this device.");
+  assert.equal(h.getEl("log-outcome").value, "Spoke with department head");
+  assert.equal(h.getEl("log-summary").value, "Discussed hip hop workshop dates for December.");
+
+  // 5. Hardened Save Verification Flow:
+  // Lock UI immediately, retain draft on API 500 error, scroll error into view
+  h.getEl("editor-feedback").scrolledIntoView = false;
+  const failedSavePromise = h.context.saveSchoolEdits({ preventDefault() {} });
+  assert.equal(h.getEl("editor-save").disabled, true);
+  assert.equal(h.getEl("editor-close").disabled, true);
+  assert.equal(h.getEl("editor-save").textContent, "Saving to Google Sheet...");
+
+  // Attempting to close while save is in flight is blocked
+  h.context.closeSchoolEditor();
+  assert.equal(h.getEl("school-editor").open, true);
+
+  // Simulate 500 API error
+  resolveSave(Response.json({ code: "INTERNAL_ERROR" }, { status: 500 }));
+  await failedSavePromise;
+
+  // Buttons re-enabled, modal stays open, draft still in localStorage, error scrolled into view
+  assert.equal(h.getEl("school-editor").open, true);
+  assert.equal(h.getEl("editor-save").disabled, false);
+  assert.equal(h.getEl("editor-close").disabled, false);
+  assert.equal(
+    h.getEl("editor-feedback").textContent,
+    "Could not save to Google Sheet — your draft is still saved on this device. Please try again."
+  );
+  assert.equal(h.getEl("editor-feedback").scrolledIntoView, true);
+  assert.ok(
+    DraftManager.loadDraft("activity", record.recordId),
+    "Draft must remain in localStorage when API returns !res.ok"
+  );
+
+  // Simulate network failure (offline drop)
+  shouldRejectNetwork = true;
+  h.getEl("editor-feedback").scrolledIntoView = false;
+  await h.context.saveSchoolEdits({ preventDefault() {} });
+  assert.equal(h.getEl("school-editor").open, true);
+  assert.equal(h.getEl("editor-save").disabled, false);
+  assert.equal(h.getEl("editor-close").disabled, false);
+  assert.equal(
+    h.getEl("editor-feedback").textContent,
+    "Could not save to Google Sheet — your draft is still saved on this device. Please try again."
+  );
+  assert.equal(h.getEl("editor-feedback").scrolledIntoView, true);
+  assert.ok(
+    DraftManager.loadDraft("activity", record.recordId),
+    "Draft must remain in localStorage on network error"
+  );
+  shouldRejectNetwork = false;
+
+  // 6. Verified 200 OK response clears draft and shows "Saved to Google Sheet!"
+  const okSavePromise = h.context.saveSchoolEdits({ preventDefault() {} });
+  assert.equal(h.getEl("editor-save").textContent, "Saving to Google Sheet...");
+  resolveSave(
+    Response.json({
+      ok: true,
+      record: { ...record, stage: "Contacted", lastRequestId: "v-102" },
+    })
+  );
+  await okSavePromise;
+
+  assert.equal(h.getEl("school-editor").open, false);
+  assert.equal(h.getEl("save-toast").textContent, "Saved to Google Sheet!");
+  assert.equal(
+    DraftManager.loadDraft("activity", record.recordId),
+    null,
+    "Draft must be cleared from localStorage after verified 200 OK"
+  );
+
+  // 7. Edit School (details) modal auto-save, restore banner, and [Discard draft] button
+  await h.context.openSchoolEditor(record.recordId, false, "details");
+  assert.equal(h.getEl("draft-restore-banner").hidden, true);
+  assert.equal(h.getEl("edit-notes").value, "Original sheet notes");
+
+  h.getEl("edit-notes").value = "Cached unsaved school note on device";
+  h.getEl("edit-notes").dispatchEvent(new h.context.Event("input", { bubbles: true }));
+  await until(() => localStorageMap.has(`h4_crm_draft_details_${record.recordId}`));
+  assert.equal(h.getEl("draft-autosave-status").textContent, "Draft auto-saved on this device");
+
+  h.context.closeSchoolEditor();
+  await h.context.openSchoolEditor(record.recordId, false, "details");
+  assert.equal(h.getEl("draft-restore-banner").hidden, false);
+  assert.equal(h.getEl("draft-restore-text").textContent, "Restored your unsaved draft from this device.");
+  assert.equal(h.getEl("edit-notes").value, "Cached unsaved school note on device");
+
+  // Clicking [Discard draft] resets to sheet's values and clears localStorage draft
+  h.getEl("draft-discard-btn").click();
+  assert.equal(h.getEl("draft-restore-banner").hidden, true);
+  assert.equal(h.getEl("edit-notes").value, "Original sheet notes");
+  assert.equal(DraftManager.loadDraft("details", record.recordId), null);
+});
+
 
 
 

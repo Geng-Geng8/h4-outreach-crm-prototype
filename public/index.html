@@ -209,6 +209,10 @@
     <dialog id="school-editor" aria-labelledby="editor-title">
       <form id="editor-form" novalidate>
         <div class="editor-header"><div><p class="eyebrow" id="editor-kind">SCHOOL DETAILS</p><h2 id="editor-title">Edit school</h2><p id="editor-meta"></p></div><button type="button" id="editor-close" class="text-button" aria-label="Close editor">Close</button></div>
+        <div id="draft-restore-banner" class="draft-restore-banner" role="status" aria-live="polite" hidden>
+          <span id="draft-restore-text">Restored your unsaved draft from this device.</span>
+          <button type="button" id="draft-discard-btn" class="button secondary compact-button">Discard draft</button>
+        </div>
         <p id="editor-status"></p>
         <div id="outreach-fields" class="editor-grid outreach-flow" hidden>
           <section class="flow-step editor-wide" id="step-contact">
@@ -512,6 +516,7 @@
         </div>
         <div class="editor-actions">
           <p id="editor-feedback" class="editor-feedback" role="status" aria-live="polite"></p>
+          <span id="draft-autosave-status" class="draft-autosave-status" role="status" aria-live="polite" hidden></span>
           <div id="unclaim-confirm-panel" class="unclaim-confirm-panel" hidden>
             <p class="unclaim-confirm-msg">Are you sure you want to release this school back to the directory?</p>
             <div class="unclaim-confirm-actions">

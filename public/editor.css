@@ -1629,5 +1629,35 @@
   border-color: #921313;
 }
 
+/* Per-Device Auto-Save Draft Banner & Status */
+.draft-restore-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: #f0f6ec;
+  border: 1px solid #bcd4b5;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #153528;
+}
+.draft-restore-banner[hidden] {
+  display: none !important;
+}
+.draft-autosave-status {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #4b6154;
+  margin-right: auto;
+}
+.draft-autosave-status[hidden] {
+  display: none !important;
+}
+
+
 
 

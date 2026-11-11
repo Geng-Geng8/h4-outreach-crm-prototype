@@ -269,6 +269,7 @@ function renderProgramChips() {
         if (input) input.value = serializeProgramTracks(currentTracks);
         renderProgramChips();
         updateDirtyState();
+        scheduleDraftAutoSave();
       }
     });
 
@@ -287,6 +288,7 @@ function renderProgramChips() {
       if (input) input.value = serializeProgramTracks(currentTracks);
       renderProgramChips();
       updateDirtyState();
+      scheduleDraftAutoSave();
     });
 
     chip.append(toggleBtn, removeBtn);
@@ -344,12 +346,136 @@ if (typeof window !== "undefined") {
 }
 let editing = null, editorSeq = 0, editorRead;
 let saveToastTimer;
+let draftSaveTimer = null;
+const DRAFT_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const DRAFT_DEBOUNCE_MS = 300;
 const editDrafts = new Map();
 const savedSchoolGoals = new Map();
 const sessionKey = "h4.crm.session-token.v1";
 const resumeKey = "h4.crm.resume-view.v1";
 const resumableViews = ["home", "my-schools", "programs", "directory", "dashboard"];
 let resumeView = null, sessionWasExpired = false;
+
+function getLocalStorage() {
+  try {
+    if (typeof localStorage !== "undefined" && localStorage) return localStorage;
+    if (typeof window !== "undefined" && window.localStorage) return window.localStorage;
+  } catch { /* Storage may be disabled. */ }
+  return null;
+}
+
+function draftFormTypeAliases(formType) {
+  const normalized = String(formType ?? "").trim();
+  if (normalized === "activity" || normalized === "outreach") return ["activity", "outreach"];
+  if (normalized === "details" || normalized === "edit") return ["details", "edit"];
+  return [normalized];
+}
+
+const DraftManager = {
+  getKey(formType, recordId) {
+    return `h4_crm_draft_${formType}_${recordId}`;
+  },
+  saveDraft(formType, recordId, payload) {
+    if (!formType || !recordId) return false;
+    try {
+      const store = getLocalStorage();
+      if (!store) return false;
+      const entry = JSON.stringify({
+        payload,
+        updatedAt: Date.now(),
+      });
+      store.setItem(this.getKey(formType, recordId), entry);
+      for (const alias of draftFormTypeAliases(formType)) {
+        if (alias !== formType) {
+          store.setItem(this.getKey(alias, recordId), entry);
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  loadDraft(formType, recordId) {
+    if (!formType || !recordId) return null;
+    try {
+      const store = getLocalStorage();
+      if (!store) return null;
+      const aliases = [formType, ...draftFormTypeAliases(formType).filter((a) => a !== formType)];
+      let chosenParsed = null;
+      for (const candidate of aliases) {
+        const key = this.getKey(candidate, recordId);
+        const raw = store.getItem(key);
+        if (!raw) continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          store.removeItem(key);
+          continue;
+        }
+        if (!parsed || typeof parsed !== "object") {
+          store.removeItem(key);
+          continue;
+        }
+        const updatedAt = Number(parsed.updatedAt);
+        if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > DRAFT_MAX_AGE_MS) {
+          for (const alias of aliases) {
+            store.removeItem(this.getKey(alias, recordId));
+          }
+          return null;
+        }
+        if (!chosenParsed) {
+          chosenParsed = { parsed, updatedAt };
+        }
+      }
+      if (!chosenParsed) return null;
+      const { parsed, updatedAt } = chosenParsed;
+      const payload = parsed.payload && typeof parsed.payload === "object" ? parsed.payload : {};
+      return {
+        ...payload,
+        payload: parsed.payload,
+        updatedAt,
+      };
+    } catch {
+      return null;
+    }
+  },
+  clearDraft(formType, recordId) {
+    if (!formType || !recordId) return false;
+    try {
+      const store = getLocalStorage();
+      if (!store) return false;
+      for (const candidate of draftFormTypeAliases(formType)) {
+        store.removeItem(this.getKey(candidate, recordId));
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  clearAllDrafts() {
+    try {
+      const store = getLocalStorage();
+      if (!store) return;
+      if (typeof store.length === "number" && typeof store.key === "function") {
+        const toRemove = [];
+        for (let i = 0; i < store.length; i++) {
+          const k = store.key(i);
+          if (typeof k === "string" && k.startsWith("h4_crm_draft_")) toRemove.push(k);
+        }
+        for (const k of toRemove) store.removeItem(k);
+      } else if (store._keys instanceof Set) {
+        for (const k of Array.from(store._keys)) {
+          if (typeof k === "string" && k.startsWith("h4_crm_draft_")) store.removeItem(k);
+        }
+      }
+    } catch {}
+  },
+};
+
+if (typeof window !== "undefined") {
+  window.DraftManager = DraftManager;
+}
 
 function parseJwtPayload(token) {
   if (typeof token !== "string") return null;
@@ -437,7 +563,11 @@ function forgetSession() {
     sessionStorage.removeItem(resumeKey);
   } catch { /* Storage may be disabled. */ }
   if (el("session-restore")) el("session-restore").hidden = true;
+  clearTimeout(draftSaveTimer); draftSaveTimer = null;
   editorSeq++; editorRead?.abort(); editing = null; editDrafts.clear(); savedSchoolGoals.clear();
+  DraftManager.clearAllDrafts();
+  if (el("draft-restore-banner")) el("draft-restore-banner").hidden = true;
+  if (el("draft-autosave-status")) { el("draft-autosave-status").textContent = ""; el("draft-autosave-status").hidden = true; }
   clearTimeout(saveToastTimer); el("save-toast").hidden = true;
   el("school-editor").close?.();
   for (const field of editFields) {
@@ -947,6 +1077,8 @@ function renderOutreachContactPicker(contacts = [], selectedIds = []) {
           card.classList.remove("is-selected");
         }
         updateSelectedContactsSummary();
+        updateDirtyState();
+        scheduleDraftAutoSave();
       });
 
       const content = document.createElement("div");
@@ -1003,14 +1135,18 @@ function editSchoolContact() {
   const values = editorValues();
   const activity = outreachValues();
   const selectedContactIds = getSelectedContactTokens();
-  // Always preserve the complete outreach draft when entering contact editor
-  editDrafts.set(`activity:${editing.id}`, {
+  const outreachDraftPayload = {
+    ...values,
+    ...activity,
     values,
     activity,
     selectedContactIds,
     pending: editing.pending,
     original: editing.original,
-  });
+  };
+  // Always preserve the complete outreach draft when entering contact editor
+  editDrafts.set(`activity:${editing.id}`, outreachDraftPayload);
+  DraftManager.saveDraft("activity", editing.id, outreachDraftPayload);
   openSchoolEditor(editing.id, false, "details");
 }
 
@@ -1048,12 +1184,15 @@ function hasFormChanges(edit = editing) {
     const activity = outreachValues();
     const values = editorValues();
     const selectedContactIds = getSelectedContactTokens();
+    const defaultStage = edit.original.stage === "Not Contacted" ? "Contacted" : edit.original.stage;
     return Boolean(
       activity.outcome?.trim() ||
       activity.summary?.trim() ||
+      (activity.channel && activity.channel !== "Email") ||
+      (activity.activityType && activity.activityType !== "Outreach") ||
       values.nextAction !== String(edit.original.nextAction ?? "") ||
       values.followUpDue !== String(edit.original.followUpDue ?? "") ||
-      (values.stage && values.stage !== edit.original.stage) ||
+      (values.stage && values.stage !== defaultStage) ||
       selectedContactIds.length > 0
     );
   }
@@ -1138,6 +1277,7 @@ function returnToActivity(force = false) {
     btn.textContent = "← Return to Log Outreach";
   }
   editDrafts.delete(`details:${editing.id}`);
+  DraftManager.clearDraft("details", editing.id);
   openSchoolEditor(editing.id, false, "activity");
 }
 
@@ -1171,6 +1311,134 @@ function editorFeedback(message, kind = "info") {
   el("editor-feedback").setAttribute("data-kind", kind);
 }
 
+function scrollEditorErrorIntoView() {
+  el("editor-feedback")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+  el("editor-status")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+}
+
+function buildCurrentDraftPayload(edit = editing) {
+  if (!edit || !edit.id || !edit.original) return null;
+  const values = editorValues();
+  const activity = outreachValues();
+  const selectedContactIds = getSelectedContactTokens();
+  return {
+    ...values,
+    ...(edit.mode === "activity" ? activity : {}),
+    values,
+    activity,
+    selectedContactIds,
+    primaryOwner: edit.primaryOwner,
+    collaborators: edit.collaborators,
+    assigneesChanged: Boolean(edit.assigneesChanged),
+    pending: edit.pending,
+    original: edit.original,
+  };
+}
+
+function saveCurrentModalDraft(showStatus = true) {
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = null;
+  if (!editing || !editing.id || !editing.original || editing.saved) return false;
+  const payload = buildCurrentDraftPayload(editing);
+  if (!payload) return false;
+  const formType = editing.mode === "activity" ? "activity" : "details";
+  DraftManager.saveDraft(formType, editing.id, payload);
+  editDrafts.set(editorDraftKey(editing), payload);
+  if (showStatus && !editing.busy) {
+    const statusBadge = el("draft-autosave-status");
+    if (statusBadge) {
+      statusBadge.textContent = "Draft auto-saved on this device";
+      statusBadge.hidden = false;
+    }
+    if (!editing.stale) {
+      el("editor-feedback").textContent = "Draft auto-saved on this device";
+      el("editor-feedback").setAttribute("data-kind", "info");
+    }
+  }
+  return true;
+}
+
+function scheduleDraftAutoSave() {
+  if (!editing || !editing.id || !editing.original || editing.busy) return;
+  if (editing.retryRequestId) editing.retryRequestId = null;
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(() => {
+    draftSaveTimer = null;
+    if (!editing || !editing.id || !editing.original || editing.saved) return;
+    saveCurrentModalDraft(true);
+  }, DRAFT_DEBOUNCE_MS);
+}
+
+function discardCurrentDraft() {
+  if (!editing || editing.busy) return;
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = null;
+  const formType = editing.mode === "activity" ? "activity" : "details";
+  DraftManager.clearDraft(formType, editing.id);
+  editDrafts.delete(editorDraftKey(editing));
+  editing.pending = null;
+  editing.retryRequestId = null;
+  editing.stale = false;
+  if (el("draft-restore-banner")) el("draft-restore-banner").hidden = true;
+  if (el("draft-autosave-status")) {
+    el("draft-autosave-status").textContent = "";
+    el("draft-autosave-status").hidden = true;
+  }
+  const record = editing.serverRecord || editing.original;
+  if (record) {
+    editing.original = { ...record };
+    for (const field of editFields) {
+      const input = el(`edit-${field}`);
+      if (input) input.value = String(record[field] ?? "");
+    }
+    const goalVal = record.outreachGoal ?? record.goal ?? "";
+    populateGoalDropdown(goalVal);
+    if (editing.mode === "activity") {
+      for (const field of outreachFields) {
+        el(`log-${field}`).value = field === "channel" ? "Email" : field === "activityType" ? "Outreach" : "";
+      }
+      if (record.stage === "Not Contacted" && el("edit-stage")) {
+        el("edit-stage").value = "Contacted";
+      }
+      renderOutreachContactPicker(editing.contacts || [], []);
+    }
+    if (el("edit-coldReason")) {
+      el("edit-coldReason").value = record.coldReason || (record.stage === "Cold" ? DEFAULT_DECLINE_REASON : "");
+    }
+    const rawOwnerEmails = String(record.ownerEmail || "").split(",").map((e) => e.trim()).filter(Boolean);
+    const rawAssignedNames = String(record.assignedTo || "").split(",").map((n) => n.trim()).filter(Boolean);
+    const primaryEmail = (rawOwnerEmails[0] || (currentUser?.email || "")).trim().toLowerCase();
+    const primaryUser = (editing.crmUsers || []).find((u) => u.email.toLowerCase() === primaryEmail);
+    const primaryName = primaryUser?.name || rawAssignedNames[0] || (currentUser?.name || primaryEmail);
+    const initialCollaborators = [];
+    for (let i = 1; i < Math.max(rawOwnerEmails.length, rawAssignedNames.length); i++) {
+      const email = (rawOwnerEmails[i] || "").trim().toLowerCase();
+      const userMatch = (editing.crmUsers || []).find((u) => u.email.toLowerCase() === email);
+      const name = userMatch?.name || rawAssignedNames[i] || email;
+      if (email || name) initialCollaborators.push({ email, name });
+    }
+    editing.primaryOwner = { email: primaryEmail, name: primaryName };
+    editing.collaborators = initialCollaborators;
+    editing.assigneesChanged = false;
+    const canEditAssignment = isSupervisor || isAssignedToMe(record);
+    renderAssigneeSection(canEditAssignment);
+
+    updateColdWarning();
+    editorInputs(false);
+    renderSummarySuggestions();
+    updateSuggestionStates();
+    updateDirtyState();
+    el("editor-save").disabled = false;
+    el("editor-save").textContent = editorSaveLabel(editing);
+    el("editor-reload").disabled = false;
+    editorFeedback("Changes save to the test spreadsheet.", "info");
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.discardCurrentDraft = discardCurrentDraft;
+}
+
 function showSaveToast(message) {
   clearTimeout(saveToastTimer);
   el("save-toast").textContent = message; el("save-toast").hidden = false;
@@ -1179,13 +1447,20 @@ function showSaveToast(message) {
 
 function closeSchoolEditor() {
   if (editing?.busy) return;
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = null;
   if (editing?.original && !editing.saved) {
-    const values = editorValues();
-    const activity = outreachValues();
-    const selectedContactIds = getSelectedContactTokens();
     if (hasFormChanges(editing)) {
-      editDrafts.set(editorDraftKey(editing), { values, activity, selectedContactIds, primaryOwner: editing.primaryOwner, collaborators: editing.collaborators, assigneesChanged: Boolean(editing.assigneesChanged), pending: editing.pending, original: editing.original });
-    } else editDrafts.delete(editorDraftKey(editing));
+      saveCurrentModalDraft(false);
+    } else {
+      editDrafts.delete(editorDraftKey(editing));
+      DraftManager.clearDraft(editing.mode === "activity" ? "activity" : "details", editing.id);
+    }
+  }
+  if (el("draft-restore-banner")) el("draft-restore-banner").hidden = true;
+  if (el("draft-autosave-status")) {
+    el("draft-autosave-status").textContent = "";
+    el("draft-autosave-status").hidden = true;
   }
   if (typeof closeContactForm === "function") closeContactForm(true);
   if (el("unclaim-confirm-panel")) el("unclaim-confirm-panel").hidden = true;
@@ -1470,6 +1745,8 @@ async function unclaimSchool() {
       edit.saved = true;
       editDrafts.delete(editorDraftKey(edit));
       editDrafts.delete(`activity:${edit.id}`);
+      DraftManager.clearDraft("details", edit.id);
+      DraftManager.clearDraft("activity", edit.id);
       edit.busy = false;
       closeSchoolEditor();
       showSaveToast("✓ School released to directory");
@@ -1721,6 +1998,7 @@ async function saveContactFromForm() {
         outreachDraft.values.contactName = data.record.contactName;
         outreachDraft.values.contactRole = data.record.contactRole;
       }
+      DraftManager.saveDraft("activity", editing.id, outreachDraft);
     }
 
     if (payload.action === "create" && data.contact) {
@@ -1735,6 +2013,7 @@ async function saveContactFromForm() {
           existing.push(data.contact.contactId);
         }
         outreachDraft.selectedContactIds = existing;
+        DraftManager.saveDraft("activity", editing.id, outreachDraft);
       }
     } else if (payload.action === "update" && data.contact) {
       const idx = editing.contacts.findIndex((c) => c.contactId === data.contact.contactId);
@@ -1834,6 +2113,7 @@ async function setPrimaryContact(contactId) {
         outreachDraft.values.contactName = data.record.contactName;
         outreachDraft.values.contactRole = data.record.contactRole;
       }
+      DraftManager.saveDraft("activity", editing.id, outreachDraft);
     }
 
     editing.contacts.forEach((c) => { c.isPrimary = (c.contactId === contactId); });
@@ -1923,6 +2203,7 @@ async function deactivateContact(contactId) {
       if (outreachDraft.selectedContactIds) {
         outreachDraft.selectedContactIds = outreachDraft.selectedContactIds.filter((id) => id !== contactId);
       }
+      DraftManager.saveDraft("activity", editing.id, outreachDraft);
     }
 
     editing.contacts = editing.contacts.filter((c) => c.contactId !== contactId);
@@ -1944,13 +2225,24 @@ async function deactivateContact(contactId) {
 
 async function openSchoolEditor(id, reload = false, mode = "details") {
   if (!credential) return;
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = null;
   if (reload && unresolvedContactOp && unresolvedContactOp.recordId === id) {
     unresolvedContactOp = null;
   }
   const retainedActivity = reload && mode === "activity" && editing?.id === id ? outreachValues() : null;
+  if (reload && !retainedActivity) {
+    DraftManager.clearDraft(mode === "activity" ? "activity" : "details", id);
+    editDrafts.delete(`${mode ?? "details"}:${id}`);
+  }
+  if (el("draft-restore-banner")) el("draft-restore-banner").hidden = true;
+  if (el("draft-autosave-status")) {
+    el("draft-autosave-status").textContent = "";
+    el("draft-autosave-status").hidden = true;
+  }
   const session = sessionVersion, seq = ++editorSeq;
   editorRead?.abort(); editorRead = new AbortController();
-  editing = { id, mode, original: null, pending: null, busy: false, pendingContactOp: unresolvedContactOp?.recordId === id ? unresolvedContactOp : null };
+  editing = { id, mode, original: null, serverRecord: null, pending: null, busy: false, pendingContactOp: unresolvedContactOp?.recordId === id ? unresolvedContactOp : null };
   el("editor-kind").textContent = mode === "activity" ? "LOG OUTREACH" : "SCHOOL DETAILS";
   el("outreach-fields").hidden = mode !== "activity";
   for (const field of detailOnlyFields) el(`field-${field}`).hidden = mode === "activity";
@@ -2004,15 +2296,29 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
       return;
     }
     if (!response.ok) throw new Error(data.code === "NOT_OWNER" ? "You can edit only your assigned schools." : "Could not load this school. Close and try again.");
-    const draft = reload ? null : editDrafts.get(editorDraftKey(editing));
+    editing.serverRecord = data.record;
+    const formType = mode === "activity" ? "activity" : "details";
+    const localDraft = reload ? null : DraftManager.loadDraft(formType, id);
+    const memoryDraft = reload ? null : editDrafts.get(editorDraftKey(editing));
+    const draft = (localDraft || memoryDraft)
+      ? {
+          ...(memoryDraft || {}),
+          ...(localDraft || {}),
+          values: { ...(memoryDraft?.values || {}), ...(localDraft?.values || {}) },
+          activity: { ...(memoryDraft?.activity || {}), ...(localDraft?.activity || {}) },
+          pending: memoryDraft?.pending ?? localDraft?.pending ?? null,
+          original: memoryDraft?.original ?? localDraft?.original ?? null,
+        }
+      : null;
     editing.original = draft?.original ?? data.record; editing.pending = draft?.pending ?? null;
     editing.contacts = data.contacts || [];
     try { renderSchoolContacts(editing.contacts); } catch {}
     for (const field of editFields) {
       const input = el(`edit-${field}`);
-      if (input) input.value = draft?.values[field] ?? String(data.record[field] ?? "");
+      const draftVal = draft?.values?.[field] ?? draft?.payload?.[field] ?? draft?.[field];
+      if (input) input.value = draftVal !== undefined ? String(draftVal) : String(data.record[field] ?? "");
     }
-    const goalVal = draft?.values?.outreachGoal ?? draft?.values?.goal ?? data.record.outreachGoal ?? data.record.goal ?? "";
+    const goalVal = draft?.values?.outreachGoal ?? draft?.values?.goal ?? draft?.payload?.outreachGoal ?? draft?.payload?.goal ?? draft?.outreachGoal ?? draft?.goal ?? data.record.outreachGoal ?? data.record.goal ?? "";
     populateGoalDropdown(goalVal);
     if (data.record) {
       if (data.record.outreachGoal !== undefined && data.record.goal === undefined) data.record.goal = data.record.outreachGoal;
@@ -2029,10 +2335,16 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
       goalEl.addEventListener("input", () => updateDirtyState());
     }
     if (mode === "activity") {
-      const activity = retainedActivity ?? draft?.activity;
-      if (activity) for (const field of outreachFields) el(`log-${field}`).value = activity[field];
-      if (!draft && data.record.stage === "Not Contacted") el("edit-stage").value = "Contacted";
-      let toSelect = draft?.selectedContactIds ? [...draft.selectedContactIds] : [];
+      const activity = retainedActivity ?? draft?.activity ?? draft?.payload ?? draft;
+      if (activity) {
+        for (const field of outreachFields) {
+          const actVal = activity[field] ?? draft?.payload?.[field] ?? draft?.[field];
+          if (actVal !== undefined) el(`log-${field}`).value = String(actVal);
+        }
+      }
+      const hasDraftStage = (draft?.values?.stage ?? draft?.payload?.stage ?? draft?.stage) !== undefined;
+      if (!hasDraftStage && data.record.stage === "Not Contacted") el("edit-stage").value = "Contacted";
+      let toSelect = draft?.selectedContactIds ? [...draft.selectedContactIds] : (draft?.payload?.selectedContactIds ? [...draft.payload.selectedContactIds] : []);
       if (editing.lastCreatedContactId) {
         toSelect = toSelect.filter((id) => id && id !== "__general__");
         if (!toSelect.includes(editing.lastCreatedContactId)) {
@@ -2061,7 +2373,8 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     if (cold) cold.disabled = isProtected;
     editing.coldAllowed = !isProtected;
     if (el("edit-coldReason")) {
-      el("edit-coldReason").value = data.record.coldReason || (data.record.stage === "Cold" ? DEFAULT_DECLINE_REASON : "");
+      const draftColdReason = draft?.values?.coldReason ?? draft?.payload?.coldReason ?? draft?.coldReason;
+      el("edit-coldReason").value = draftColdReason !== undefined ? String(draftColdReason) : (data.record.coldReason || (data.record.stage === "Cold" ? DEFAULT_DECLINE_REASON : ""));
     }
     updateColdWarning();
 
@@ -2097,6 +2410,16 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     const staleDraft = draft?.original && draft.original.lastRequestId !== data.record.lastRequestId && !editing.pending;
     editing.stale = !!staleDraft;
 
+    if (el("draft-restore-banner")) {
+      el("draft-restore-banner").hidden = !draft;
+    }
+    if (el("draft-restore-text") && draft) {
+      el("draft-restore-text").textContent = "Restored your unsaved draft from this device.";
+    }
+    if (el("draft-discard-btn")) {
+      el("draft-discard-btn").disabled = Boolean(editing.pending);
+    }
+
     if (unresolvedContactOp && unresolvedContactOp.recordId === id && mode === "details") {
       editing.pendingContactOp = unresolvedContactOp;
       if (unresolvedContactOp.action === "create" || unresolvedContactOp.action === "update") {
@@ -2108,7 +2431,7 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     } else if (unresolvedContactOp && unresolvedContactOp.recordId !== id) {
       editorFeedback(`Notice: A contact save for "${unresolvedContactOp.schoolName || "another school"}" is pending verification.`, "info");
     } else {
-      editorFeedback(staleDraft ? "Your draft is kept, but saved information changed. Reload school values and review before saving." : retainedActivity ? "Latest school values loaded. Your outreach text is kept; review stage and follow-up before saving." : draft ? "Your unsaved draft was restored." : "Changes save to the test spreadsheet.", staleDraft ? "error" : "info");
+      editorFeedback(staleDraft ? "Your draft is kept, but saved information changed. Reload school values and review before saving." : retainedActivity ? "Latest school values loaded. Your outreach text is kept; review stage and follow-up before saving." : draft ? "Restored your unsaved draft from this device." : "Changes save to the test spreadsheet.", staleDraft ? "error" : "info");
     }
 
     editorInputs(!!editing.pending);
@@ -2149,7 +2472,7 @@ async function saveSchoolEdits(event) {
       const isCold = values.stage === "Cold";
       const coldReasonVal = isCold ? (values.coldReason || el("edit-coldReason")?.value || DEFAULT_DECLINE_REASON) : undefined;
       const isExplicitRejection = isCold && (EXPLICIT_REJECTION_REASONS.includes(coldReasonVal) || activity.outcome.trim().toLowerCase() === "not interested");
-      edit.pending = { recordId: edit.id, expectedRequestId: edit.original.lastRequestId, requestId: crypto.randomUUID(), ...activity,
+      edit.pending = { recordId: edit.id, expectedRequestId: edit.original.lastRequestId, requestId: edit.retryRequestId || crypto.randomUUID(), ...activity,
         contactIds,
         followUpDue: isCold && isExplicitRejection && !values.followUpDue ? "" : values.followUpDue,
         nextAction: isCold && isExplicitRejection && !values.nextAction ? "Archived for season" : values.nextAction,
@@ -2204,10 +2527,13 @@ async function saveSchoolEdits(event) {
       );
 
       if (assigneesChanged) {
+        saveCurrentModalDraft(false);
         edit.busy = true; editorInputs(true);
         el("editor-save").disabled = true; el("editor-close").disabled = true; el("editor-reload").disabled = true;
-        el("editor-save").textContent = "Saving…";
-        editorFeedback("Saving…");
+        if (el("draft-discard-btn")) el("draft-discard-btn").disabled = true;
+        if (el("draft-autosave-status")) el("draft-autosave-status").hidden = true;
+        el("editor-save").textContent = "Saving to Google Sheet...";
+        editorFeedback("Saving to Google Sheet...");
 
         try {
           const reassignPayload = {
@@ -2231,18 +2557,20 @@ async function saveSchoolEdits(event) {
             editorInputs(false);
             if (reassignResponse.status === 409 || reassignData.code === "CONFLICT_STALE_VERSION") {
               edit.stale = true;
-              editorFeedback("Someone changed this school. Your draft is kept. Reload school values and review before saving.", "error");
+              editorFeedback("Someone changed this school. Could not save to Google Sheet — your draft is still saved on this device. Reload school values and review before saving.", "error");
             } else if (reassignResponse.status === 401 || reassignResponse.status === 403) {
               forgetSession(); status("Your access changed. Please sign in again.");
               el("google-button").hidden = false;
               if (config?.ready) await showGoogleButton();
             } else {
-              editorFeedback(reassignData.message || "Failed to reassign school. Your draft is kept.", "error");
+              editorFeedback("Could not save to Google Sheet — your draft is still saved on this device. Please try again.", "error");
             }
+            scrollEditorErrorIntoView();
             el("editor-save").disabled = !!edit.stale;
             el("editor-save").textContent = editorSaveLabel(edit);
             el("editor-close").disabled = false;
             el("editor-reload").disabled = false;
+            if (el("draft-discard-btn")) el("draft-discard-btn").disabled = false;
             return;
           }
 
@@ -2255,7 +2583,9 @@ async function saveSchoolEdits(event) {
             el("editor-save").textContent = editorSaveLabel(edit);
             el("editor-close").disabled = false;
             el("editor-reload").disabled = false;
-            editorFeedback("Connection interrupted. Retry saving changes; your draft is kept.", "error");
+            if (el("draft-discard-btn")) el("draft-discard-btn").disabled = false;
+            editorFeedback("Could not save to Google Sheet — your draft is still saved on this device. Please try again.", "error");
+            scrollEditorErrorIntoView();
           }
           return;
         }
@@ -2286,6 +2616,7 @@ async function saveSchoolEdits(event) {
         if (assigneesChanged) {
           edit.busy = false;
           edit.saved = true;
+          DraftManager.clearDraft("details", edit.id);
           editDrafts.delete(editorDraftKey(edit));
           closeSchoolEditor();
           showSaveToast("✓ School reassigned");
@@ -2298,13 +2629,16 @@ async function saveSchoolEdits(event) {
         }
         closeSchoolEditor(); showSaveToast("No changes to save"); return;
       }
-      edit.pending = { recordId: edit.id, expectedRequestId: edit.original.lastRequestId, requestId: crypto.randomUUID(), patch };
+      edit.pending = { recordId: edit.id, expectedRequestId: edit.original.lastRequestId, requestId: edit.retryRequestId || crypto.randomUUID(), patch };
     }
   }
+  saveCurrentModalDraft(false);
   edit.busy = true; editorInputs(true);
   el("editor-save").disabled = true; el("editor-close").disabled = true; el("editor-reload").disabled = true;
-  el("editor-save").textContent = "Saving…";
-  editorFeedback("Saving…");
+  if (el("draft-discard-btn")) el("draft-discard-btn").disabled = true;
+  if (el("draft-autosave-status")) el("draft-autosave-status").hidden = true;
+  el("editor-save").textContent = "Saving to Google Sheet...";
+  editorFeedback("Saving to Google Sheet...");
   try {
     const response = await apiFetch(edit.mode === "activity" ? "./api/activities" : "./api/schools/update", {
       method: "POST", headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
@@ -2338,12 +2672,18 @@ async function saveSchoolEdits(event) {
         renderProgramsView();
       };
       syncLocalGoal();
-      edit.pending = null; edit.saved = true; editDrafts.delete(editorDraftKey(edit));
+      DraftManager.clearDraft(edit.mode === "activity" ? "activity" : "details", edit.id);
+      edit.pending = null; edit.retryRequestId = null; edit.saved = true; editDrafts.delete(editorDraftKey(edit));
+      if (el("draft-restore-banner")) el("draft-restore-banner").hidden = true;
+      if (el("draft-autosave-status")) { el("draft-autosave-status").textContent = ""; el("draft-autosave-status").hidden = true; }
       const outreachDraft = editDrafts.get(`activity:${edit.id}`);
       if (outreachDraft) {
         outreachDraft.original = { ...data.record };
-        outreachDraft.values.contactName = data.record.contactName;
-        outreachDraft.values.contactRole = data.record.contactRole;
+        if (outreachDraft.values) {
+          outreachDraft.values.contactName = data.record.contactName;
+          outreachDraft.values.contactRole = data.record.contactRole;
+        }
+        DraftManager.saveDraft("activity", edit.id, outreachDraft);
       }
       edit.busy = false;
       if (edit.mode === "details" && outreachDraft) {
@@ -2353,9 +2693,9 @@ async function saveSchoolEdits(event) {
         await openSchoolEditor(edit.id, false, "activity");
         return;
       }
-      editorFeedback("Saved to the test spreadsheet.");
+      editorFeedback("Saved to Google Sheet!");
       closeSchoolEditor();
-      showSaveToast(edit.mode === "activity" ? "✓ Outreach saved" : "✓ Saved");
+      showSaveToast("Saved to Google Sheet!");
       await refresh();
       syncLocalGoal();
     } else if (response.status === 401 || response.status === 403) {
@@ -2367,21 +2707,36 @@ async function saveSchoolEdits(event) {
       edit.pending = null;
       edit.stale = data.code === "CONFLICT_STALE_VERSION";
       editorFeedback(data.code === "CONFLICT_STALE_VERSION"
-        ? "Someone changed this school. Your draft is kept. Reload school values and review before saving."
+        ? "Someone changed this school. Could not save to Google Sheet — your draft is still saved on this device. Reload school values and review before saving."
         : data.code === "COLD_RULE_VIOLATION" ? (data.reason || "This school cannot be marked Cold yet. Check the follow-up rule below.")
         : data.code === "OUTREACH_DETAILS_REQUIRED" ? "Add an outcome and a short description before saving."
-        : data.message || "The spreadsheet rejected this change. Your draft is kept.", "error");
+        : data.message
+          ? `${data.message} — Could not save to Google Sheet — your draft is still saved on this device. Please try again.`
+          : "Could not save to Google Sheet — your draft is still saved on this device. Please try again.", "error");
+      scrollEditorErrorIntoView();
+    } else if (data?.code === "COMMIT_UNCERTAIN") {
+      editorFeedback("Could not save to Google Sheet — your draft is still saved on this device. Please try again. (Save status is uncertain; use Retry save.)", "error");
+      scrollEditorErrorIntoView();
     } else {
-      editorFeedback("Save status is uncertain. Use Retry save to check safely; your draft is kept.", "error");
+      edit.retryRequestId = edit.pending?.requestId || null;
+      edit.pending = null;
+      editorFeedback("Could not save to Google Sheet — your draft is still saved on this device. Please try again.", "error");
+      scrollEditorErrorIntoView();
     }
   } catch {
-    if (session === sessionVersion && editing === edit) editorFeedback("Connection interrupted. Use Retry save; your draft is kept.", "error");
+    if (session === sessionVersion && editing === edit) {
+      edit.retryRequestId = edit.pending?.requestId || null;
+      edit.pending = null;
+      editorFeedback("Could not save to Google Sheet — your draft is still saved on this device. Please try again.", "error");
+      scrollEditorErrorIntoView();
+    }
   } finally {
     edit.busy = false;
     if (session === sessionVersion && editing === edit) {
       editorInputs(!!edit.pending);
       el("editor-save").disabled = !!edit.stale; el("editor-save").textContent = edit.pending ? "Retry save" : editorSaveLabel(edit);
       el("editor-close").disabled = false; el("editor-reload").disabled = !!edit.pending;
+      if (el("draft-discard-btn")) el("draft-discard-btn").disabled = !!edit.pending;
     }
   }
 }
@@ -4378,6 +4733,7 @@ el("restore-sign-in")?.addEventListener("click", () => {
 el("editor-form")?.addEventListener("submit", saveSchoolEdits);
 el("editor-close")?.addEventListener("click", closeSchoolEditor);
 el("editor-reload")?.addEventListener("click", () => { if (editing) openSchoolEditor(editing.id, true, editing.mode); });
+el("draft-discard-btn")?.addEventListener("click", discardCurrentDraft);
 el("school-editor")?.addEventListener("cancel", (event) => { event.preventDefault(); closeSchoolEditor(); });
 el("edit-primary-owner")?.addEventListener("change", (e) => {
   if (!editing) return;
@@ -4392,9 +4748,11 @@ el("edit-primary-owner")?.addEventListener("change", (e) => {
   const canEdit = isSupervisor || isAssignedToMe(editing.original);
   renderAssigneeSection(canEdit);
   updateDirtyState();
+  scheduleDraftAutoSave();
 });
 el("add-collaborator-select")?.addEventListener("change", () => {
   updateDirtyState();
+  scheduleDraftAutoSave();
 });
 el("add-collaborator-btn")?.addEventListener("click", () => {
   if (!editing) return;
@@ -4419,28 +4777,57 @@ el("add-collaborator-btn")?.addEventListener("click", () => {
   const canEdit = isSupervisor || isAssignedToMe(editing.original);
   renderAssigneeSection(canEdit);
   updateDirtyState();
+  scheduleDraftAutoSave();
 });
 el("editor-form")?.addEventListener("input", () => {
   updateDirtyState();
+  scheduleDraftAutoSave();
 });
 el("editor-form")?.addEventListener("change", () => {
   updateDirtyState();
+  scheduleDraftAutoSave();
 });
+for (const field of editFields) {
+  if (field === "outreachGoal") continue;
+  el(`edit-${field}`)?.addEventListener("input", () => {
+    updateDirtyState();
+    scheduleDraftAutoSave();
+  });
+  el(`edit-${field}`)?.addEventListener("change", () => {
+    updateDirtyState();
+    scheduleDraftAutoSave();
+  });
+}
+for (const field of outreachFields) {
+  el(`log-${field}`)?.addEventListener("input", () => {
+    updateDirtyState();
+    scheduleDraftAutoSave();
+  });
+  el(`log-${field}`)?.addEventListener("change", () => {
+    updateDirtyState();
+    scheduleDraftAutoSave();
+  });
+}
 el("edit-goal")?.addEventListener("change", () => {
   updateDirtyState();
+  scheduleDraftAutoSave();
 });
 el("edit-goal")?.addEventListener("input", () => {
   updateDirtyState();
+  scheduleDraftAutoSave();
 });
 el("add-program-select")?.addEventListener("change", () => {
   updateDirtyState();
+  scheduleDraftAutoSave();
 });
 el("add-program-status")?.addEventListener("change", () => {
   updateDirtyState();
+  scheduleDraftAutoSave();
 });
 el("add-program-btn")?.addEventListener("click", () => {
   if (!editing) return;
   addProgramFromControls();
+  scheduleDraftAutoSave();
 });
 el("editor-unclaim-btn")?.addEventListener("click", () => {
   el("unclaim-confirm-panel").hidden = false;
@@ -4522,6 +4909,8 @@ el("contact-choice-general")?.addEventListener("change", () => {
     genCard?.classList.remove("is-selected");
   }
   updateSelectedContactsSummary();
+  updateDirtyState();
+  scheduleDraftAutoSave();
 });
 el("return-to-activity")?.addEventListener("click", () => returnToActivity(false));
 el("save-contact-return")?.addEventListener("click", saveSchoolEdits);
@@ -4647,7 +5036,10 @@ el("bulk-submit-save")?.addEventListener("click", () => {
 el("bulk-retry-failed")?.addEventListener("click", () => executeBulkBatch(true));
 el("bulk-finish-done")?.addEventListener("click", () => closeBulkOutreach(false));
 window.addEventListener("beforeunload", (e) => {
-  if (bulkBatch && (bulkBatch.inProgress || hasUnresolvedBulkRecords(bulkBatch))) {
+  const modalUnsavedOrBusy = Boolean(
+    editing && (editing.busy || (el("school-editor")?.open && hasFormChanges(editing)))
+  );
+  if (modalUnsavedOrBusy || (bulkBatch && (bulkBatch.inProgress || hasUnresolvedBulkRecords(bulkBatch)))) {
     e.preventDefault();
     e.returnValue = "You have outreach saves waiting for confirmation or retry.";
     return e.returnValue;
