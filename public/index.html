@@ -61,6 +61,7 @@
         <button id="tab-home" role="tab" aria-selected="true" aria-controls="home-view" class="tab-btn active" type="button">My Outreach</button>
         <button id="tab-dashboard" role="tab" aria-selected="false" aria-controls="dashboard-view" class="tab-btn" type="button">Team Progress</button>
         <button id="tab-my-schools" role="tab" aria-selected="false" aria-controls="schools-view" class="tab-btn" type="button">My Schools</button>
+        <button id="tab-programs" role="tab" aria-selected="false" aria-controls="programs-view" class="tab-btn" type="button">Programs</button>
         <button id="tab-directory" role="tab" aria-selected="false" aria-controls="directory-view" class="tab-btn" type="button">Find School</button>
         <button id="tab-demo-claim" role="tab" aria-selected="false" class="tab-btn" type="button">🧪 Synthetic claim demo</button>
       </nav>
@@ -117,6 +118,76 @@
         <div id="school-list" class="school-list"></div>
         <div id="empty-state" class="empty-state" hidden><span aria-hidden="true">↗</span><h2 id="empty-title">No schools assigned yet</h2><p id="empty-description">Your supervisor can help you find your next school.</p></div>
       </div>
+
+      <section id="programs-view" class="view-section hidden" role="tabpanel" aria-labelledby="tab-programs" hidden>
+        <div class="dashboard-heading">
+          <div>
+            <h2 id="programs-heading">Program tracks at a glance.</h2>
+            <p id="programs-subheading">Track flagship programs, pipeline health, and completed deliveries across schools.</p>
+          </div>
+          <div class="heading-actions">
+            <div id="programs-scope-toggle" class="supervisor-filter-toggle" role="group" aria-label="Program school scope">
+              <button id="programs-toggle-mine" type="button" class="supervisor-toggle-btn active" aria-pressed="true">My Schools (0)</button>
+              <button id="programs-toggle-all" type="button" class="supervisor-toggle-btn" aria-pressed="false">All Team Schools (0)</button>
+            </div>
+            <button id="programs-refresh" class="button secondary" type="button">Refresh</button>
+          </div>
+        </div>
+        <div id="programs-selector-bar" class="programs-selector-bar" role="navigation" aria-label="Program tracks">
+          <div id="programs-primary-pills" class="programs-primary-pills">
+            <button type="button" id="program-pill-all" class="program-nav-pill active" data-program="" aria-pressed="true">All Programs</button>
+            <button type="button" id="program-pill-cypher" class="program-nav-pill" data-program="Cypher Program" aria-pressed="false">Cypher Program <span class="program-pill-count">0</span></button>
+            <button type="button" id="program-pill-competitive" class="program-nav-pill" data-program="Competitive Arts" aria-pressed="false">Competitive Arts <span class="program-pill-count">0</span></button>
+            <button type="button" id="program-pill-btheerise" class="program-nav-pill" data-program="B Thee Rise" aria-pressed="false">B Thee Rise <span class="program-pill-count">0</span></button>
+            <button type="button" id="program-pill-shsm" class="program-nav-pill" data-program="SHSM" aria-pressed="false">SHSM <span class="program-pill-count">0</span></button>
+          </div>
+          <label class="programs-more-label">
+            <span class="sr-only">More programs</span>
+            <select id="more-programs-select" class="more-programs-select" aria-label="More programs">
+              <option value="">More programs…</option>
+            </select>
+          </label>
+        </div>
+        <p id="programs-status" class="workspace-status" role="status" aria-live="polite"></p>
+        <div id="programs-overview-matrix" class="programs-overview-matrix"></div>
+        <div id="programs-drilldown" class="programs-drilldown" hidden>
+          <div id="programs-kpi-strip" class="dashboard-metrics programs-kpi-strip" aria-label="Program totals"></div>
+          <div id="programs-quick-tag-bar" class="programs-quick-tag-bar">
+            <label for="quick-tag-school-select" class="quick-tag-label">Tag a school into this program:</label>
+            <div class="quick-tag-controls">
+              <select id="quick-tag-school-select" class="form-select" aria-label="Select a school to tag">
+                <option value="">Select a school…</option>
+              </select>
+              <button type="button" id="quick-tag-school-btn" class="button secondary compact-button">+ Add School to Program</button>
+            </div>
+            <p id="quick-tag-feedback" class="workspace-status" role="status" aria-live="polite"></p>
+          </div>
+          <div id="programs-section-attention" class="programs-triage-section">
+            <div class="dashboard-section-heading">
+              <div><h3>Needs attention</h3><p>Overdue follow-ups or High/Urgent priority schools.</p></div>
+              <span id="programs-attention-count" class="program-section-badge">0</span>
+            </div>
+            <div id="programs-attention-list" class="school-list"></div>
+            <p id="programs-attention-empty" class="empty-state" hidden>No schools need immediate attention for this program.</p>
+          </div>
+          <div id="programs-section-active" class="programs-triage-section">
+            <div class="dashboard-section-heading">
+              <div><h3>Active pipeline</h3><p>Schools currently in outreach, conversation, or booking for this track.</p></div>
+              <span id="programs-active-count" class="program-section-badge">0</span>
+            </div>
+            <div id="programs-active-list" class="school-list"></div>
+            <p id="programs-active-empty" class="empty-state" hidden>No schools in the active pipeline for this program.</p>
+          </div>
+          <div id="programs-section-completed" class="programs-triage-section">
+            <div class="dashboard-section-heading">
+              <div><h3>Completed</h3><p>Schools where this program track or overall delivery is marked completed.</p></div>
+              <span id="programs-completed-count" class="program-section-badge">0</span>
+            </div>
+            <div id="programs-completed-list" class="school-list"></div>
+            <p id="programs-completed-empty" class="empty-state" hidden>No completed schools recorded for this program yet.</p>
+          </div>
+        </div>
+      </section>
 
       <div id="directory-view" role="tabpanel" aria-labelledby="tab-directory" hidden>
         <div class="workspace-tools"><div class="count-label"><strong id="dir-count">0</strong><span id="dir-count-label">schools</span></div><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">Search directory</span><input id="dir-search" type="search" placeholder="Search directory by name, board, city or region" autocomplete="off"></label><button id="dir-refresh" class="button secondary" type="button">Refresh directory</button></div>

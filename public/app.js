@@ -54,6 +54,24 @@ const pendingClaims = new Map(); // osn -> requestId
 let teamSchools = [], dashboardLoaded = false, dashboardSeq = 0, dashboardRequest;
 let overviewStudents = [], schoolScopeFilter = null, schoolStageFilter = "", schoolScopeLabel = "", homeShowAll = false;
 let supervisorSchoolScope = "mine";
+let programsScope = "mine", selectedProgram = "";
+const FLAGSHIP_PROGRAMS = [
+  "Cypher Program",
+  "Competitive Arts",
+  "B Thee Rise",
+  "SHSM",
+];
+const SECONDARY_PROGRAMS = [
+  "Board Partnership",
+  "Dance Workshops",
+  "Co-op Workshops",
+  "Volunteer Workshops",
+  "After-School Program",
+  "Keynotes",
+  "Leadership Programs",
+  "Filipino Projects",
+  "Misc",
+];
 const pipelineStages = ["Not Contacted", "Contacted", "Interested", "Engaged", "Booked", "Completed", "Cold"];
 const otherStage = "Other / not set";
 const stageKey = (school) => pipelineStages.includes(school.stage) ? school.stage : otherStage;
@@ -141,8 +159,9 @@ function parseProgramTracks(rawGoal) {
     if (existing) {
       existing.name = name;
       existing.status = status;
+      existing.completed = status === "Completed";
     } else {
-      tracks.push({ name, status });
+      tracks.push({ name, status, completed: status === "Completed" });
     }
   }
   return tracks;
@@ -328,7 +347,7 @@ const editDrafts = new Map();
 const savedSchoolGoals = new Map();
 const sessionKey = "h4.crm.session-token.v1";
 const resumeKey = "h4.crm.resume-view.v1";
-const resumableViews = ["home", "my-schools", "directory", "dashboard"];
+const resumableViews = ["home", "my-schools", "programs", "directory", "dashboard"];
 let resumeView = null, sessionWasExpired = false;
 
 function parseJwtPayload(token) {
@@ -454,7 +473,19 @@ function forgetSession() {
   if (el("home-refresh")) el("home-refresh").disabled = false;
   credential = ""; schools = []; directory = []; demoSchools = []; isSupervisor = false; currentUser = null;
   pendingClaims.clear(); supervisorSchoolScope = "mine";
+  programsScope = "mine"; selectedProgram = "";
   if (el("schools-supervisor-toggle")) el("schools-supervisor-toggle").hidden = true;
+  if (el("programs-view")) {
+    el("programs-view").hidden = true;
+    el("programs-view").classList?.add("hidden");
+    if (el("programs-overview-matrix")) el("programs-overview-matrix").replaceChildren();
+    if (el("programs-attention-list")) el("programs-attention-list").replaceChildren();
+    if (el("programs-active-list")) el("programs-active-list").replaceChildren();
+    if (el("programs-completed-list")) el("programs-completed-list").replaceChildren();
+    if (el("programs-kpi-strip")) el("programs-kpi-strip").replaceChildren();
+    if (el("programs-status")) el("programs-status").textContent = "";
+    if (el("quick-tag-feedback")) el("quick-tag-feedback").textContent = "";
+  }
   el("school-list").replaceChildren(); el("search").value = "";
   el("school-count").textContent = "0"; el("school-count-label").textContent = "schools";
   if (el("schools-scope")) { el("schools-scope").hidden = true; el("schools-scope-label").textContent = ""; }
@@ -2303,6 +2334,7 @@ async function saveSchoolEdits(event) {
         renderSchools();
         renderHome();
         renderDashboard();
+        renderProgramsView();
       };
       syncLocalGoal();
       edit.pending = null; edit.saved = true; editDrafts.delete(editorDraftKey(edit));
@@ -3090,8 +3122,8 @@ function finalizeBulkBatch() {
 function updateWorkspaceHeading() {
   if (el("tab-home")) el("tab-home").textContent = isSupervisor ? "H4 Overview" : "My Outreach";
   el("tab-my-schools").textContent = isSupervisor ? "Schools" : "My Schools";
-  el("workspace-heading").textContent = currentTab === "home" ? isSupervisor ? "H4 Overview." : "My Outreach." : currentTab === "dashboard" ? "Team Progress." : currentTab === "directory" ? "Find your next school." : isSupervisor ? "School overview." : "Your schools.";
-  el("workspace-description").textContent = currentTab === "home" ? isSupervisor ? "A clear view of the program. A little support where it counts." : "Your next step, without the guesswork." : currentTab === "dashboard" ? "Coordinate your outreach. Make every connection count." : currentTab === "directory" ? "Browse available schools and start a new connection." : isSupervisor ? "School assignments across H4." : "Your assigned schools, ready for your next connection.";
+  el("workspace-heading").textContent = currentTab === "home" ? isSupervisor ? "H4 Overview." : "My Outreach." : currentTab === "dashboard" ? "Team Progress." : currentTab === "programs" ? "Program Tracks." : currentTab === "directory" ? "Find your next school." : isSupervisor ? "School overview." : "Your schools.";
+  el("workspace-description").textContent = currentTab === "home" ? isSupervisor ? "A clear view of the program. A little support where it counts." : "Your next step, without the guesswork." : currentTab === "dashboard" ? "Coordinate your outreach. Make every connection count." : currentTab === "programs" ? "Manage flagship tracks, triage school health, and track completed deliveries." : currentTab === "directory" ? "Browse available schools and start a new connection." : isSupervisor ? "School assignments across H4." : "Your assigned schools, ready for your next connection.";
 }
 function switchTab(tab) {
   currentTab = tab;
@@ -3105,6 +3137,12 @@ function switchTab(tab) {
   if (el("dashboard-view")) el("dashboard-view").hidden = tab !== "dashboard";
   el("tab-my-schools").classList.toggle("active", tab === "my-schools");
   el("tab-my-schools").setAttribute("aria-selected", String(tab === "my-schools"));
+  el("tab-programs")?.classList.toggle("active", tab === "programs");
+  el("tab-programs")?.setAttribute("aria-selected", String(tab === "programs"));
+  if (el("programs-view")) {
+    el("programs-view").hidden = tab !== "programs";
+    el("programs-view").classList?.toggle("hidden", tab !== "programs");
+  }
   el("tab-directory").classList.toggle("active", tab === "directory");
   el("tab-directory").setAttribute("aria-selected", String(tab === "directory"));
   el("tab-demo-claim").classList.toggle("active", tab === "demo-claim");
@@ -3114,6 +3152,10 @@ function switchTab(tab) {
   el("directory-view").hidden = tab !== "directory";
   el("demo-view").hidden = tab !== "demo-claim";
 
+  if (tab === "programs") {
+    renderProgramsView();
+    if (!dashboardLoaded && !isSupervisor && credential) loadDashboard();
+  }
   if (tab === "directory" && directory.length === 0) loadDirectory();
   if (tab === "dashboard" && !dashboardLoaded) loadDashboard();
   // Requirement: Reload synthetic availability when entering the Demo tab (never reuse stale cached state)
@@ -3128,13 +3170,29 @@ function dashboardToday(now = new Date()) {
   return ["year", "month", "day"].map((key) => parts.find((part) => part.type === key).value).join("-");
 }
 function dueState(school, today = dashboardToday()) {
-  const due = school.followUpDue;
+  const due = school?.followUpDue || school?.followUpDate;
   // Only unambiguous ISO dates are compared. Preserve other sheet formatting as text.
-  if (["Booked", "Cold"].includes(school.stage) || !/^\d{4}-\d{2}-\d{2}$/.test(due)
+  if (["Booked", "Cold", "Completed"].includes(school?.stage) || !/^\d{4}-\d{2}-\d{2}$/.test(due)
     || Number.isNaN(Date.parse(due)) || new Date(due).toISOString().slice(0, 10) !== due) return "none";
   return due < today ? "overdue" : due === today ? "today" : "upcoming";
 }
 function overdueSchool(school, today) { return dueState(school, today) === "overdue"; }
+function isOverdue(schoolOrDate, today = dashboardToday()) {
+  if (!schoolOrDate) return false;
+  if (typeof schoolOrDate === "object") {
+    if (["Booked", "Cold", "Completed"].includes(schoolOrDate.stage)) return false;
+    const due = schoolOrDate.followUpDate || schoolOrDate.followUpDue;
+    return isOverdue(due, today);
+  }
+  const str = String(schoolOrDate).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str) || Number.isNaN(Date.parse(str)) || new Date(str).toISOString().slice(0, 10) !== str) {
+    return false;
+  }
+  return str < today;
+}
+if (typeof window !== "undefined") {
+  window.isOverdue = isOverdue;
+}
 function dashboardOptions(id, allLabel, values) {
   const select = el(id), previous = select.value;
   const all = dashboardNode("option", allLabel); all.value = "";
@@ -3365,7 +3423,9 @@ async function loadDashboard() {
     }
     dashboardOptions("dashboard-owner", "Everyone", [...new Set(teamSchools.flatMap((s) => (s.assignedTo || "").split(",").map((n) => n.trim()).filter(Boolean)))].sort());
     dashboardOptions("dashboard-stage", "All stages", [...pipelineStages, ...(teamSchools.some((s) => stageKey(s) === otherStage) ? [otherStage] : [])]);
-    renderDashboard(); el("dashboard-content").hidden = false;
+    renderDashboard();
+    renderProgramsView();
+    el("dashboard-content").hidden = false;
     el("dashboard-status").textContent = "Up to date · whole team · dates use Ontario time";
   } catch (error) {
     if (session !== sessionVersion || seq !== dashboardSeq || error.name === "AbortError") return;
@@ -3375,6 +3435,449 @@ async function loadDashboard() {
   } finally {
     if (session === sessionVersion && seq === dashboardSeq) el("dashboard-refresh").disabled = false;
   }
+}
+
+function getProgramScopedSchools() {
+  const byId = new Map();
+  for (const s of (schools || [])) {
+    if (s && s.recordId) byId.set(s.recordId, s);
+  }
+  for (const ts of (teamSchools || [])) {
+    if (!ts || !ts.recordId) continue;
+    if (byId.has(ts.recordId)) {
+      const existing = byId.get(ts.recordId);
+      const rawGoal = existing.outreachGoal || existing.goal || ts.outreachGoal || ts.goal || savedSchoolGoals.get(ts.recordId) || "";
+      if (rawGoal) {
+        existing.outreachGoal = rawGoal;
+        existing.goal = rawGoal;
+      }
+    } else {
+      const rawGoal = ts.outreachGoal || ts.goal || savedSchoolGoals.get(ts.recordId) || "";
+      if (rawGoal) {
+        ts.outreachGoal = rawGoal;
+        ts.goal = rawGoal;
+      }
+      byId.set(ts.recordId, ts);
+    }
+  }
+  const allList = byId.size > 0 ? Array.from(byId.values()) : [...(schools || []), ...(teamSchools || [])];
+  const myList = allList.filter(isAssignedToMe);
+  const activeList = programsScope === "all" ? allList : myList;
+  return { myList, allList, activeList };
+}
+
+function categorizeSchoolsForProgram(programName, schoolList = getProgramScopedSchools().activeList, today = dashboardToday()) {
+  const target = String(programName || "").trim().toLowerCase();
+  const completed = [];
+  const needsAttention = [];
+  const active = [];
+  if (!target) {
+    return { completed, needsAttention, active, total: 0 };
+  }
+  for (const school of (schoolList || [])) {
+    const rawGoal = school.outreachGoal || school.goal || savedSchoolGoals.get(school.recordId) || "";
+    const tracks = parseProgramTracks(rawGoal);
+    const match = tracks.find((track) => track.name.toLowerCase() === target);
+    if (!match) continue;
+    const isCompleted = match.completed === true || match.status === "Completed" || school.stage === "Completed";
+    if (isCompleted) {
+      completed.push(school);
+      continue;
+    }
+    const dueDate = school.followUpDate || school.followUpDue || "";
+    const isAttention = isOverdue(dueDate, today) || isOverdue(school, today) || school.priority === "High" || school.priority === "Urgent";
+    if (isAttention) {
+      needsAttention.push(school);
+    } else {
+      active.push(school);
+    }
+  }
+  return {
+    completed,
+    needsAttention,
+    active,
+    total: completed.length + needsAttention.length + active.length,
+  };
+}
+
+function programAttentionReasons(school, today = dashboardToday()) {
+  const reasons = attentionReasons(school, today);
+  if ((school.priority === "High" || school.priority === "Urgent") && !reasons.some((r) => r.includes("priority"))) {
+    reasons.unshift(`${school.priority} priority`);
+  }
+  if (isOverdue(school.followUpDate || school.followUpDue, today) && !reasons.includes("Overdue follow-up")) {
+    reasons.unshift("Overdue follow-up");
+  }
+  return reasons;
+}
+
+function selectProgram(programName = "") {
+  selectedProgram = String(programName || "").trim();
+  const moreSelect = el("more-programs-select");
+  if (moreSelect) {
+    moreSelect.value = SECONDARY_PROGRAMS.includes(selectedProgram) ? selectedProgram : "";
+  }
+  if (el("quick-tag-feedback")) el("quick-tag-feedback").textContent = "";
+  renderProgramsView();
+}
+
+function setProgramsScope(scope) {
+  programsScope = scope === "all" ? "all" : "mine";
+  if (programsScope === "all" && !dashboardLoaded && !isSupervisor && credential) {
+    loadDashboard();
+  }
+  renderProgramsView();
+}
+
+function ensureProgramsNavPopulated(activeList, today) {
+  const pillContainer = el("programs-primary-pills");
+  const primarySpecs = [
+    { id: "program-pill-all", program: "", label: "All Programs" },
+    { id: "program-pill-cypher", program: "Cypher Program", label: "Cypher Program" },
+    { id: "program-pill-competitive", program: "Competitive Arts", label: "Competitive Arts" },
+    { id: "program-pill-btheerise", program: "B Thee Rise", label: "B Thee Rise" },
+    { id: "program-pill-shsm", program: "SHSM", label: "SHSM" },
+  ];
+  for (const spec of primarySpecs) {
+    let btn = el(spec.id);
+    if (!btn) continue;
+    btn.type = "button";
+    btn.setAttribute("data-program", spec.program);
+    if (pillContainer && !pillContainer.children.includes(btn)) {
+      pillContainer.append(btn);
+    }
+    const isActive = selectedProgram.toLowerCase() === spec.program.toLowerCase();
+    btn.className = `program-nav-pill${isActive ? " active" : ""}`;
+    btn.setAttribute("aria-pressed", String(isActive));
+    btn.replaceChildren();
+    if (!spec.program) {
+      btn.textContent = spec.label;
+    } else {
+      const count = categorizeSchoolsForProgram(spec.program, activeList, today).total;
+      const badge = dashboardNode("span", String(count), "program-pill-count");
+      btn.append(dashboardNode("span", spec.label), badge);
+    }
+    btn.onclick = () => selectProgram(spec.program);
+  }
+
+  const moreSelect = el("more-programs-select");
+  if (moreSelect) {
+    moreSelect.replaceChildren();
+    const placeholder = dashboardNode("option", "More programs…");
+    placeholder.value = "";
+    moreSelect.append(placeholder);
+    for (const tag of SECONDARY_PROGRAMS) {
+      const count = categorizeSchoolsForProgram(tag, activeList, today).total;
+      const opt = dashboardNode("option", `${tag} (${count})`);
+      opt.value = tag;
+      moreSelect.append(opt);
+    }
+    moreSelect.value = SECONDARY_PROGRAMS.some((t) => t.toLowerCase() === selectedProgram.toLowerCase())
+      ? SECONDARY_PROGRAMS.find((t) => t.toLowerCase() === selectedProgram.toLowerCase())
+      : "";
+  }
+}
+
+async function quickTagSchoolToProgram() {
+  const select = el("quick-tag-school-select");
+  const btn = el("quick-tag-school-btn");
+  const feedback = el("quick-tag-feedback");
+  const recordId = String(select?.value || "").trim();
+  const programName = String(selectedProgram || "").trim();
+  if (!recordId || !programName) {
+    if (feedback) feedback.textContent = "Select a school first to add it to this program.";
+    return false;
+  }
+  const { allList } = getProgramScopedSchools();
+  const school = allList.find((s) => s.recordId === recordId) || schools.find((s) => s.recordId === recordId);
+  if (!school) return false;
+
+  const existingTracks = parseProgramTracks(school.outreachGoal || school.goal || "");
+  if (!existingTracks.some((t) => t.name.toLowerCase() === programName.toLowerCase())) {
+    existingTracks.push({ name: programName, status: "Active", completed: false });
+  }
+  const newGoal = serializeProgramTracks(existingTracks);
+
+  if (btn) btn.disabled = true;
+  if (feedback) feedback.textContent = `Adding ${school.schoolName} to ${programName}…`;
+
+  const applyLocalGoalUpdate = (lastReqId) => {
+    savedSchoolGoals.set(recordId, newGoal);
+    for (const list of [schools, teamSchools]) {
+      const target = (list || []).find((s) => s.recordId === recordId);
+      if (target) {
+        target.outreachGoal = newGoal;
+        target.goal = newGoal;
+        if (lastReqId) target.lastRequestId = lastReqId;
+      }
+    }
+    school.outreachGoal = newGoal;
+    school.goal = newGoal;
+    if (lastReqId) school.lastRequestId = lastReqId;
+  };
+
+  if (!credential) {
+    applyLocalGoalUpdate(school.lastRequestId);
+    if (feedback) feedback.textContent = `Added ${school.schoolName} to ${programName}.`;
+    renderProgramsView();
+    renderSchools();
+    renderHome();
+    renderDashboard();
+    return true;
+  }
+
+  const session = sessionVersion;
+  const requestId = crypto.randomUUID();
+  const payload = {
+    recordId: school.recordId,
+    expectedRequestId: school.lastRequestId || crypto.randomUUID(),
+    requestId,
+    patch: { outreachGoal: newGoal, goal: newGoal },
+  };
+
+  try {
+    const response = await apiFetch("./api/schools/update", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      credentials: "omit",
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (session !== sessionVersion || !credential) return false;
+    if (response.ok) {
+      applyLocalGoalUpdate(data.record?.lastRequestId || requestId);
+      if (feedback) feedback.textContent = `✓ Added ${school.schoolName} to ${programName}.`;
+      showSaveToast(`✓ Added to ${programName}`);
+      renderProgramsView();
+      renderSchools();
+      renderHome();
+      renderDashboard();
+      return true;
+    } else {
+      if (feedback) feedback.textContent = data.message || "Could not update program tags for this school.";
+      return false;
+    }
+  } catch {
+    if (session === sessionVersion && feedback) {
+      feedback.textContent = "Connection interrupted while saving program tag.";
+    }
+    return false;
+  } finally {
+    if (btn && session === sessionVersion) {
+      btn.disabled = config?.writesEnabled === false;
+    }
+  }
+}
+
+function renderProgramsView() {
+  const view = el("programs-view");
+  if (!view) return;
+  const today = dashboardToday();
+  const { myList, allList, activeList } = getProgramScopedSchools();
+
+  const btnMine = el("programs-toggle-mine");
+  const btnAll = el("programs-toggle-all");
+  if (btnMine) {
+    btnMine.textContent = `My Schools (${myList.length})`;
+    const isMine = programsScope !== "all";
+    btnMine.classList.toggle("active", isMine);
+    btnMine.setAttribute("aria-pressed", String(isMine));
+  }
+  if (btnAll) {
+    btnAll.textContent = `All Team Schools (${allList.length})`;
+    const isAll = programsScope === "all";
+    btnAll.classList.toggle("active", isAll);
+    btnAll.setAttribute("aria-pressed", String(isAll));
+  }
+
+  ensureProgramsNavPopulated(activeList, today);
+
+  const matrixEl = el("programs-overview-matrix");
+  const drilldownEl = el("programs-drilldown");
+  const headingEl = el("programs-heading");
+  const subheadingEl = el("programs-subheading");
+  const statusEl = el("programs-status");
+
+  if (!selectedProgram) {
+    if (headingEl) headingEl.textContent = "Program tracks at a glance.";
+    if (subheadingEl) subheadingEl.textContent = "Track flagship programs, pipeline health, and completed deliveries across schools.";
+    if (statusEl) {
+      statusEl.textContent = `Showing ${programsScope === "all" ? "All Team Schools" : "My Schools"} (${activeList.length} ${activeList.length === 1 ? "school" : "schools"})`;
+    }
+    if (matrixEl) {
+      matrixEl.hidden = false;
+      matrixEl.classList?.remove("hidden");
+      matrixEl.replaceChildren();
+
+      const activeSecondary = SECONDARY_PROGRAMS.filter(
+        (prog) => categorizeSchoolsForProgram(prog, activeList, today).total > 0
+      );
+      const programsToRender = [...FLAGSHIP_PROGRAMS, ...activeSecondary];
+
+      for (const prog of programsToRender) {
+        const isFlagship = FLAGSHIP_PROGRAMS.includes(prog);
+        const stats = categorizeSchoolsForProgram(prog, activeList, today);
+        const card = dashboardNode(
+          "button",
+          "",
+          `school-card program-summary-card${isFlagship ? " flagship-program-card" : ""}`
+        );
+        card.type = "button";
+        card.setAttribute("data-program", prog);
+        card.setAttribute(
+          "aria-label",
+          `${prog}: Needs attention ${stats.needsAttention.length}, Active pipeline ${stats.active.length}, Completed ${stats.completed.length}`
+        );
+
+        const headerRow = dashboardNode("div", "", "program-card-header");
+        const eyebrow = dashboardNode(
+          "span",
+          isFlagship ? "Flagship Track" : "Program Track",
+          `program-card-eyebrow${isFlagship ? " is-flagship" : ""}`
+        );
+        const totalBadge = dashboardNode(
+          "span",
+          `${stats.total} ${stats.total === 1 ? "school" : "schools"}`,
+          "program-card-total"
+        );
+        headerRow.append(eyebrow, totalBadge);
+
+        const title = dashboardNode("h3", prog, "program-card-title");
+
+        const kpiRow = dashboardNode("div", "", "program-kpi-pills");
+        const pillAttention = dashboardNode(
+          "span",
+          `Needs attention: ${stats.needsAttention.length}`,
+          `program-kpi-pill kpi-attention${stats.needsAttention.length > 0 ? " has-count" : ""}`
+        );
+        const pillActive = dashboardNode(
+          "span",
+          `Active pipeline: ${stats.active.length}`,
+          `program-kpi-pill kpi-active${stats.active.length > 0 ? " has-count" : ""}`
+        );
+        const pillCompleted = dashboardNode(
+          "span",
+          `Completed: ${stats.completed.length}`,
+          `program-kpi-pill kpi-completed${stats.completed.length > 0 ? " has-count" : ""}`
+        );
+        kpiRow.append(pillAttention, pillActive, pillCompleted);
+
+        card.append(headerRow, title, kpiRow);
+        card.onclick = () => selectProgram(prog);
+        matrixEl.append(card);
+      }
+    }
+    if (drilldownEl) {
+      drilldownEl.hidden = true;
+      drilldownEl.classList?.add("hidden");
+    }
+    return;
+  }
+
+  // View Mode 2: Single Program Drill-Down
+  const buckets = categorizeSchoolsForProgram(selectedProgram, activeList, today);
+  if (headingEl) headingEl.textContent = selectedProgram;
+  if (subheadingEl) {
+    subheadingEl.textContent = FLAGSHIP_PROGRAMS.includes(selectedProgram)
+      ? `Flagship program track · ${buckets.total} tagged ${buckets.total === 1 ? "school" : "schools"} in ${programsScope === "all" ? "All Team Schools" : "My Schools"}.`
+      : `Program track · ${buckets.total} tagged ${buckets.total === 1 ? "school" : "schools"} in ${programsScope === "all" ? "All Team Schools" : "My Schools"}.`;
+  }
+  if (statusEl) {
+    statusEl.textContent = `${selectedProgram} · ${buckets.total} ${buckets.total === 1 ? "school" : "schools"} (${buckets.needsAttention.length} needs attention, ${buckets.active.length} active pipeline, ${buckets.completed.length} completed)`;
+  }
+
+  if (matrixEl) {
+    matrixEl.hidden = true;
+    matrixEl.classList?.add("hidden");
+  }
+  if (drilldownEl) {
+    drilldownEl.hidden = false;
+    drilldownEl.classList?.remove("hidden");
+  }
+
+  if (el("programs-kpi-strip")) {
+    renderMetrics("programs-kpi-strip", [
+      ["Total Tagged", buckets.total],
+      ["Needs Attention", buckets.needsAttention.length],
+      ["Active Pipeline", buckets.active.length],
+      ["Completed", buckets.completed.length],
+    ]);
+  }
+
+  const quickSelect = el("quick-tag-school-select");
+  if (quickSelect) {
+    const prevVal = quickSelect.value;
+    quickSelect.replaceChildren();
+    const placeholder = dashboardNode("option", "Select a school…");
+    placeholder.value = "";
+    quickSelect.append(placeholder);
+
+    const untaggedSchools = activeList
+      .filter((s) => {
+        const tracks = parseProgramTracks(s.outreachGoal || s.goal || "");
+        return !tracks.some((t) => t.name.toLowerCase() === selectedProgram.toLowerCase());
+      })
+      .sort((a, b) => (a.schoolName || "").localeCompare(b.schoolName || ""));
+
+    for (const s of untaggedSchools) {
+      const opt = dashboardNode("option", s.schoolName);
+      opt.value = s.recordId;
+      quickSelect.append(opt);
+    }
+    quickSelect.value = untaggedSchools.some((s) => s.recordId === prevVal) ? prevVal : "";
+  }
+
+  const quickBtn = el("quick-tag-school-btn");
+  if (quickBtn) {
+    quickBtn.textContent = `+ Add School to ${selectedProgram}`;
+    quickBtn.disabled = config?.writesEnabled === false;
+  }
+
+  const renderBucketSection = (listId, countId, emptyId, items, isAttentionSection = false) => {
+    const listNode = el(listId);
+    const countNode = el(countId);
+    const emptyNode = el(emptyId);
+    if (countNode) countNode.textContent = String(items.length);
+    if (listNode) {
+      listNode.replaceChildren(
+        ...items.map((school) => actionCard(school, isAttentionSection ? programAttentionReasons(school, today) : []))
+      );
+    }
+    if (emptyNode) emptyNode.hidden = items.length > 0;
+  };
+
+  renderBucketSection(
+    "programs-attention-list",
+    "programs-attention-count",
+    "programs-attention-empty",
+    buckets.needsAttention,
+    true
+  );
+  renderBucketSection(
+    "programs-active-list",
+    "programs-active-count",
+    "programs-active-empty",
+    buckets.active,
+    false
+  );
+  renderBucketSection(
+    "programs-completed-list",
+    "programs-completed-count",
+    "programs-completed-empty",
+    buckets.completed,
+    false
+  );
+}
+
+if (typeof window !== "undefined") {
+  window.FLAGSHIP_PROGRAMS = FLAGSHIP_PROGRAMS;
+  window.SECONDARY_PROGRAMS = SECONDARY_PROGRAMS;
+  window.categorizeSchoolsForProgram = categorizeSchoolsForProgram;
+  window.renderProgramsView = renderProgramsView;
+  window.selectProgram = selectProgram;
+  window.setProgramsScope = setProgramsScope;
+  window.quickTagSchoolToProgram = quickTagSchoolToProgram;
 }
 
 function renderDirectory() {
@@ -3742,7 +4245,7 @@ async function refresh() {
     resumeView = null;
     switchTab(currentTab);
     el("workspace-status").textContent = config?.writesEnabled ? "Up to date" : "Up to date · viewing only";
-    renderSchools(); renderHome(); el("welcome").hidden = true; el("workspace").hidden = false;
+    renderSchools(); renderHome(); renderProgramsView(); el("welcome").hidden = true; el("workspace").hidden = false;
     if (el("session-restore")) el("session-restore").hidden = true;
     rememberSession(credential);
     rememberView();
@@ -4134,6 +4637,23 @@ el("schools-toggle-all")?.addEventListener("click", () => {
   renderSchools();
 });
 el("tab-dashboard")?.addEventListener("click", () => switchTab("dashboard"));
+el("tab-programs")?.addEventListener("click", () => {
+  switchTab("programs");
+  renderProgramsView();
+});
+el("programs-toggle-mine")?.addEventListener("click", () => setProgramsScope("mine"));
+el("programs-toggle-all")?.addEventListener("click", () => setProgramsScope("all"));
+el("programs-refresh")?.addEventListener("click", async () => {
+  await refresh();
+  if (!isSupervisor && credential) await loadDashboard();
+});
+el("more-programs-select")?.addEventListener("change", (e) => {
+  const val = e?.target?.value ?? el("more-programs-select")?.value ?? "";
+  selectProgram(val);
+});
+el("quick-tag-school-btn")?.addEventListener("click", () => {
+  quickTagSchoolToProgram();
+});
 el("dashboard-refresh")?.addEventListener("click", loadDashboard);
 el("dashboard-clear")?.addEventListener("click", clearDashboardFilters);
 el("dashboard-search")?.addEventListener("input", renderDashboard);

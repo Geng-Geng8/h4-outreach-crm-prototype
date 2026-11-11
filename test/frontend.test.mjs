@@ -4254,3 +4254,192 @@ test("outreach goal: grouped school overview cards render program badges, suppor
   assert.equal(updatedSchoolBadges[0].textContent, "✓ Board Partnership");
   assert.equal(updatedSchoolBadges[1].textContent, "Keynotes");
 });
+
+test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance Workshops), scope toggle, and quick-tag school", async (t) => {
+  const indexHtml = await readFile("public/index.html", "utf8");
+  assert.match(indexHtml, /id="tab-programs"/);
+  assert.match(indexHtml, /<section id="programs-view" class="view-section hidden"/);
+  assert.match(indexHtml, /id="more-programs-select"/);
+  assert.match(indexHtml, /id="quick-tag-school-select"/);
+  assert.match(indexHtml, /id="quick-tag-school-btn"/);
+
+  const testSchools = [
+    {
+      ...reloadRecord,
+      recordId: "prog-1",
+      schoolName: "Madonna Catholic SS",
+      ownerEmail: "alex@example.test",
+      assignedTo: "Alex",
+      stage: "Engaged",
+      priority: "Medium",
+      followUpDue: "2000-01-01", // Overdue -> Needs attention for SHSM, Completed for Dance Workshops
+      outreachGoal: "Dance Workshops (Completed), SHSM, Cypher Program",
+    },
+    {
+      ...reloadRecord,
+      recordId: "prog-2",
+      schoolName: "Birchmount Park CI",
+      ownerEmail: "alex@example.test",
+      assignedTo: "Alex",
+      stage: "Not Contacted",
+      priority: "Low",
+      followUpDue: "2099-12-31", // Active pipeline for SHSM & Competitive Arts
+      outreachGoal: "SHSM, Competitive Arts",
+    },
+    {
+      ...reloadRecord,
+      recordId: "prog-3",
+      schoolName: "Wexford CSA",
+      ownerEmail: "alex@example.test",
+      assignedTo: "Alex",
+      stage: "Interested",
+      priority: "High",
+      followUpDue: "2099-12-31", // High priority -> Needs attention for Dance Workshops, Completed for SHSM
+      outreachGoal: "SHSM (Completed), Dance Workshops, B Thee Rise",
+    },
+    {
+      ...reloadRecord,
+      recordId: "prog-4",
+      schoolName: "Cedarbrae CI",
+      ownerEmail: "alex@example.test",
+      assignedTo: "Alex",
+      stage: "Contacted",
+      priority: "Medium",
+      followUpDue: "2099-12-31", // Active pipeline for Dance Workshops
+      outreachGoal: "Dance Workshops",
+    },
+    {
+      ...reloadRecord,
+      recordId: "prog-5",
+      schoolName: "Agincourt CI",
+      ownerEmail: "jordan@example.test",
+      assignedTo: "Jordan",
+      stage: "Booked",
+      priority: "Urgent",
+      followUpDue: "2099-12-31", // Team member's school: Needs attention for SHSM (Urgent)
+      outreachGoal: "SHSM, Cypher Program (Completed)",
+    },
+  ];
+
+  const updateRequests = [];
+  const h = setupEnv({
+    fetchHandler: (url, init) => {
+      if (url.includes("/api/config")) return reloadFetch(url);
+      if (url.includes("/api/schools/update")) {
+        const body = JSON.parse(init.body);
+        updateRequests.push(body);
+        const match = testSchools.find((s) => s.recordId === body.recordId) || testSchools[0];
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            code: "SUCCESS",
+            requestId: body.requestId,
+            record: { ...match, ...body.patch, lastRequestId: body.requestId },
+          })
+        );
+      }
+      if (url.includes("/api/dashboard")) {
+        return Promise.resolve(Response.json({ ok: true, schools: testSchools }));
+      }
+      return Promise.resolve(
+        Response.json({
+          ...reloadPayload(),
+          currentUser: { name: "Alex", email: "alex@example.test", role: "Supervisor" },
+          schools: testSchools,
+        })
+      );
+    },
+  });
+  t.after(h.cleanup);
+  await h.signIn("alex@example.test");
+
+  // 1. Clicking the Programs nav tab opens #programs-view and renders the overview matrix with flagship programs
+  h.getEl("tab-programs").click();
+  assert.equal(h.getEl("programs-view").hidden, false);
+  assert.equal(h.getEl("programs-view").classList.contains("hidden"), false);
+  assert.equal(h.getEl("programs-overview-matrix").hidden, false);
+  assert.equal(h.getEl("programs-drilldown").hidden, true);
+
+  const matrixCards = h.getEl("programs-overview-matrix").children;
+  const cardPrograms = matrixCards.map((c) => c.getAttribute("data-program"));
+  assert.deepEqual(
+    cardPrograms.slice(0, 4),
+    ["Cypher Program", "Competitive Arts", "B Thee Rise", "SHSM"],
+    "4 flagship programs must be featured first in the overview matrix"
+  );
+  assert.ok(cardPrograms.includes("Dance Workshops"), "Active secondary program Dance Workshops should appear in overview matrix");
+
+  // Scope defaults to My Schools (4 schools assigned to Alex, 1 to Jordan)
+  assert.equal(h.getEl("programs-toggle-mine").textContent, "My Schools (4)");
+  assert.equal(h.getEl("programs-toggle-all").textContent, "All Team Schools (5)");
+
+  // Verify SHSM pill count in My Schools scope is 3 (prog-1, prog-2, prog-3)
+  const shsmPill = h.getEl("program-pill-shsm");
+  assert.equal(shsmPill.children[1].textContent, "3");
+
+  // 2. Selecting SHSM accurately buckets schools into Needs attention, Active pipeline, and Completed with zero dropped schools
+  shsmPill.click();
+  assert.equal(h.getEl("programs-overview-matrix").hidden, true);
+  assert.equal(h.getEl("programs-drilldown").hidden, false);
+  assert.equal(h.getEl("programs-heading").textContent, "SHSM");
+
+  // 4-card KPI strip for SHSM (My Schools = 3 total: 1 attention, 1 active, 1 completed)
+  const kpiCards = h.getEl("programs-kpi-strip").children;
+  assert.equal(kpiCards.length, 4);
+  assert.equal(kpiCards[0].children[0].textContent, "3"); // Total Tagged
+  assert.equal(kpiCards[1].children[0].textContent, "1"); // Needs Attention (Madonna - overdue)
+  assert.equal(kpiCards[2].children[0].textContent, "1"); // Active Pipeline (Birchmount - Not Contacted, not overdue, Low priority)
+  assert.equal(kpiCards[3].children[0].textContent, "1"); // Completed (Wexford - SHSM (Completed))
+
+  assert.equal(h.getEl("programs-attention-list").children.length, 1);
+  assert.equal(h.getEl("programs-attention-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Madonna Catholic SS");
+  assert.equal(h.getEl("programs-active-list").children.length, 1);
+  assert.equal(h.getEl("programs-active-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Birchmount Park CI");
+  assert.equal(h.getEl("programs-completed-list").children.length, 1);
+  assert.equal(h.getEl("programs-completed-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Wexford CSA");
+
+  // 3. Selecting Dance Workshops via #more-programs-select buckets accurately with zero dropped schools
+  const moreSelect = h.getEl("more-programs-select");
+  moreSelect.value = "Dance Workshops";
+  moreSelect.dispatchEvent(new h.context.Event("change", { bubbles: true }));
+  assert.equal(h.getEl("programs-heading").textContent, "Dance Workshops");
+  // Dance Workshops in My Schools: Wexford (High priority -> Needs attention), Cedarbrae (Contacted -> Active), Madonna (Completed)
+  assert.equal(h.getEl("programs-attention-list").children.length, 1);
+  assert.equal(h.getEl("programs-attention-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Wexford CSA");
+  assert.equal(h.getEl("programs-active-list").children.length, 1);
+  assert.equal(h.getEl("programs-active-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Cedarbrae CI");
+  assert.equal(h.getEl("programs-completed-list").children.length, 1);
+  assert.equal(h.getEl("programs-completed-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Madonna Catholic SS");
+
+  // 4. Switching between My Schools and All Team Schools filters program counts and cards accurately
+  shsmPill.click();
+  assert.equal(h.getEl("programs-kpi-strip").children[0].children[0].textContent, "3");
+  h.getEl("programs-toggle-all").click();
+  assert.equal(h.getEl("programs-toggle-all").classList.contains("active"), true);
+  // In All Team Schools, Agincourt CI (Jordan's school, Urgent priority) is added to SHSM -> Total 4, Needs Attention 2
+  assert.equal(h.getEl("program-pill-shsm").children[1].textContent, "4");
+  assert.equal(h.getEl("programs-kpi-strip").children[0].children[0].textContent, "4");
+  assert.equal(h.getEl("programs-kpi-strip").children[1].children[0].textContent, "2");
+  assert.equal(h.getEl("programs-attention-list").children.length, 2);
+
+  // Switch back to My Schools
+  h.getEl("programs-toggle-mine").click();
+  assert.equal(h.getEl("programs-kpi-strip").children[0].children[0].textContent, "3");
+
+  // 5. Quick-Tag School Bar adds untagged Cedarbrae CI to SHSM, saves via /api/schools/update, and renders immediately
+  const quickSelect = h.getEl("quick-tag-school-select");
+  const untaggedIds = quickSelect.children.map((opt) => opt.value).filter(Boolean);
+  assert.deepEqual(untaggedIds, ["prog-4"], "Only Cedarbrae CI should be untagged for SHSM in My Schools");
+  assert.equal(h.getEl("quick-tag-school-btn").textContent, "+ Add School to SHSM");
+
+  quickSelect.value = "prog-4";
+  await h.context.quickTagSchoolToProgram();
+
+  assert.equal(updateRequests.length, 1);
+  assert.equal(updateRequests[0].recordId, "prog-4");
+  assert.equal(updateRequests[0].patch.outreachGoal, "Dance Workshops, SHSM");
+  assert.equal(h.getEl("program-pill-shsm").children[1].textContent, "4");
+  assert.equal(h.getEl("programs-kpi-strip").children[0].children[0].textContent, "4");
+  assert.equal(h.getEl("programs-active-list").children.length, 2, "Cedarbrae CI should now render in SHSM Active pipeline");
+});
+
