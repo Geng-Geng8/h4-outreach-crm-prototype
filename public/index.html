@@ -151,7 +151,7 @@
         <p id="programs-status" class="workspace-status" role="status" aria-live="polite"></p>
         <div id="programs-overview-matrix" class="programs-overview-matrix"></div>
         <div id="programs-drilldown" class="programs-drilldown" hidden>
-          <div id="programs-kpi-strip" class="dashboard-metrics programs-kpi-strip" aria-label="Program totals"></div>
+          <div id="programs-kpi-strip" class="dashboard-metrics programs-kpi-strip" role="group" aria-label="Filter schools by commitment temperature"></div>
           <div id="programs-quick-tag-bar" class="programs-quick-tag-bar">
             <label for="quick-tag-school-select" class="quick-tag-label">Tag a school into this program:</label>
             <div class="quick-tag-controls">
@@ -162,23 +162,47 @@
             </div>
             <p id="quick-tag-feedback" class="workspace-status" role="status" aria-live="polite"></p>
           </div>
-          <div id="programs-section-attention" class="programs-triage-section">
+          <div id="programs-section-confirmed" class="programs-triage-section" data-bucket="confirmed">
             <div class="dashboard-section-heading">
-              <div><h3>Needs attention</h3><p>Overdue follow-ups or High/Urgent priority schools.</p></div>
+              <div><h3>Confirmed</h3><p>Schools with a definite YES and locked-in booking for this track.</p></div>
+              <span id="programs-confirmed-count" class="program-section-badge">0</span>
+            </div>
+            <div id="programs-confirmed-list" class="school-list"></div>
+            <p id="programs-confirmed-empty" class="empty-state" hidden>No confirmed schools for this program yet.</p>
+          </div>
+          <div id="programs-section-fence" class="programs-triage-section" data-bucket="onTheFence">
+            <div class="dashboard-section-heading">
+              <div><h3>On the Fence</h3><p>Teacher or principal replied — discussing dates, pricing, or details.</p></div>
+              <span id="programs-fence-count" class="program-section-badge">0</span>
+            </div>
+            <div id="programs-fence-list" class="school-list"></div>
+            <p id="programs-fence-empty" class="empty-state" hidden>No schools currently on the fence for this program.</p>
+          </div>
+          <div id="programs-section-attention" class="programs-triage-section" data-bucket="needsAttention">
+            <div class="dashboard-section-heading">
+              <div><h3>Overdue Follow-Up</h3><p>Non-completed schools with an overdue follow-up date needing attention.</p></div>
               <span id="programs-attention-count" class="program-section-badge">0</span>
             </div>
             <div id="programs-attention-list" class="school-list"></div>
-            <p id="programs-attention-empty" class="empty-state" hidden>No schools need immediate attention for this program.</p>
+            <p id="programs-attention-empty" class="empty-state" hidden>No schools have an overdue follow-up for this program.</p>
           </div>
-          <div id="programs-section-active" class="programs-triage-section">
+          <div id="programs-section-waiting" class="programs-triage-section" data-bucket="waitingOnReply">
             <div class="dashboard-section-heading">
-              <div><h3>Active pipeline</h3><p>Schools currently in outreach, conversation, or booking for this track.</p></div>
-              <span id="programs-active-count" class="program-section-badge">0</span>
+              <div><h3>Waiting on Reply</h3><p>Sent email or left voicemail — waiting to hear back from the school.</p></div>
+              <span id="programs-waiting-count" class="program-section-badge">0</span>
             </div>
-            <div id="programs-active-list" class="school-list"></div>
-            <p id="programs-active-empty" class="empty-state" hidden>No schools in the active pipeline for this program.</p>
+            <div id="programs-waiting-list" class="school-list"></div>
+            <p id="programs-waiting-empty" class="empty-state" hidden>No schools waiting on a reply for this program.</p>
           </div>
-          <div id="programs-section-completed" class="programs-triage-section">
+          <div id="programs-section-cold" class="programs-triage-section" data-bucket="cold">
+            <div class="dashboard-section-heading">
+              <div><h3>Cold</h3><p>Haven’t reached out yet — ready for a first intro email or phone call.</p></div>
+              <span id="programs-cold-count" class="program-section-badge">0</span>
+            </div>
+            <div id="programs-cold-list" class="school-list"></div>
+            <p id="programs-cold-empty" class="empty-state" hidden>No cold schools for this program.</p>
+          </div>
+          <div id="programs-section-completed" class="programs-triage-section" data-bucket="completed">
             <div class="dashboard-section-heading">
               <div><h3>Completed</h3><p>Schools where this program track or overall delivery is marked completed.</p></div>
               <span id="programs-completed-count" class="program-section-badge">0</span>
@@ -487,16 +511,16 @@
                 <span class="field-help">When to follow up next (reminder appears on your dashboard).</span>
               </label>
               <label id="field-stage" class="stage-secondary">School stage
-                <select id="edit-stage">
-                  <option>Not Contacted</option>
-                  <option>Contacted</option>
-                  <option>Interested</option>
-                  <option>Engaged</option>
-                  <option>Booked</option>
-                  <option>Completed</option>
-                  <option value="Cold">Cold</option>
+                <select id="edit-stage" aria-describedby="stage-helper-text">
+                  <option value="Not Contacted">Cold (Not Contacted) — Haven't reached out yet</option>
+                  <option value="Contacted">Waiting on Reply (Contacted) — Sent email or left voicemail</option>
+                  <option value="Engaged">On the Fence (Engaged) — Teacher replied / talking details</option>
+                  <option value="Booked">Confirmed (Booked) — Definite YES / locked in</option>
+                  <option value="Completed">Completed — Workshop or program delivered</option>
+                  <option value="Interested">On the Fence (Interested) — Teacher replied / talking details</option>
+                  <option value="Cold">Cold (Archived / Declined)</option>
                 </select>
-                <span class="field-help">School's current outreach stage.</span>
+                <span id="stage-helper-text" class="field-help">No one has contacted this school yet. Ready for a first intro email or phone call.</span>
               </label>
               <label id="field-coldReason" class="editor-wide" hidden>Cold reason
                 <select id="edit-coldReason">

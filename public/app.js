@@ -54,7 +54,111 @@ const pendingClaims = new Map(); // osn -> requestId
 let teamSchools = [], dashboardLoaded = false, dashboardSeq = 0, dashboardRequest;
 let overviewStudents = [], schoolScopeFilter = null, schoolStageFilter = "", schoolScopeLabel = "", homeShowAll = false;
 let supervisorSchoolScope = "mine";
-let programsScope = "mine", selectedProgram = "";
+let programsScope = "mine", selectedProgram = "", programStatusFilter = "all";
+var state = {
+  get programStatusFilter() { return programStatusFilter; },
+  set programStatusFilter(val) { programStatusFilter = String(val || "all").trim() || "all"; },
+};
+const STAGE_CONFIG = {
+  "Not Contacted": {
+    display: "Cold",
+    dropdownLabel: "Cold (Not Contacted) — Haven't reached out yet",
+    helperText: "No one has contacted this school yet. Ready for a first intro email or phone call.",
+    badgeClass: "stage-cold",
+  },
+  Contacted: {
+    display: "Waiting on Reply",
+    dropdownLabel: "Waiting on Reply (Contacted) — Sent email or left voicemail",
+    helperText: "We reached out by email or phone and are waiting to hear back from the school.",
+    badgeClass: "stage-waiting",
+  },
+  Engaged: {
+    display: "On the Fence",
+    dropdownLabel: "On the Fence (Engaged) — Teacher replied / talking details",
+    helperText: "The teacher or principal replied! We are discussing dates, pricing, or program details.",
+    badgeClass: "stage-fence",
+  },
+  Booked: {
+    display: "Confirmed",
+    dropdownLabel: "Confirmed (Booked) — Definite YES / locked in",
+    helperText: "Awesome! Only choose this when the school gave a clear YES to participate.",
+    badgeClass: "stage-confirmed",
+  },
+  Completed: {
+    display: "Completed",
+    dropdownLabel: "Completed — Workshop or program delivered",
+    helperText: "The workshop, certification, or event has already been delivered.",
+    badgeClass: "stage-completed",
+  },
+};
+const LEGACY_STAGE_FALLBACKS = {
+  Interested: {
+    display: "On the Fence",
+    dropdownLabel: "On the Fence (Interested) — Teacher replied / talking details",
+    helperText: STAGE_CONFIG.Engaged.helperText,
+    badgeClass: "stage-fence",
+  },
+  Cold: {
+    display: "Cold",
+    dropdownLabel: "Cold (Archived / Declined)",
+    helperText: "This school declined or was archived after multiple unanswered follow-ups.",
+    badgeClass: "stage-cold",
+  },
+};
+function getStageMeta(stage) {
+  const key = String(stage || "").trim();
+  if (STAGE_CONFIG[key]) return STAGE_CONFIG[key];
+  if (LEGACY_STAGE_FALLBACKS[key]) return LEGACY_STAGE_FALLBACKS[key];
+  if (!key) return STAGE_CONFIG["Not Contacted"];
+  return {
+    display: key,
+    dropdownLabel: key,
+    helperText: "School's current outreach stage.",
+    badgeClass: "stage-cold",
+  };
+}
+function ensureStageDropdownPopulated() {
+  const stageSelect = el("edit-stage");
+  if (!stageSelect) return;
+  const currentValue = stageSelect.value;
+  const optionSpecs = [
+    ...Object.entries(STAGE_CONFIG).map(([value, meta]) => ({ value, label: meta.dropdownLabel })),
+    { value: "Interested", label: LEGACY_STAGE_FALLBACKS.Interested.dropdownLabel },
+    { value: "Cold", label: LEGACY_STAGE_FALLBACKS.Cold.dropdownLabel },
+  ];
+  const existingOptions = stageSelect.options
+    ? Array.from(stageSelect.options)
+    : (stageSelect.children ? Array.from(stageSelect.children) : []);
+  if (existingOptions.length === 0) {
+    for (const spec of optionSpecs) {
+      const opt = document.createElement("option");
+      opt.value = spec.value;
+      opt.textContent = spec.label;
+      stageSelect.append(opt);
+    }
+    if (currentValue) stageSelect.value = currentValue;
+  } else {
+    for (const spec of optionSpecs) {
+      const match = existingOptions.find((o) => (o.value || o.textContent) === spec.value);
+      if (match) {
+        match.value = spec.value;
+        match.textContent = spec.label;
+      }
+    }
+  }
+}
+function updateStageHelperText(stageVal) {
+  ensureStageDropdownPopulated();
+  const helper = el("stage-helper-text");
+  if (!helper) return;
+  const resolvedStage = stageVal !== undefined ? stageVal : (el("edit-stage")?.value || "Not Contacted");
+  helper.textContent = getStageMeta(resolvedStage).helperText;
+}
+if (typeof window !== "undefined") {
+  window.STAGE_CONFIG = STAGE_CONFIG;
+  window.state = state;
+  window.updateStageHelperText = updateStageHelperText;
+}
 const FLAGSHIP_PROGRAMS = [
   "Cypher Program",
   "Competitive Arts",
@@ -603,6 +707,8 @@ function forgetSession() {
     const input = el(`edit-${field}`);
     if (input) input.value = "";
   }
+  ensureStageDropdownPopulated();
+  updateStageHelperText("Not Contacted");
   populateGoalDropdown("");
   for (const field of outreachFields) el(`log-${field}`).value = "";
   updateSuggestionStates?.();
@@ -633,15 +739,23 @@ function forgetSession() {
   if (el("home-refresh")) el("home-refresh").disabled = false;
   credential = ""; schools = []; directory = []; demoSchools = []; isSupervisor = false; currentUser = null;
   pendingClaims.clear(); supervisorSchoolScope = "mine";
-  programsScope = "mine"; selectedProgram = "";
+  programsScope = "mine"; selectedProgram = ""; programStatusFilter = "all";
   if (el("schools-supervisor-toggle")) el("schools-supervisor-toggle").hidden = true;
   if (el("programs-view")) {
     el("programs-view").hidden = true;
     el("programs-view").classList?.add("hidden");
     el("programs-overview-matrix")?.replaceChildren?.();
-    el("programs-attention-list")?.replaceChildren?.();
-    el("programs-active-list")?.replaceChildren?.();
-    el("programs-completed-list")?.replaceChildren?.();
+    for (const listId of [
+      "programs-confirmed-list",
+      "programs-fence-list",
+      "programs-attention-list",
+      "programs-waiting-list",
+      "programs-cold-list",
+      "programs-active-list",
+      "programs-completed-list",
+    ]) {
+      el(listId)?.replaceChildren?.();
+    }
     el("programs-kpi-strip")?.replaceChildren?.();
     if (el("programs-status")) el("programs-status").textContent = "";
     if (el("quick-tag-feedback")) el("quick-tag-feedback").textContent = "";
@@ -828,6 +942,7 @@ function applySuggestion(targetId, value) {
       if (el("edit-coldReason")) el("edit-coldReason").value = DEFAULT_DECLINE_REASON;
       if (el("edit-followUpDue")) el("edit-followUpDue").value = "";
       if (el("edit-nextAction")) el("edit-nextAction").value = "Archived for season";
+      updateStageHelperText("Cold");
       updateColdWarning();
     }
   }
@@ -1452,6 +1567,7 @@ function discardCurrentDraft() {
     const canEditAssignment = isSupervisor || isAssignedToMe(record);
     renderAssigneeSection(canEditAssignment);
 
+    updateStageHelperText(el("edit-stage")?.value || record.stage || "Not Contacted");
     updateColdWarning();
     editorInputs(false);
     renderSummarySuggestions();
@@ -2307,6 +2423,8 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     const input = el(`edit-${field}`);
     if (input) input.value = "";
   }
+  ensureStageDropdownPopulated();
+  updateStageHelperText("Not Contacted");
   populateGoalDropdown("");
   editorInputs(true);
   renderSummarySuggestions();
@@ -2405,6 +2523,7 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
       const draftColdReason = draft?.values?.coldReason ?? draft?.payload?.coldReason ?? draft?.coldReason;
       el("edit-coldReason").value = draftColdReason !== undefined ? String(draftColdReason) : (data.record.coldReason || (data.record.stage === "Cold" ? DEFAULT_DECLINE_REASON : ""));
     }
+    updateStageHelperText(el("edit-stage")?.value || data.record.stage || "Not Contacted");
     updateColdWarning();
 
     editing.crmUsers = data.users || [];
@@ -2929,7 +3048,7 @@ function renderBulkStep1() {
       meta.textContent = [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · ") || "Location not listed";
       info.append(title, meta);
 
-      const badge = schoolBadge(school.stage, school.stage === "Not Contacted" ? "Claimed / not contacted" : school.stage);
+      const badge = schoolBadge(school.stage);
 
       row.append(check, info, badge);
       list.append(row);
@@ -3643,12 +3762,16 @@ function appendNextAction(card, school) {
   const due = dueState(school);
   card.append(dashboardNode("p", school.followUpDue ? `Follow-up: ${school.followUpDue}${due === "overdue" ? " · Overdue" : due === "today" ? " · Today" : ""}` : "No follow-up reminder set", due === "overdue" ? "action-date dashboard-due" : "action-date"));
 }
-function schoolBadge(stage, label = stage || "Stage not set") {
-  const badge = dashboardNode("span", label, "school-stage");
+function schoolBadge(stage, label) {
+  const meta = getStageMeta(stage);
+  const displayLabel = label !== undefined ? label : (STAGE_CONFIG[stage]?.display || meta.display || stage || "Stage not set");
+  const badge = dashboardNode("span", displayLabel, "school-stage");
+  if (meta.badgeClass) badge.classList.add(meta.badgeClass);
+  if (stage === "Contacted") badge.classList.add("contacted");
   if (["Interested", "Engaged"].includes(stage)) badge.classList.add("warm");
   if (stage === "Booked") badge.classList.add("booked");
   if (stage === "Completed") badge.classList.add("completed", "badge-completed");
-  if (stage === "Cold") badge.classList.add("cold");
+  if (stage === "Cold" || stage === "Not Contacted" || !stage) badge.classList.add("cold");
   return badge;
 }
 async function openAction(id, action = "open") {
@@ -3799,7 +3922,7 @@ function renderDashboard() {
     const cell = (label) => { const td = document.createElement("td"); td.setAttribute("data-label", label); row.append(td); return td; };
     cell("School").append(dashboardNode("strong", school.schoolName), dashboardNode("span", [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · "), "dashboard-school-meta"));
     cell("Assigned to").textContent = assignee(school);
-    const badge = schoolBadge(school.stage, school.stage === "Not Contacted" ? "Claimed / not contacted" : school.stage || "Stage not set");
+    const badge = schoolBadge(school.stage);
     const programBadges = createProgramBadges(school.outreachGoal || school.goal || "");
     cell("Stage").append(badge, ...programBadges);
     cell("Last contact").textContent = school.lastContacted || "Not recorded";
@@ -3885,17 +4008,39 @@ function getProgramScopedSchools() {
   return { myList, allList, activeList };
 }
 
-function categorizeSchoolsForProgram(programName, schoolList = getProgramScopedSchools().activeList, today = dashboardToday()) {
+function categorizeSchoolsForProgram(arg1, arg2 = getProgramScopedSchools().activeList, today = dashboardToday()) {
+  let programName;
+  let schoolList;
+  if (Array.isArray(arg1)) {
+    schoolList = arg1;
+    programName = arg2;
+  } else {
+    programName = arg1;
+    schoolList = Array.isArray(arg2) ? arg2 : getProgramScopedSchools().activeList;
+  }
   const target = String(programName || "").trim().toLowerCase();
+  const confirmed = [];
+  const onTheFence = [];
+  const waitingOnReply = [];
+  const cold = [];
   const completed = [];
   const needsAttention = [];
   const active = [];
   if (!target) {
-    return { completed, needsAttention, active, total: 0 };
+    return {
+      confirmed,
+      onTheFence,
+      waitingOnReply,
+      cold,
+      completed,
+      needsAttention,
+      active,
+      total: 0,
+    };
   }
   for (const school of (schoolList || [])) {
     if (!school) continue;
-    const rawGoal = school.outreachGoal || school.goal || savedSchoolGoals.get(school.recordId) || "";
+    const rawGoal = savedSchoolGoals.get(school.recordId) || school.outreachGoal || school.goal || "";
     const tracks = parseProgramTracks(rawGoal);
     const match = tracks.find((track) => track.name.toLowerCase() === target);
     if (!match) continue;
@@ -3904,24 +4049,37 @@ function categorizeSchoolsForProgram(programName, schoolList = getProgramScopedS
       completed.push(school);
       continue;
     }
+    const rawStage = String(school.stage || "").trim();
+    if (rawStage === "Booked") {
+      confirmed.push(school);
+    } else if (rawStage === "Engaged" || rawStage === "Interested") {
+      onTheFence.push(school);
+    } else if (rawStage === "Contacted") {
+      waitingOnReply.push(school);
+    } else {
+      cold.push(school);
+    }
     const dueDate = school.followUpDue || school.followUpDate || "";
-    const isAttention = (
+    const isOverdueFollowUp = (
       isOverdue(school, today) ||
-      (!["Booked", "Cold"].includes(school.stage) && isOverdue(dueDate, today)) ||
-      school.priority === "High" ||
-      school.priority === "Urgent"
+      (!["Booked", "Cold", "Completed"].includes(rawStage) && isOverdue(dueDate, today))
     );
-    if (isAttention) {
+    if (isOverdueFollowUp) {
       needsAttention.push(school);
     } else {
       active.push(school);
     }
   }
+  const total = confirmed.length + onTheFence.length + waitingOnReply.length + cold.length + completed.length;
   return {
+    confirmed,
+    onTheFence,
+    waitingOnReply,
+    cold,
     completed,
     needsAttention,
     active,
-    total: completed.length + needsAttention.length + active.length,
+    total,
   };
 }
 
@@ -3936,8 +4094,22 @@ function programAttentionReasons(school, today = dashboardToday()) {
   return reasons;
 }
 
+function setProgramStatusFilter(bucket = "all") {
+  const normalized = String(bucket || "all").trim();
+  if (!normalized || normalized === "all" || programStatusFilter === normalized) {
+    programStatusFilter = "all";
+  } else {
+    programStatusFilter = normalized;
+  }
+  renderProgramsView();
+}
+
 function selectProgram(programName = "") {
-  selectedProgram = String(programName || "").trim();
+  const nextProgram = String(programName || "").trim();
+  if (nextProgram.toLowerCase() !== selectedProgram.toLowerCase()) {
+    programStatusFilter = "all";
+  }
+  selectedProgram = nextProgram;
   const moreSelect = el("more-programs-select");
   if (moreSelect) {
     moreSelect.value = SECONDARY_PROGRAMS.includes(selectedProgram) ? selectedProgram : "";
@@ -4173,22 +4345,37 @@ function renderProgramsView() {
           const title = dashboardNode("h3", prog, "program-card-title");
 
           const kpiRow = dashboardNode("div", "", "program-kpi-pills");
+          const pillConfirmed = dashboardNode(
+            "span",
+            `Confirmed: ${stats.confirmed.length}`,
+            `program-kpi-pill kpi-confirmed${stats.confirmed.length > 0 ? " has-count" : ""}`
+          );
+          const pillFence = dashboardNode(
+            "span",
+            `On the Fence: ${stats.onTheFence.length}`,
+            `program-kpi-pill kpi-fence${stats.onTheFence.length > 0 ? " has-count" : ""}`
+          );
+          const pillWaiting = dashboardNode(
+            "span",
+            `Waiting on Reply: ${stats.waitingOnReply.length}`,
+            `program-kpi-pill kpi-waiting${stats.waitingOnReply.length > 0 ? " has-count" : ""}`
+          );
+          const pillCold = dashboardNode(
+            "span",
+            `Cold: ${stats.cold.length}`,
+            `program-kpi-pill kpi-cold${stats.cold.length > 0 ? " has-count" : ""}`
+          );
           const pillAttention = dashboardNode(
             "span",
-            `Needs attention: ${stats.needsAttention.length}`,
+            `Overdue Follow-Up: ${stats.needsAttention.length}`,
             `program-kpi-pill kpi-attention${stats.needsAttention.length > 0 ? " has-count" : ""}`
-          );
-          const pillActive = dashboardNode(
-            "span",
-            `Active pipeline: ${stats.active.length}`,
-            `program-kpi-pill kpi-active${stats.active.length > 0 ? " has-count" : ""}`
           );
           const pillCompleted = dashboardNode(
             "span",
             `Completed: ${stats.completed.length}`,
             `program-kpi-pill kpi-completed${stats.completed.length > 0 ? " has-count" : ""}`
           );
-          kpiRow.append(pillAttention, pillActive, pillCompleted);
+          kpiRow.append(pillConfirmed, pillFence, pillWaiting, pillCold, pillAttention, pillCompleted);
 
           card.append(headerRow, title, kpiRow);
           card.onclick = () => selectProgram(prog);
@@ -4204,6 +4391,7 @@ function renderProgramsView() {
 
     // View Mode 2: Single Program Drill-Down
     const buckets = categorizeSchoolsForProgram(selectedProgram, activeList, today);
+    const activeFilter = programStatusFilter || "all";
     if (headingEl) headingEl.textContent = selectedProgram;
     if (subheadingEl) {
       subheadingEl.textContent = FLAGSHIP_PROGRAMS.includes(selectedProgram)
@@ -4211,7 +4399,7 @@ function renderProgramsView() {
         : `Program track · ${buckets.total} tagged ${buckets.total === 1 ? "school" : "schools"} in ${programsScope === "all" ? "All Team Schools" : "My Schools"}.`;
     }
     if (statusEl) {
-      statusEl.textContent = `${selectedProgram} · ${buckets.total} ${buckets.total === 1 ? "school" : "schools"} (${buckets.needsAttention.length} needs attention, ${buckets.active.length} active pipeline, ${buckets.completed.length} completed)`;
+      statusEl.textContent = `${selectedProgram} · ${buckets.total} ${buckets.total === 1 ? "school" : "schools"} (${buckets.confirmed.length} confirmed, ${buckets.onTheFence.length} on the fence, ${buckets.waitingOnReply.length} waiting on reply, ${buckets.cold.length} cold, ${buckets.needsAttention.length} overdue follow-up, ${buckets.completed.length} completed)`;
     }
 
     if (matrixEl) {
@@ -4223,13 +4411,35 @@ function renderProgramsView() {
       drilldownEl.classList?.remove("hidden");
     }
 
-    if (el("programs-kpi-strip")) {
-      renderMetrics("programs-kpi-strip", [
-        ["Total Tagged", buckets.total],
-        ["Needs Attention", buckets.needsAttention.length],
-        ["Active Pipeline", buckets.active.length],
-        ["Completed", buckets.completed.length],
-      ]);
+    const kpiStrip = el("programs-kpi-strip");
+    if (kpiStrip) {
+      kpiStrip.replaceChildren?.();
+      const statCards = [
+        { key: "all", label: "All", count: buckets.total, accentClass: "stat-all" },
+        { key: "confirmed", label: "Confirmed", count: buckets.confirmed.length, accentClass: "stat-confirmed" },
+        { key: "onTheFence", label: "On the Fence", count: buckets.onTheFence.length, accentClass: "stat-fence" },
+        { key: "waitingOnReply", label: "Waiting on Reply", count: buckets.waitingOnReply.length, accentClass: "stat-waiting" },
+        { key: "cold", label: "Cold", count: buckets.cold.length, accentClass: "stat-cold" },
+        { key: "needsAttention", label: "Overdue Follow-Up", count: buckets.needsAttention.length, accentClass: "stat-attention" },
+      ];
+      for (const spec of statCards) {
+        const isPressed = activeFilter === spec.key;
+        const btn = dashboardNode(
+          "button",
+          "",
+          `dashboard-metric program-stat-card ${spec.accentClass}${isPressed ? " active is-active" : ""}`
+        );
+        btn.type = "button";
+        btn.setAttribute("data-status-filter", spec.key);
+        btn.setAttribute("aria-pressed", String(isPressed));
+        btn.setAttribute("aria-label", `${spec.label}: ${spec.count}`);
+        btn.append(
+          dashboardNode("strong", String(spec.count), "stat-card-count"),
+          dashboardNode("span", spec.label, "stat-card-label")
+        );
+        btn.onclick = () => setProgramStatusFilter(spec.key);
+        kpiStrip.append(btn);
+      }
     }
 
     const quickSelect = el("quick-tag-school-select");
@@ -4261,40 +4471,110 @@ function renderProgramsView() {
       quickBtn.disabled = config?.writesEnabled === false;
     }
 
-    const renderBucketSection = (listId, countId, emptyId, items, isAttentionSection = false) => {
-      const listNode = el(listId);
-      const countNode = el(countId);
-      const emptyNode = el(emptyId);
-      if (countNode) countNode.textContent = String(items.length);
-      if (listNode) {
-        listNode.replaceChildren?.(
-          ...items.map((school) => actionCard(school, isAttentionSection ? programAttentionReasons(school, today) : []))
-        );
-      }
-      if (emptyNode) emptyNode.hidden = items.length > 0;
-    };
+    const prioritySectionSpecs = [
+      {
+        bucket: "confirmed",
+        sectionId: "programs-section-confirmed",
+        title: "Confirmed",
+        listId: "programs-confirmed-list",
+        countId: "programs-confirmed-count",
+        emptyId: "programs-confirmed-empty",
+        items: buckets.confirmed,
+        isAttention: false,
+      },
+      {
+        bucket: "onTheFence",
+        sectionId: "programs-section-fence",
+        title: "On the Fence",
+        listId: "programs-fence-list",
+        countId: "programs-fence-count",
+        emptyId: "programs-fence-empty",
+        items: buckets.onTheFence,
+        isAttention: false,
+      },
+      {
+        bucket: "needsAttention",
+        sectionId: "programs-section-attention",
+        title: "Overdue Follow-Up",
+        listId: "programs-attention-list",
+        countId: "programs-attention-count",
+        emptyId: "programs-attention-empty",
+        items: buckets.needsAttention,
+        isAttention: true,
+      },
+      {
+        bucket: "waitingOnReply",
+        sectionId: "programs-section-waiting",
+        title: "Waiting on Reply",
+        listId: "programs-waiting-list",
+        countId: "programs-waiting-count",
+        emptyId: "programs-waiting-empty",
+        items: buckets.waitingOnReply,
+        isAttention: false,
+      },
+      {
+        bucket: "cold",
+        sectionId: "programs-section-cold",
+        title: "Cold",
+        listId: "programs-cold-list",
+        countId: "programs-cold-count",
+        emptyId: "programs-cold-empty",
+        items: buckets.cold,
+        isAttention: false,
+      },
+      {
+        bucket: "completed",
+        sectionId: "programs-section-completed",
+        title: "Completed",
+        listId: "programs-completed-list",
+        countId: "programs-completed-count",
+        emptyId: "programs-completed-empty",
+        items: buckets.completed,
+        isAttention: false,
+      },
+    ];
 
-    renderBucketSection(
-      "programs-attention-list",
-      "programs-attention-count",
-      "programs-attention-empty",
-      buckets.needsAttention,
-      true
-    );
-    renderBucketSection(
-      "programs-active-list",
-      "programs-active-count",
-      "programs-active-empty",
-      buckets.active,
-      false
-    );
-    renderBucketSection(
-      "programs-completed-list",
-      "programs-completed-count",
-      "programs-completed-empty",
-      buckets.completed,
-      false
-    );
+    if (el("programs-section-active")) {
+      el("programs-section-active").hidden = true;
+      el("programs-section-active").classList?.add("hidden");
+    }
+
+    for (const spec of prioritySectionSpecs) {
+      const sectionNode = el(spec.sectionId);
+      const listNode = el(spec.listId);
+      const countNode = el(spec.countId);
+      const emptyNode = el(spec.emptyId);
+      const isVisible = activeFilter === "all" || activeFilter === spec.bucket;
+
+      if (sectionNode) {
+        sectionNode.classList?.add("programs-triage-section");
+        sectionNode.setAttribute?.("data-bucket", spec.bucket);
+        sectionNode.hidden = !isVisible;
+        sectionNode.classList?.toggle("hidden", !isVisible);
+        if (drilldownEl && sectionNode.parentElement !== drilldownEl) {
+          drilldownEl.append?.(sectionNode);
+        }
+        const sectionChildren = sectionNode.children ? Array.from(sectionNode.children) : [];
+        if (listNode && !sectionChildren.includes(listNode)) {
+          sectionNode.append?.(listNode);
+        }
+      }
+      if (countNode) {
+        countNode.textContent = String(spec.items.length);
+      }
+      if (listNode) {
+        if (isVisible) {
+          listNode.replaceChildren?.(
+            ...spec.items.map((school) => actionCard(school, spec.isAttention ? programAttentionReasons(school, today) : []))
+          );
+        } else {
+          listNode.replaceChildren?.();
+        }
+      }
+      if (emptyNode) {
+        emptyNode.hidden = !isVisible || spec.items.length > 0;
+      }
+    }
   } catch (err) {
     console.error("[Programs View Render Error]", err);
   }
@@ -4307,6 +4587,7 @@ if (typeof window !== "undefined") {
   window.renderProgramsView = renderProgramsView;
   window.selectProgram = selectProgram;
   window.setProgramsScope = setProgramsScope;
+  window.setProgramStatusFilter = setProgramStatusFilter;
   window.quickTagSchoolToProgram = quickTagSchoolToProgram;
 }
 
@@ -4911,7 +5192,10 @@ el("edit-stage")?.addEventListener("change", () => {
     }
   }
   updateColdWarning();
+  updateStageHelperText(stage || "Not Contacted");
 });
+ensureStageDropdownPopulated();
+updateStageHelperText(el("edit-stage")?.value || "Not Contacted");
 el("edit-coldReason")?.addEventListener("change", () => {
   const reason = el("edit-coldReason")?.value;
   if (EXPLICIT_REJECTION_REASONS.includes(reason)) {

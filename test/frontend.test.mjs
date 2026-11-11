@@ -3969,7 +3969,7 @@ test("pipeline: Completed stage displays badge, defaults nextAction, appears in 
 
   // 4. Edit modal stage dropdown has Completed option and defaults nextAction to invoice/survey
   const html = await readFile("public/index.html", "utf8");
-  assert.match(html, /<select id="edit-stage">[\s\S]*?<option>Completed<\/option>/, "Edit stage dropdown options include Completed");
+  assert.match(html, /<select id="edit-stage"[^>]*>[\s\S]*?<option value="Completed">Completed — Workshop or program delivered<\/option>/, "Edit stage dropdown options include Completed");
 
   await context.openSchoolEditor(bookedRecord.recordId, false, "details");
   const editStageSelect = getEl("edit-stage");
@@ -4265,13 +4265,14 @@ test("outreach goal: grouped school overview cards render program badges, suppor
   assert.equal(updatedSchoolBadges[1].textContent, "Keynotes");
 });
 
-test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance Workshops), scope toggle, and quick-tag school", async (t) => {
+test("Programs dashboard: overview matrix, 5-stage temperature bucketing, 1-click stat card filtering, student stage labels, scope toggle, and quick-tag school", async (t) => {
   const indexHtml = await readFile("public/index.html", "utf8");
   assert.match(indexHtml, /id="tab-programs"/);
   assert.match(indexHtml, /<section id="programs-view" class="view-section hidden"/);
   assert.match(indexHtml, /id="more-programs-select"/);
   assert.match(indexHtml, /id="quick-tag-school-select"/);
   assert.match(indexHtml, /id="quick-tag-school-btn"/);
+  assert.match(indexHtml, /id="stage-helper-text"/);
 
   const testSchools = [
     {
@@ -4282,7 +4283,7 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
       assignedTo: "Alex",
       stage: "Engaged",
       priority: "Medium",
-      followUpDue: "2000-01-01", // Overdue -> Needs attention for SHSM, Completed for Dance Workshops
+      followUpDue: "2000-01-01", // On the Fence + Overdue -> onTheFence & needsAttention for SHSM, Completed for Dance Workshops
       outreachGoal: "Dance Workshops (Completed), SHSM, Cypher Program",
     },
     {
@@ -4293,7 +4294,7 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
       assignedTo: "Alex",
       stage: "Not Contacted",
       priority: "Low",
-      followUpDue: "2099-12-31", // Active pipeline for SHSM & Competitive Arts
+      followUpDue: "2099-12-31", // Cold for SHSM & Competitive Arts
       outreachGoal: "SHSM, Competitive Arts",
     },
     {
@@ -4302,9 +4303,9 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
       schoolName: "Wexford CSA",
       ownerEmail: "alex@example.test",
       assignedTo: "Alex",
-      stage: "Interested",
+      stage: "Engaged",
       priority: "High",
-      followUpDue: "2099-12-31", // High priority -> Needs attention for Dance Workshops, Completed for SHSM
+      followUpDue: "2099-12-31", // On the Fence for Dance Workshops, Completed for SHSM
       outreachGoal: "SHSM (Completed), Dance Workshops, B Thee Rise",
     },
     {
@@ -4315,7 +4316,7 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
       assignedTo: "Alex",
       stage: "Contacted",
       priority: "Medium",
-      followUpDue: "2099-12-31", // Active pipeline for Dance Workshops
+      followUpDue: "2099-12-31", // Waiting on Reply for Dance Workshops
       outreachGoal: "Dance Workshops",
     },
     {
@@ -4326,7 +4327,7 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
       assignedTo: "Jordan",
       stage: "Booked",
       priority: "Urgent",
-      followUpDue: "2099-12-31", // Team member's school: Needs attention for SHSM (Urgent)
+      followUpDue: "2099-12-31", // Team member's school: Confirmed for SHSM
       outreachGoal: "SHSM, Cypher Program (Completed)",
     },
   ];
@@ -4335,6 +4336,11 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
   const h = setupEnv({
     fetchHandler: (url, init) => {
       if (url.includes("/api/config")) return reloadFetch(url);
+      if (url.includes("/api/schools/detail")) {
+        const matchId = new URL(url, "https://example.test").searchParams.get("recordId");
+        const match = testSchools.find((s) => s.recordId === matchId) || testSchools[0];
+        return Promise.resolve(Response.json({ record: match }));
+      }
       if (url.includes("/api/schools/update")) {
         const body = JSON.parse(init.body);
         updateRequests.push(body);
@@ -4363,6 +4369,54 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
   t.after(h.cleanup);
   await h.signIn("alex@example.test");
 
+  // Verify STAGE_CONFIG is centralized and keeps Contacted and Engaged distinct
+  const STAGE_CONFIG = h.context.window.STAGE_CONFIG;
+  assert.ok(STAGE_CONFIG);
+  assert.equal(STAGE_CONFIG["Not Contacted"].display, "Cold");
+  assert.equal(STAGE_CONFIG["Contacted"].display, "Waiting on Reply");
+  assert.equal(STAGE_CONFIG["Engaged"].display, "On the Fence");
+  assert.equal(STAGE_CONFIG["Booked"].display, "Confirmed");
+  assert.equal(STAGE_CONFIG["Completed"].display, "Completed");
+
+  // Verify School Cards in Schools view display student-friendly stage labels and CSS classes
+  h.getEl("schools-toggle-all").click();
+  const schoolCards = h.getEl("school-list").children;
+  const stageBadgesBySchool = Object.fromEntries(
+    schoolCards.map((card) => {
+      const openBtn = card.children[0];
+      const badge = openBtn.children[0];
+      const h2 = openBtn.children.find((c) => c.tagName === "H2");
+      return [h2.textContent, { text: badge.textContent, classes: Array.from(badge.classes) }];
+    })
+  );
+  assert.equal(stageBadgesBySchool["Agincourt CI"].text, "Confirmed");
+  assert.ok(stageBadgesBySchool["Agincourt CI"].classes.includes("stage-confirmed"));
+  assert.equal(stageBadgesBySchool["Madonna Catholic SS"].text, "On the Fence");
+  assert.ok(stageBadgesBySchool["Madonna Catholic SS"].classes.includes("stage-fence"));
+  assert.equal(stageBadgesBySchool["Cedarbrae CI"].text, "Waiting on Reply");
+  assert.ok(stageBadgesBySchool["Cedarbrae CI"].classes.includes("stage-waiting"));
+  assert.equal(stageBadgesBySchool["Birchmount Park CI"].text, "Cold");
+  assert.ok(stageBadgesBySchool["Birchmount Park CI"].classes.includes("stage-cold"));
+
+  // Verify Modal Stage Dropdown & Dynamic Helper Caption (#stage-helper-text)
+  await h.context.openSchoolEditor("prog-2", false, "details");
+  const stageSelect = h.getEl("edit-stage");
+  const helperText = h.getEl("stage-helper-text");
+  const optionMap = Object.fromEntries(stageSelect.children.map((opt) => [opt.value, opt.textContent]));
+  assert.equal(optionMap["Not Contacted"], "Cold (Not Contacted) — Haven't reached out yet");
+  assert.equal(optionMap["Contacted"], "Waiting on Reply (Contacted) — Sent email or left voicemail");
+  assert.equal(optionMap["Engaged"], "On the Fence (Engaged) — Teacher replied / talking details");
+  assert.equal(optionMap["Booked"], "Confirmed (Booked) — Definite YES / locked in");
+  assert.equal(optionMap["Completed"], "Completed — Workshop or program delivered");
+  assert.equal(helperText.textContent, STAGE_CONFIG["Not Contacted"].helperText);
+
+  for (const rawStage of ["Contacted", "Engaged", "Booked", "Completed", "Not Contacted"]) {
+    stageSelect.value = rawStage;
+    stageSelect.dispatchEvent(new h.context.Event("change", { bubbles: true }));
+    assert.equal(helperText.textContent, STAGE_CONFIG[rawStage].helperText);
+  }
+  h.context.closeSchoolEditor();
+
   // 1. Clicking the Programs nav tab opens #programs-view and renders the overview matrix with flagship programs
   h.getEl("tab-programs").click();
   assert.equal(h.getEl("programs-view").hidden, false);
@@ -4387,24 +4441,47 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
   const shsmPill = h.getEl("program-pill-shsm");
   assert.equal(shsmPill.children[1].textContent, "3");
 
-  // 2. Selecting SHSM accurately buckets schools into Needs attention, Active pipeline, and Completed with zero dropped schools
+  // 2. Selecting SHSM renders the 6 interactive filter stat cards and buckets schools accurately
   shsmPill.click();
   assert.equal(h.getEl("programs-overview-matrix").hidden, true);
   assert.equal(h.getEl("programs-drilldown").hidden, false);
   assert.equal(h.getEl("programs-heading").textContent, "SHSM");
+  assert.equal(h.context.state.programStatusFilter, "all");
 
-  // 4-card KPI strip for SHSM (My Schools = 3 total: 1 attention, 1 active, 1 completed)
+  // 6-card interactive stat bar for SHSM in My Schools:
+  // Total = 3, Confirmed = 0, On the Fence = 1 (Madonna), Waiting on Reply = 0, Cold = 1 (Birchmount), Overdue Follow-Up = 1 (Madonna), Completed = 1 (Wexford)
   const kpiCards = h.getEl("programs-kpi-strip").children;
-  assert.equal(kpiCards.length, 4);
-  assert.equal(kpiCards[0].children[0].textContent, "3"); // Total Tagged
-  assert.equal(kpiCards[1].children[0].textContent, "1"); // Needs Attention (Madonna - overdue)
-  assert.equal(kpiCards[2].children[0].textContent, "1"); // Active Pipeline (Birchmount - Not Contacted, not overdue, Low priority)
-  assert.equal(kpiCards[3].children[0].textContent, "1"); // Completed (Wexford - SHSM (Completed))
+  assert.equal(kpiCards.length, 6);
+  assert.deepEqual(
+    kpiCards.map((c) => ({
+      filter: c.getAttribute("data-status-filter"),
+      count: c.children[0].textContent,
+      label: c.children[1].textContent,
+      pressed: c.getAttribute("aria-pressed"),
+    })),
+    [
+      { filter: "all", count: "3", label: "All", pressed: "true" },
+      { filter: "confirmed", count: "0", label: "Confirmed", pressed: "false" },
+      { filter: "onTheFence", count: "1", label: "On the Fence", pressed: "false" },
+      { filter: "waitingOnReply", count: "0", label: "Waiting on Reply", pressed: "false" },
+      { filter: "cold", count: "1", label: "Cold", pressed: "false" },
+      { filter: "needsAttention", count: "1", label: "Overdue Follow-Up", pressed: "false" },
+    ]
+  );
 
+  // Verify priority order when showing All: Confirmed, On the Fence, Overdue Follow-Up, Waiting on Reply, Cold, Completed
+  const drilldownSections = h.getEl("programs-drilldown").children.filter((c) => c.classList?.contains("programs-triage-section") && !c.hidden);
+  assert.deepEqual(
+    drilldownSections.map((s) => s.getAttribute("data-bucket")),
+    ["confirmed", "onTheFence", "needsAttention", "waitingOnReply", "cold", "completed"]
+  );
+
+  assert.equal(h.getEl("programs-fence-list").children.length, 1);
+  assert.equal(h.getEl("programs-fence-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Madonna Catholic SS");
   assert.equal(h.getEl("programs-attention-list").children.length, 1);
   assert.equal(h.getEl("programs-attention-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Madonna Catholic SS");
-  assert.equal(h.getEl("programs-active-list").children.length, 1);
-  assert.equal(h.getEl("programs-active-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Birchmount Park CI");
+  assert.equal(h.getEl("programs-cold-list").children.length, 1);
+  assert.equal(h.getEl("programs-cold-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Birchmount Park CI");
   assert.equal(h.getEl("programs-completed-list").children.length, 1);
   assert.equal(h.getEl("programs-completed-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Wexford CSA");
 
@@ -4413,11 +4490,11 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
   moreSelect.value = "Dance Workshops";
   moreSelect.dispatchEvent(new h.context.Event("change", { bubbles: true }));
   assert.equal(h.getEl("programs-heading").textContent, "Dance Workshops");
-  // Dance Workshops in My Schools: Wexford (High priority -> Needs attention), Cedarbrae (Contacted -> Active), Madonna (Completed)
-  assert.equal(h.getEl("programs-attention-list").children.length, 1);
-  assert.equal(h.getEl("programs-attention-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Wexford CSA");
-  assert.equal(h.getEl("programs-active-list").children.length, 1);
-  assert.equal(h.getEl("programs-active-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Cedarbrae CI");
+  // Dance Workshops in My Schools: Wexford (Engaged -> On the Fence), Cedarbrae (Contacted -> Waiting on Reply), Madonna (Completed)
+  assert.equal(h.getEl("programs-fence-list").children.length, 1);
+  assert.equal(h.getEl("programs-fence-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Wexford CSA");
+  assert.equal(h.getEl("programs-waiting-list").children.length, 1);
+  assert.equal(h.getEl("programs-waiting-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Cedarbrae CI");
   assert.equal(h.getEl("programs-completed-list").children.length, 1);
   assert.equal(h.getEl("programs-completed-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Madonna Catholic SS");
 
@@ -4426,17 +4503,18 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
   assert.equal(h.getEl("programs-kpi-strip").children[0].children[0].textContent, "3");
   h.getEl("programs-toggle-all").click();
   assert.equal(h.getEl("programs-toggle-all").classList.contains("active"), true);
-  // In All Team Schools, Agincourt CI (Jordan's school, Urgent priority) is added to SHSM -> Total 4, Needs Attention 2
+  // In All Team Schools, Agincourt CI (Jordan's school, Booked -> Confirmed) is added to SHSM -> Total 4, Confirmed 1
   assert.equal(h.getEl("program-pill-shsm").children[1].textContent, "4");
   assert.equal(h.getEl("programs-kpi-strip").children[0].children[0].textContent, "4");
-  assert.equal(h.getEl("programs-kpi-strip").children[1].children[0].textContent, "2");
-  assert.equal(h.getEl("programs-attention-list").children.length, 2);
+  assert.equal(h.getEl("programs-kpi-strip").children[1].children[0].textContent, "1");
+  assert.equal(h.getEl("programs-confirmed-list").children.length, 1);
+  assert.equal(h.getEl("programs-confirmed-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Agincourt CI");
 
   // Switch back to My Schools
   h.getEl("programs-toggle-mine").click();
   assert.equal(h.getEl("programs-kpi-strip").children[0].children[0].textContent, "3");
 
-  // 5. Quick-Tag School Bar adds untagged Cedarbrae CI to SHSM, saves via /api/schools/update, and renders immediately
+  // 5. Quick-Tag School Bar adds untagged Cedarbrae CI (Contacted -> Waiting on Reply) to SHSM, saves via /api/schools/update, and renders immediately
   const quickSelect = h.getEl("quick-tag-school-select");
   const untaggedIds = quickSelect.children.map((opt) => opt.value).filter(Boolean);
   assert.deepEqual(untaggedIds, ["prog-4"], "Only Cedarbrae CI should be untagged for SHSM in My Schools");
@@ -4450,7 +4528,83 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
   assert.equal(updateRequests[0].patch.outreachGoal, "Dance Workshops, SHSM");
   assert.equal(h.getEl("program-pill-shsm").children[1].textContent, "4");
   assert.equal(h.getEl("programs-kpi-strip").children[0].children[0].textContent, "4");
-  assert.equal(h.getEl("programs-active-list").children.length, 2, "Cedarbrae CI should now render in SHSM Active pipeline");
+  assert.equal(h.getEl("programs-waiting-list").children.length, 1, "Cedarbrae CI should now render in SHSM Waiting on Reply");
+  assert.equal(h.getEl("programs-waiting-list").children[0].children.find((c) => c.tagName === "H3").textContent, "Cedarbrae CI");
+
+  // 6. Interactive 1-Click Filtering Behavior across all stat cards
+  // Switch to All Team Schools on SHSM so we have schools in every bucket:
+  // Confirmed: Agincourt CI
+  // On the Fence: Madonna Catholic SS
+  // Waiting on Reply: Cedarbrae CI
+  // Cold: Birchmount Park CI
+  // Overdue Follow-Up: Madonna Catholic SS
+  // Completed: Wexford CSA
+  h.getEl("programs-toggle-all").click();
+  const getStatBtn = (filterKey) =>
+    h.getEl("programs-kpi-strip").children.find((c) => c.getAttribute("data-status-filter") === filterKey);
+  const getVisibleBuckets = () =>
+    [
+      ["confirmed", "programs-section-confirmed", "programs-confirmed-list"],
+      ["onTheFence", "programs-section-fence", "programs-fence-list"],
+      ["needsAttention", "programs-section-attention", "programs-attention-list"],
+      ["waitingOnReply", "programs-section-waiting", "programs-waiting-list"],
+      ["cold", "programs-section-cold", "programs-cold-list"],
+      ["completed", "programs-section-completed", "programs-completed-list"],
+    ]
+      .filter(([, secId]) => !h.getEl(secId).hidden)
+      .map(([bucket, , listId]) => ({
+        bucket,
+        schools: h.getEl(listId).children.map((card) => card.children.find((c) => c.tagName === "H3").textContent),
+      }));
+
+  // Click Confirmed -> shows ONLY Confirmed (Agincourt CI), clicking a second time resets to 'all'
+  getStatBtn("confirmed").click();
+  assert.equal(h.context.state.programStatusFilter, "confirmed");
+  assert.equal(getStatBtn("confirmed").getAttribute("aria-pressed"), "true");
+  assert.deepEqual(getVisibleBuckets(), [{ bucket: "confirmed", schools: ["Agincourt CI"] }]);
+  getStatBtn("confirmed").click();
+  assert.equal(h.context.state.programStatusFilter, "all");
+  assert.equal(getStatBtn("all").getAttribute("aria-pressed"), "true");
+  assert.equal(getVisibleBuckets().length, 6);
+
+  // Click On the Fence -> shows ONLY On the Fence (Madonna Catholic SS)
+  getStatBtn("onTheFence").click();
+  assert.equal(h.context.state.programStatusFilter, "onTheFence");
+  assert.equal(getStatBtn("onTheFence").getAttribute("aria-pressed"), "true");
+  assert.deepEqual(getVisibleBuckets(), [{ bucket: "onTheFence", schools: ["Madonna Catholic SS"] }]);
+
+  // Click Waiting on Reply -> switches directly to Waiting on Reply (Cedarbrae CI)
+  getStatBtn("waitingOnReply").click();
+  assert.equal(h.context.state.programStatusFilter, "waitingOnReply");
+  assert.equal(getStatBtn("waitingOnReply").getAttribute("aria-pressed"), "true");
+  assert.deepEqual(getVisibleBuckets(), [{ bucket: "waitingOnReply", schools: ["Cedarbrae CI"] }]);
+
+  // Click Cold -> shows ONLY Cold (Birchmount Park CI)
+  getStatBtn("cold").click();
+  assert.equal(h.context.state.programStatusFilter, "cold");
+  assert.equal(getStatBtn("cold").getAttribute("aria-pressed"), "true");
+  assert.deepEqual(getVisibleBuckets(), [{ bucket: "cold", schools: ["Birchmount Park CI"] }]);
+
+  // Click Overdue Follow-Up -> shows ONLY Overdue Follow-Up (Madonna Catholic SS)
+  getStatBtn("needsAttention").click();
+  assert.equal(h.context.state.programStatusFilter, "needsAttention");
+  assert.equal(getStatBtn("needsAttention").getAttribute("aria-pressed"), "true");
+  assert.deepEqual(getVisibleBuckets(), [{ bucket: "needsAttention", schools: ["Madonna Catholic SS"] }]);
+
+  // Click All -> resets to 'all'
+  getStatBtn("all").click();
+  assert.equal(h.context.state.programStatusFilter, "all");
+  assert.equal(getStatBtn("all").getAttribute("aria-pressed"), "true");
+  assert.equal(getVisibleBuckets().length, 6);
+
+  // Verify categorizeSchoolsForProgram supports (schools, programName) signature as well as (programName, schools)
+  const bySchoolsFirst = h.context.categorizeSchoolsForProgram(testSchools, "SHSM", "2026-11-10");
+  assert.equal(bySchoolsFirst.confirmed.length, 1);
+  assert.equal(bySchoolsFirst.onTheFence.length, 1);
+  assert.equal(bySchoolsFirst.waitingOnReply.length, 1);
+  assert.equal(bySchoolsFirst.cold.length, 1);
+  assert.equal(bySchoolsFirst.completed.length, 1);
+  assert.equal(bySchoolsFirst.needsAttention.length, 1);
 });
 
 test("Programs defensive guards: missing DOM elements, HTMLCollection without .includes, and non-string outreachGoal values do not crash init", async (t) => {

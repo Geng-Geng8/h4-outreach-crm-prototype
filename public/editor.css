@@ -1658,6 +1658,180 @@
   display: none !important;
 }
 
+/* 5-Stage Temperature Badges Across Schools & Programs Views */
+.school-stage.stage-confirmed,
+.stage-confirmed {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #16a34a;
+  font-weight: 700;
+}
+.school-stage.stage-fence,
+.stage-fence {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #d97706;
+  font-weight: 700;
+}
+.school-stage.stage-waiting,
+.stage-waiting {
+  background: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #2563eb;
+  font-weight: 700;
+}
+.school-stage.stage-cold,
+.stage-cold {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #64748b;
+  font-weight: 600;
+}
+.school-stage.stage-completed,
+.stage-completed {
+  background: #f3e8ff;
+  color: #6b21a8;
+  border: 1px solid #9333ea;
+  font-weight: 700;
+}
+
+/* Stage Helper Caption in Editor & Outreach Modals */
+#stage-helper-text {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: #f8faf7;
+  border-left: 3px solid #1f6b43;
+  border-radius: 4px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #1e3328;
+}
+
+/* Interactive 1-Click Status Filter Bar in Programs View */
+.programs-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 10px;
+}
+.program-stat-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border: 1.5px solid #d8e2d4;
+  border-top: 4px solid #1f6b43;
+  border-radius: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease, background-color 0.12s ease;
+}
+.program-stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(21, 53, 40, 0.08);
+}
+.program-stat-card:focus-visible {
+  outline: 2px solid #153528;
+  outline-offset: 2px;
+}
+.program-stat-card strong {
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 800;
+  color: #153528;
+}
+.program-stat-card span {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #3d5245;
+}
+.program-stat-card[data-status-filter="all"] {
+  border-top-color: #1f6b43;
+}
+.program-stat-card[data-status-filter="confirmed"] {
+  border-top-color: #16a34a;
+}
+.program-stat-card[data-status-filter="confirmed"] strong {
+  color: #16a34a;
+}
+.program-stat-card[data-status-filter="onTheFence"] {
+  border-top-color: #d97706;
+}
+.program-stat-card[data-status-filter="onTheFence"] strong {
+  color: #d97706;
+}
+.program-stat-card[data-status-filter="waitingOnReply"] {
+  border-top-color: #2563eb;
+}
+.program-stat-card[data-status-filter="waitingOnReply"] strong {
+  color: #2563eb;
+}
+.program-stat-card[data-status-filter="cold"] {
+  border-top-color: #64748b;
+}
+.program-stat-card[data-status-filter="cold"] strong {
+  color: #64748b;
+}
+.program-stat-card[data-status-filter="needsAttention"] {
+  border-top-color: #e11d48;
+}
+.program-stat-card[data-status-filter="needsAttention"] strong {
+  color: #e11d48;
+}
+.program-stat-card[aria-pressed="true"],
+.program-stat-card.active {
+  background: #f1f7ef;
+  box-shadow: 0 0 0 2px #153528, 0 4px 12px rgba(21, 53, 40, 0.12);
+}
+.program-stat-card[data-status-filter="confirmed"][aria-pressed="true"] {
+  background: #f0fdf4;
+  box-shadow: 0 0 0 2px #16a34a;
+}
+.program-stat-card[data-status-filter="onTheFence"][aria-pressed="true"] {
+  background: #fffbeb;
+  box-shadow: 0 0 0 2px #d97706;
+}
+.program-stat-card[data-status-filter="waitingOnReply"][aria-pressed="true"] {
+  background: #eff6ff;
+  box-shadow: 0 0 0 2px #2563eb;
+}
+.program-stat-card[data-status-filter="cold"][aria-pressed="true"] {
+  background: #f8fafc;
+  box-shadow: 0 0 0 2px #64748b;
+}
+.program-stat-card[data-status-filter="needsAttention"][aria-pressed="true"] {
+  background: #fff1f2;
+  box-shadow: 0 0 0 2px #e11d48;
+}
+.program-kpi-pill.kpi-confirmed.has-count {
+  background: #dcfce7;
+  color: #166534;
+  border-color: #86efac;
+}
+.program-kpi-pill.kpi-fence.has-count {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+.program-kpi-pill.kpi-waiting.has-count {
+  background: #dbeafe;
+  color: #1e40af;
+  border-color: #93c5fd;
+}
+.program-kpi-pill.kpi-cold.has-count {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+.programs-triage-section[hidden] {
+  display: none !important;
+}
+
+
 
 
 
