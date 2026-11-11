@@ -325,12 +325,16 @@
             </label>
             <div class="suggestion-group editor-wide" role="group" aria-label="Outcome suggestions">
               <span class="suggestion-label">Suggestions:</span>
-              <div class="suggestion-chips">
+              <div id="outcome-suggestion-chips" class="suggestion-chips">
                 <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="No reply yet">No reply yet</button>
                 <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Left voicemail">Left voicemail</button>
                 <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Spoke with someone">Spoke with someone</button>
-                <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Interested">Interested</button>
+                <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Office asked to email info">Office asked to email info</button>
+                <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Receptionist gave teacher contact">Receptionist gave teacher contact</button>
                 <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Asked for more information">Asked for more information</button>
+                <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Interested">Interested</button>
+                <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Checking with Principal / Dept Head">Checking with Principal / Dept Head</button>
+                <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Confirmed / Locked in!">Confirmed / Locked in!</button>
                 <button type="button" class="suggestion-chip" data-target="log-outcome" data-value="Not interested">Not interested</button>
               </div>
             </div>
@@ -352,11 +356,16 @@
             <div class="suggestion-group editor-wide" role="group" aria-label="Summary suggestions">
               <span class="suggestion-label">Suggestions:</span>
               <div id="summary-suggestion-chips" class="suggestion-chips">
-                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Sent an introductory email explaining H4 and our free dance programs.">Introduced H4</button>
-                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Sent an email offering a free introductory dance workshop.">Offered free workshop</button>
-                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Emailed to ask if the school has a dance class, team, or club.">Asked about dance program</button>
-                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Emailed to ask who oversees dance, leadership, or student clubs.">Asked for the right contact</button>
-                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Sent an email inviting students to become H4 volunteer dance mentors.">Invited student mentors</button>
+                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Introduced H4">Introduced H4</button>
+                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Offered free workshop">Offered free workshop</button>
+                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Pitched Cypher Program">Pitched Cypher Program</button>
+                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Pitched SHSM Certification">Pitched SHSM Certification</button>
+                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Invited to Battle at the Board">Invited to Battle at the Board</button>
+                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Asked about dance program">Asked about dance program</button>
+                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Asked for the right contact">Asked for the right contact</button>
+                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Sent program info package / flyer">Sent program info package / flyer</button>
+                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Discussed available dates">Discussed available dates</button>
+                <button type="button" class="suggestion-chip" data-target="log-summary" data-value="Invited student mentors">Invited student mentors</button>
               </div>
             </div>
             <p class="field-help quiet-note">Opening an email composer does not count as sending outreach. Only log outreach you have already sent or completed.</p>
@@ -499,15 +508,31 @@
                 <input id="edit-nextAction" maxlength="1000" placeholder="e.g. Follow up if no reply">
                 <span class="field-help">Next step for this school on your My Outreach list.</span>
                 <div class="suggestion-group">
-                  <span class="suggestion-label">Suggestion:</span>
-                  <div class="suggestion-chips">
+                  <span class="suggestion-label">Suggestions:</span>
+                  <div id="next-action-suggestion-chips" class="suggestion-chips">
                     <button type="button" class="suggestion-chip" data-target="edit-nextAction" data-value="Follow up if no reply">Follow up if no reply</button>
+                    <button type="button" class="suggestion-chip" data-target="edit-nextAction" data-value="Schedule a workshop">Schedule a workshop</button>
+                    <button type="button" class="suggestion-chip" data-target="edit-nextAction" data-value="Visit the school">Visit the school</button>
+                    <button type="button" class="suggestion-chip" data-target="edit-nextAction" data-value="Call school main office">Call school main office</button>
+                    <button type="button" class="suggestion-chip" data-target="edit-nextAction" data-value="Send info package by email">Send info package by email</button>
+                    <button type="button" class="suggestion-chip" data-target="edit-nextAction" data-value="Confirm dates with teacher">Confirm dates with teacher</button>
+                    <button type="button" class="suggestion-chip" data-target="edit-nextAction" data-value="Get Principal / Admin approval">Get Principal / Admin approval</button>
+                    <button type="button" class="suggestion-chip" data-target="edit-nextAction" data-value="Send booking confirmation">Send booking confirmation</button>
                     <button type="button" class="suggestion-chip" data-target="edit-nextAction" data-value="Send invoice / feedback survey">Send invoice / feedback survey</button>
                   </div>
                 </div>
               </label>
               <label id="field-followUpDue">Follow-up date
                 <input id="edit-followUpDue" type="date">
+                <div class="suggestion-group quick-date-group" role="group" aria-label="Quick follow-up date suggestions">
+                  <span class="suggestion-label">Quick date:</span>
+                  <div id="quick-date-suggestion-chips" class="suggestion-chips quick-date-chips">
+                    <button type="button" class="suggestion-chip quick-date-chip" data-days="1">Tomorrow</button>
+                    <button type="button" class="suggestion-chip quick-date-chip" data-days="3">In 3 days</button>
+                    <button type="button" class="suggestion-chip quick-date-chip" data-days="7">Next week</button>
+                    <button type="button" class="suggestion-chip quick-date-chip" data-days="14">In 2 weeks</button>
+                  </div>
+                </div>
                 <span class="field-help">When to follow up next (reminder appears on your dashboard).</span>
               </label>
               <label id="field-stage" class="stage-secondary">School stage

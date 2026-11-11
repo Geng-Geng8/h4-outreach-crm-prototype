@@ -481,6 +481,18 @@
   cursor: not-allowed;
 }
 
+.quick-date-group {
+  margin-top: 6px;
+}
+.quick-date-chips {
+  gap: 6px;
+}
+.quick-date-chip {
+  padding: 4px 10px;
+  min-height: 28px;
+  font-size: 11px;
+}
+
 /* Accessible Inline Help (<details>) */
 .inline-help {
   font-size: 12px;

@@ -931,6 +931,8 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
   }
 
   function getEl(id) {
+    if (id === "edit-follow-up-date" && elements.has("edit-followUpDue")) return elements.get("edit-followUpDue");
+    if (id === "edit-followUpDue" && elements.has("edit-follow-up-date")) return elements.get("edit-follow-up-date");
     if (!elements.has(id)) {
       elements.set(id, makeElement(id));
     }
@@ -1080,6 +1082,8 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
       if (missingIds.includes(id)) return null;
       if (id === "edit-outreachGoal" && elements.has("edit-goal")) return getEl("edit-goal");
       if (id === "edit-goal" && elements.has("edit-outreachGoal")) return getEl("edit-outreachGoal");
+      if (id === "edit-follow-up-date" && elements.has("edit-followUpDue")) return getEl("edit-followUpDue");
+      if (id === "edit-followUpDue" && elements.has("edit-follow-up-date")) return getEl("edit-follow-up-date");
       return getEl(id);
     },
     createElement: (tag) => {
@@ -1165,7 +1169,11 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
   vm.createContext(context);
   getEl("workspace").hidden = true;
   getEl("session-restore").hidden = true;
-  getEl("editor-form").append(getEl("step-summary"));
+  getEl("editor-form").append(getEl("step-outcome"), getEl("step-summary"), getEl("activity-step-5"));
+  getEl("step-outcome").append(getEl("outcome-suggestion-chips"));
+  getEl("activity-step-5").append(getEl("field-nextAction"), getEl("field-followUpDue"));
+  getEl("field-nextAction").append(getEl("next-action-suggestion-chips"));
+  getEl("field-followUpDue").append(getEl("quick-date-suggestion-chips"));
   getEl("step-summary").append(getEl("summary-suggestion-chips"));
   vm.runInContext(appCode, context);
 
@@ -1533,14 +1541,19 @@ test("quick summary suggestions: provides Grade 9 Email First Contact pills, sup
   // Step 4: Initially no summary preselected
   assert.equal(getEl("log-summary").value, "");
   const chipsContainer = getEl("summary-suggestion-chips");
-  assert.equal(chipsContainer.children.length, 5);
+  assert.equal(chipsContainer.children.length, 10);
 
   const expectedEmailOutreach = [
-    { label: "Introduced H4", value: "Sent an introductory email explaining H4 and our free dance programs." },
-    { label: "Offered free workshop", value: "Sent an email offering a free introductory dance workshop." },
-    { label: "Asked about dance program", value: "Emailed to ask if the school has a dance class, team, or club." },
-    { label: "Asked for the right contact", value: "Emailed to ask who oversees dance, leadership, or student clubs." },
-    { label: "Invited student mentors", value: "Sent an email inviting students to become H4 volunteer dance mentors." },
+    { label: "Introduced H4", value: "Introduced H4" },
+    { label: "Offered free workshop", value: "Offered free workshop" },
+    { label: "Pitched Cypher Program", value: "Pitched Cypher Program" },
+    { label: "Pitched SHSM Certification", value: "Pitched SHSM Certification" },
+    { label: "Invited to Battle at the Board", value: "Invited to Battle at the Board" },
+    { label: "Asked about dance program", value: "Asked about dance program" },
+    { label: "Asked for the right contact", value: "Asked for the right contact" },
+    { label: "Sent program info package / flyer", value: "Sent program info package / flyer" },
+    { label: "Discussed available dates", value: "Discussed available dates" },
+    { label: "Invited student mentors", value: "Invited student mentors" },
   ];
 
   for (let i = 0; i < expectedEmailOutreach.length; i++) {
@@ -1553,17 +1566,22 @@ test("quick summary suggestions: provides Grade 9 Email First Contact pills, sup
 
   // Tapping first pill fills summary and selects chip
   chipsContainer.children[0].click();
-  assert.equal(getEl("log-summary").value, "Sent an introductory email explaining H4 and our free dance programs.");
+  assert.equal(getEl("log-summary").value, "Introduced H4");
   assert.equal(chipsContainer.children[0].classList.contains("selected"), true);
   assert.equal(chipsContainer.children[0].getAttribute("aria-pressed"), "true");
   assert.equal(chipsContainer.children[1].classList.contains("selected"), false);
 
-  // Tapping another pill updates summary and transfers selection
+  // Tapping another pill updates summary and transfers selection (multi-select)
   chipsContainer.children[1].click();
-  assert.equal(getEl("log-summary").value, "Sent an email offering a free introductory dance workshop.");
-  assert.equal(chipsContainer.children[0].classList.contains("selected"), false);
+  assert.equal(getEl("log-summary").value, "Introduced H4, Offered free workshop");
+  assert.equal(chipsContainer.children[0].classList.contains("selected"), true);
   assert.equal(chipsContainer.children[1].classList.contains("selected"), true);
 
+  // Tapping first pill again toggles it off cleanly
+  chipsContainer.children[0].click();
+  assert.equal(getEl("log-summary").value, "Offered free workshop");
+  assert.equal(chipsContainer.children[0].classList.contains("selected"), false);
+  assert.equal(chipsContainer.children[1].classList.contains("selected"), true);
   // Manual typing preserves editing; unselects pill if non-matching
   getEl("log-summary").value = "Sent custom email to department head.";
   getEl("log-summary").dispatchEvent(new Event("input", { bubbles: true }));
@@ -1583,14 +1601,14 @@ test("quick summary suggestions: provides Grade 9 Email First Contact pills, sup
 
   // Tapping follow-up pill fills summary
   chipsContainer.children[1].click();
-  assert.equal(getEl("log-summary").value, "Requested an update.");
+  assert.equal(getEl("log-summary").value, "Sent custom email to department head. Requested an update.");
   assert.equal(chipsContainer.children[1].classList.contains("selected"), true);
 
   // Context-aware update: Switch to Phone
   getEl("log-channel").value = "Phone";
   getEl("log-channel").dispatchEvent(new Event("change", { bubbles: true }));
   // Text preserved across channel switch
-  assert.equal(getEl("log-summary").value, "Requested an update.");
+  assert.equal(getEl("log-summary").value, "Sent custom email to department head. Requested an update.");
   assert.equal(chipsContainer.children.length, 4);
   assert.equal(chipsContainer.children[0].textContent, "Called school office");
   assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Called school office.");
@@ -1604,7 +1622,7 @@ test("quick summary suggestions: provides Grade 9 Email First Contact pills, sup
   // Context-aware update: Switch to Social
   getEl("log-channel").value = "Social";
   getEl("log-channel").dispatchEvent(new Event("change", { bubbles: true }));
-  assert.equal(getEl("log-summary").value, "Requested an update.");
+  assert.equal(getEl("log-summary").value, "Sent custom email to department head. Requested an update.");
   assert.equal(chipsContainer.children.length, 3);
   assert.equal(chipsContainer.children[0].textContent, "Sent direct message");
   assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Sent direct message.");
@@ -1616,7 +1634,7 @@ test("quick summary suggestions: provides Grade 9 Email First Contact pills, sup
   // Context-aware update: Switch to Meeting
   getEl("log-channel").value = "Meeting";
   getEl("log-channel").dispatchEvent(new Event("change", { bubbles: true }));
-  assert.equal(getEl("log-summary").value, "Requested an update.");
+  assert.equal(getEl("log-summary").value, "Sent custom email to department head. Requested an update.");
   assert.equal(chipsContainer.children.length, 4);
   assert.equal(chipsContainer.children[0].textContent, "Discussed program delivery");
   assert.equal(chipsContainer.children[0].getAttribute("data-value"), "Discussed program delivery.");
@@ -1629,7 +1647,7 @@ test("quick summary suggestions: provides Grade 9 Email First Contact pills, sup
 
   // Tapping Meeting pill fills summary
   chipsContainer.children[3].click();
-  assert.equal(getEl("log-summary").value, "Agreed on next steps.");
+  assert.equal(getEl("log-summary").value, "Sent custom email to department head. Requested an update. Agreed on next steps.");
   assert.equal(chipsContainer.children[3].classList.contains("selected"), true);
 });
 
@@ -1663,7 +1681,7 @@ test("Scenario: Grade 9 first email outreach using quick summary suggestion pill
     ?? Array.from(chipsContainer.children).find((c) => c.textContent === "Offered free workshop");
   assert.ok(workshopChip);
   workshopChip.click();
-  assert.equal(getEl("log-summary").value, "Sent an email offering a free introductory dance workshop.");
+  assert.equal(getEl("log-summary").value, "Offered free workshop");
   assert.equal(workshopChip.classList.contains("selected"), true);
 
   // Step 5: Next action & Follow-up date
@@ -1676,7 +1694,7 @@ test("Scenario: Grade 9 first email outreach using quick summary suggestion pill
   assert.equal(requests[0].channel, "Email");
   assert.equal(requests[0].activityType, "Outreach");
   assert.equal(requests[0].outcome, "No reply yet");
-  assert.equal(requests[0].summary, "Sent an email offering a free introductory dance workshop.");
+  assert.equal(requests[0].summary, "Offered free workshop");
   assert.equal(requests[0].nextAction, "Follow up if no reply");
   assert.equal(requests[0].followUpDue, "2026-10-25");
   assert.equal(requests[0].stage, "Contacted");
@@ -4929,6 +4947,230 @@ test("LocalStorage DraftManager & Verified Save Lock: debounced auto-save, resto
   assert.equal(h.getEl("draft-restore-text").textContent, "Restored your unsaved draft from this device.");
   assert.equal(h.getEl("log-outcome").value, "Left message with vice principal");
   assert.equal(h.getEl("log-summary").value, "Typed before signing out without clicking Save.");
+});
+
+test("Quick-tap suggestion pills, quick-date chips, and smart outcome chaining across Steps 3, 4, and 5", async (t) => {
+  const record = {
+    recordId: "00000000-0000-4000-8000-000000000100",
+    schoolName: "Etobicoke Collegiate Institute",
+    schoolBoard: "TDSB",
+    geographicRegion: "Etobicoke",
+    stage: "Not Contacted",
+    contactName: "Ms. Adams",
+    contactRole: "Dance Lead",
+    lastRequestId: "v100",
+  };
+  const requests = [];
+  const { context, getEl, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) return Response.json({ currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" }, schools: [record], sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600 });
+      if (url.includes("/api/schools/detail")) return Response.json({ record });
+      if (url.includes("/api/activities")) {
+        requests.push(JSON.parse(init.body));
+        return Response.json({ ok: true, record: { ...record, stage: "Contacted", lastRequestId: "v101" } });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+  await signIn("alex@example.test");
+  await context.openSchoolEditor(record.recordId, false, "activity");
+
+  // 1. Verify Step 3 Outcome suggestion pills (10 pills)
+  const outcomeContainer = getEl("outcome-suggestion-chips");
+  const expectedOutcomes = [
+    "No reply yet",
+    "Left voicemail",
+    "Spoke with someone",
+    "Office asked to email info",
+    "Receptionist gave teacher contact",
+    "Asked for more information",
+    "Interested",
+    "Checking with Principal / Dept Head",
+    "Confirmed / Locked in!",
+    "Not interested",
+  ];
+  assert.equal(outcomeContainer.children.length, expectedOutcomes.length);
+  for (let i = 0; i < expectedOutcomes.length; i++) {
+    const chip = outcomeContainer.children[i];
+    assert.equal(chip.textContent, expectedOutcomes[i]);
+    assert.equal(chip.getAttribute("data-value"), expectedOutcomes[i]);
+    assert.equal(chip.getAttribute("data-target"), "log-outcome");
+  }
+
+  // 2. Verify Step 4 Summary suggestion pills (10 pills)
+  const summaryContainer = getEl("summary-suggestion-chips");
+  const expectedSummaries = [
+    "Introduced H4",
+    "Offered free workshop",
+    "Pitched Cypher Program",
+    "Pitched SHSM Certification",
+    "Invited to Battle at the Board",
+    "Asked about dance program",
+    "Asked for the right contact",
+    "Sent program info package / flyer",
+    "Discussed available dates",
+    "Invited student mentors",
+  ];
+  assert.equal(summaryContainer.children.length, expectedSummaries.length);
+  for (let i = 0; i < expectedSummaries.length; i++) {
+    const chip = summaryContainer.children[i];
+    assert.equal(chip.textContent, expectedSummaries[i]);
+    assert.equal(chip.getAttribute("data-value"), expectedSummaries[i]);
+  }
+
+  // Test Step 4 multi-select, append, and toggle
+  summaryContainer.children[0].click(); // "Introduced H4"
+  assert.equal(getEl("log-summary").value, "Introduced H4");
+  assert.equal(summaryContainer.children[0].classList.contains("selected"), true);
+
+  summaryContainer.children[1].click(); // "Offered free workshop"
+  assert.equal(getEl("log-summary").value, "Introduced H4, Offered free workshop");
+  assert.equal(summaryContainer.children[0].classList.contains("selected"), true);
+  assert.equal(summaryContainer.children[1].classList.contains("selected"), true);
+
+  summaryContainer.children[7].click(); // "Sent program info package / flyer"
+  assert.equal(getEl("log-summary").value, "Introduced H4, Offered free workshop, Sent program info package / flyer");
+  assert.equal(summaryContainer.children[7].classList.contains("selected"), true);
+
+  // Toggle off the middle pill
+  summaryContainer.children[1].click();
+  assert.equal(getEl("log-summary").value, "Introduced H4, Sent program info package / flyer");
+  assert.equal(summaryContainer.children[1].classList.contains("selected"), false);
+  assert.equal(summaryContainer.children[0].classList.contains("selected"), true);
+  assert.equal(summaryContainer.children[7].classList.contains("selected"), true);
+
+  // 3. Verify Step 5 Next Action suggestion pills (9 pills)
+  const nextActionContainer = getEl("next-action-suggestion-chips");
+  const expectedNextActions = [
+    "Follow up if no reply",
+    "Schedule a workshop",
+    "Visit the school",
+    "Call school main office",
+    "Send info package by email",
+    "Confirm dates with teacher",
+    "Get Principal / Admin approval",
+    "Send booking confirmation",
+    "Send invoice / feedback survey",
+  ];
+  assert.equal(nextActionContainer.children.length, expectedNextActions.length);
+  for (let i = 0; i < expectedNextActions.length; i++) {
+    const chip = nextActionContainer.children[i];
+    assert.equal(chip.textContent, expectedNextActions[i]);
+    assert.equal(chip.getAttribute("data-value"), expectedNextActions[i]);
+    assert.equal(chip.getAttribute("data-target"), "edit-nextAction");
+  }
+
+  // 4. Verify Step 5 Quick Date Chips (4 chips)
+  const quickDateContainer = getEl("quick-date-suggestion-chips");
+  const expectedDates = [
+    { label: "Tomorrow", days: 1 },
+    { label: "In 3 days", days: 3 },
+    { label: "Next week", days: 7 },
+    { label: "In 2 weeks", days: 14 },
+  ];
+  assert.equal(quickDateContainer.children.length, expectedDates.length);
+  for (let i = 0; i < expectedDates.length; i++) {
+    const chip = quickDateContainer.children[i];
+    assert.equal(chip.textContent, expectedDates[i].label);
+    assert.equal(chip.getAttribute("data-days"), String(expectedDates[i].days));
+  }
+
+  // Tapping a quick date chip sets date and highlights chip
+  quickDateContainer.children[0].click(); // Tomorrow
+  const expectedTomorrow = context.formatQuickDate(1);
+  assert.equal(getEl("edit-followUpDue").value, expectedTomorrow);
+  assert.equal(quickDateContainer.children[0].classList.contains("selected"), true);
+  assert.equal(quickDateContainer.children[1].classList.contains("selected"), false);
+
+  quickDateContainer.children[1].click(); // In 3 days
+  const expectedIn3Days = context.formatQuickDate(3);
+  assert.equal(getEl("edit-followUpDue").value, expectedIn3Days);
+  assert.equal(quickDateContainer.children[0].classList.contains("selected"), false);
+  assert.equal(quickDateContainer.children[1].classList.contains("selected"), true);
+
+  // 5. Verify Smart Chaining from Step 3 Outcome to Step 5 (Next Action, Stage, Date)
+  const testChaining = [
+    {
+      outcome: "No reply yet",
+      expectedAction: "Follow up if no reply",
+      expectedStage: "Contacted",
+      expectedDays: 4,
+    },
+    {
+      outcome: "Left voicemail",
+      expectedAction: "Call school main office",
+      expectedStage: "Contacted",
+      expectedDays: 3,
+    },
+    {
+      outcome: "Office asked to email info",
+      expectedAction: "Send info package by email",
+      expectedStage: "Contacted",
+      expectedDays: 3,
+    },
+    {
+      outcome: "Receptionist gave teacher contact",
+      expectedAction: "Send info package by email",
+      expectedStage: "Contacted",
+      expectedDays: 2,
+    },
+    {
+      outcome: "Asked for more information",
+      expectedAction: "Send info package by email",
+      expectedStage: "Engaged",
+      expectedDays: 3,
+    },
+    {
+      outcome: "Interested",
+      expectedAction: "Confirm dates with teacher",
+      expectedStage: "Engaged",
+      expectedDays: 3,
+    },
+    {
+      outcome: "Checking with Principal / Dept Head",
+      expectedAction: "Get Principal / Admin approval",
+      expectedStage: "Engaged",
+      expectedDays: 5,
+    },
+    {
+      outcome: "Confirmed / Locked in!",
+      expectedAction: "Schedule a workshop",
+      expectedStage: "Booked",
+      expectedDays: 2,
+    },
+  ];
+
+  for (const tc of testChaining) {
+    const outcomeChip = Array.from(outcomeContainer.children).find((c) => c.textContent === tc.outcome);
+    assert.ok(outcomeChip, `Found outcome chip for ${tc.outcome}`);
+    outcomeChip.click();
+
+    assert.equal(getEl("log-outcome").value, tc.outcome);
+    assert.equal(outcomeChip.classList.contains("selected"), true);
+    assert.equal(getEl("edit-nextAction").value, tc.expectedAction);
+    assert.equal(getEl("edit-stage").value, tc.expectedStage);
+    assert.equal(getEl("stage-helper-text").textContent, (context.STAGE_CONFIG || context.window.STAGE_CONFIG)[tc.expectedStage].helperText);
+    assert.equal(getEl("edit-followUpDue").value, context.formatQuickDate(tc.expectedDays));
+  }
+
+  // Verify student can override chained values with 1 click
+  // Currently after Confirmed / Locked in!, nextAction is "Schedule a workshop", stage is "Booked", follow-up date is +2 days
+  // Student clicks "Visit the school" in Next Action
+  const visitChip = Array.from(nextActionContainer.children).find((c) => c.textContent === "Visit the school");
+  assert.ok(visitChip);
+  visitChip.click();
+  assert.equal(getEl("edit-nextAction").value, "Visit the school");
+  assert.equal(visitChip.classList.contains("selected"), true);
+
+  // Student clicks "Next week" (+7 days) in Quick Date
+  quickDateContainer.children[2].click();
+  assert.equal(getEl("edit-followUpDue").value, context.formatQuickDate(7));
+  assert.equal(quickDateContainer.children[2].classList.contains("selected"), true);
+
+  // Still retains outcome from Step 3
+  assert.equal(getEl("log-outcome").value, "Confirmed / Locked in!");
 });
 
 

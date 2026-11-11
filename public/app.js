@@ -4,6 +4,8 @@ const el = (id) => {
   if (!node && id === "edit-goal") return document.getElementById("edit-outreachGoal");
   if (!node && id === "field-goal") return document.getElementById("field-outreachGoal");
   if (!node && id === "field-outreachGoal") return document.getElementById("field-goal");
+  if (!node && id === "edit-follow-up-date") return document.getElementById("edit-followUpDue");
+  if (!node && id === "edit-followUpDue") return document.getElementById("edit-follow-up-date");
   return node;
 };
 // Pages supplies a public API origin; the local preview stays on the same origin.
@@ -926,24 +928,156 @@ function editorInputs(disabled) {
   }
 }
 
+const OUTCOME_CHAINING = {
+  "no reply yet": {
+    nextAction: "Follow up if no reply",
+    stage: "Contacted",
+    days: 4,
+  },
+  "left voicemail": {
+    nextAction: "Call school main office",
+    stage: "Contacted",
+    days: 3,
+  },
+  "office asked to email info": {
+    nextAction: "Send info package by email",
+    stage: "Contacted",
+    days: 3,
+  },
+  "receptionist gave teacher contact": {
+    nextAction: "Send info package by email",
+    stage: "Contacted",
+    days: 2,
+  },
+  "asked for more information": {
+    nextAction: "Send info package by email",
+    stage: "Engaged",
+    days: 3,
+  },
+  "interested": {
+    nextAction: "Confirm dates with teacher",
+    stage: "Engaged",
+    days: 3,
+  },
+  "checking with principal / dept head": {
+    nextAction: "Get Principal / Admin approval",
+    stage: "Engaged",
+    days: 5,
+  },
+  "confirmed / locked in!": {
+    nextAction: "Schedule a workshop",
+    stage: "Booked",
+    days: 2,
+  },
+};
+
+function formatQuickDate(daysFromNow, now = new Date()) {
+  const d = new Date(now);
+  d.setDate(d.getDate() + Number(daysFromNow || 0));
+  return dashboardToday(d);
+}
+
+function toggleSummaryPhrase(currentText, phrase) {
+  const text = (currentText || "").trim();
+  if (!text) return phrase;
+
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(^|[,.;\\n]\\s*)${escaped}(?=[,.;\\n]|\\s|$)`, "i");
+  const match = text.match(regex);
+
+  if (match) {
+    const idx = match.index + (match[1] ? match[1].length : 0);
+    const before = text.slice(0, idx).trimEnd();
+    const after = text.slice(idx + phrase.length).trimStart();
+    const cleanBefore = before.replace(/[,;]+$/, "");
+    const cleanAfter = after.replace(/^[,;]+/, "").trimStart();
+
+    if (!cleanBefore) {
+      return cleanAfter.replace(/^[,\s;.]+/, "").trim();
+    }
+    if (!cleanAfter) {
+      return cleanBefore.trim();
+    }
+    if (cleanBefore.endsWith(".")) {
+      return `${cleanBefore} ${cleanAfter}`;
+    }
+    return `${cleanBefore}, ${cleanAfter}`;
+  }
+
+  const clean = text.replace(/[,\s;]+$/, "");
+  const sep = clean.endsWith(".") ? " " : ", ";
+  return `${clean}${sep}${phrase}`;
+}
+
+function applyQuickDate(days) {
+  const target = el("edit-followUpDue") || el("edit-follow-up-date");
+  if (!target || target.disabled) return;
+  target.value = formatQuickDate(Number(days));
+  target.dispatchEvent(new Event("input", { bubbles: true }));
+  target.dispatchEvent(new Event("change", { bubbles: true }));
+  updateDirtyState();
+  scheduleDraftAutoSave();
+  updateSuggestionStates();
+}
+
+if (typeof window !== "undefined") {
+  window.formatQuickDate = formatQuickDate;
+  window.applyQuickDate = applyQuickDate;
+  window.toggleSummaryPhrase = toggleSummaryPhrase;
+  window.OUTCOME_CHAINING = OUTCOME_CHAINING;
+}
+
 function applySuggestion(targetId, value) {
   const input = el(targetId);
   if (!input || input.disabled) return;
-  input.value = value;
+
+  if (targetId === "log-summary") {
+    input.value = toggleSummaryPhrase(input.value, value);
+  } else {
+    input.value = value;
+  }
+
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
   input.focus?.();
+  updateDirtyState();
+  scheduleDraftAutoSave();
   updateSuggestionStates();
 
-  if (targetId === "log-outcome" && value.toLowerCase() === "not interested") {
-    const origStage = editing?.original?.stage;
-    if (!origStage || !["Interested", "Engaged", "Booked", "Completed"].includes(origStage)) {
-      if (el("edit-stage")) el("edit-stage").value = "Cold";
-      if (el("edit-coldReason")) el("edit-coldReason").value = DEFAULT_DECLINE_REASON;
-      if (el("edit-followUpDue")) el("edit-followUpDue").value = "";
-      if (el("edit-nextAction")) el("edit-nextAction").value = "Archived for season";
-      updateStageHelperText("Cold");
-      updateColdWarning();
+  if (targetId === "log-outcome") {
+    const outcomeKey = value.toLowerCase().trim();
+    if (outcomeKey === "not interested") {
+      const origStage = editing?.original?.stage;
+      if (!origStage || !["Interested", "Engaged", "Booked", "Completed"].includes(origStage)) {
+        if (el("edit-stage")) el("edit-stage").value = "Cold";
+        if (el("edit-coldReason")) el("edit-coldReason").value = DEFAULT_DECLINE_REASON;
+        if (el("edit-followUpDue")) el("edit-followUpDue").value = "";
+        if (el("edit-nextAction")) el("edit-nextAction").value = "Archived for season";
+        updateStageHelperText("Cold");
+        updateColdWarning();
+        updateSuggestionStates();
+      }
+    } else if (OUTCOME_CHAINING[outcomeKey]) {
+      const chain = OUTCOME_CHAINING[outcomeKey];
+      if (el("edit-stage")) {
+        el("edit-stage").value = chain.stage;
+        el("edit-stage").dispatchEvent(new Event("change", { bubbles: true }));
+        updateStageHelperText(chain.stage);
+      }
+      if (el("edit-nextAction")) {
+        el("edit-nextAction").value = chain.nextAction;
+        el("edit-nextAction").dispatchEvent(new Event("input", { bubbles: true }));
+        el("edit-nextAction").dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const dateInput = el("edit-followUpDue") || el("edit-follow-up-date");
+      if (dateInput) {
+        dateInput.value = formatQuickDate(chain.days);
+        dateInput.dispatchEvent(new Event("input", { bubbles: true }));
+        dateInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      updateDirtyState();
+      scheduleDraftAutoSave();
+      updateSuggestionStates();
     }
   }
 }
@@ -952,16 +1086,100 @@ function updateSuggestionStates() {
   if (typeof document?.querySelectorAll !== "function") return;
   const chips = document.querySelectorAll(".suggestion-chip");
   for (const chip of chips) {
+    if (chip.classList?.contains("quick-date-chip") || chip.getAttribute?.("data-days")) continue;
     const targetId = chip.getAttribute?.("data-target");
     const value = chip.getAttribute?.("data-value");
     const input = el(targetId);
-    const isMatch = Boolean(input && value && input.value.trim().toLowerCase() === value.trim().toLowerCase());
+    if (!input || !value) continue;
+    let isMatch = false;
+    if (targetId === "log-summary") {
+      const escaped = value.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      isMatch = new RegExp(`(^|[,.;\\n]\\s*)${escaped}(?=[,.;\\n]|\\s|$)`, "i").test(input.value.trim());
+    } else {
+      isMatch = Boolean(input.value.trim().toLowerCase() === value.trim().toLowerCase());
+    }
     chip.classList?.toggle("selected", isMatch);
     chip.setAttribute?.("aria-pressed", String(isMatch));
   }
+
+  const dateChips = document.querySelectorAll(".quick-date-chip");
+  const dateInput = el("edit-followUpDue") || el("edit-follow-up-date");
+  if (dateChips && dateInput) {
+    const currentDate = (dateInput.value || "").trim();
+    for (const chip of dateChips) {
+      const days = chip.getAttribute?.("data-days");
+      if (days !== null && days !== undefined) {
+        const isMatch = Boolean(currentDate && currentDate === formatQuickDate(Number(days)));
+        chip.classList?.toggle("selected", isMatch);
+        chip.setAttribute?.("aria-pressed", String(isMatch));
+      }
+    }
+  }
 }
 
+const STEP4_SUMMARY_SUGGESTIONS = [
+  { label: "Introduced H4", value: "Introduced H4" },
+  { label: "Offered free workshop", value: "Offered free workshop" },
+  { label: "Pitched Cypher Program", value: "Pitched Cypher Program" },
+  { label: "Pitched SHSM Certification", value: "Pitched SHSM Certification" },
+  { label: "Invited to Battle at the Board", value: "Invited to Battle at the Board" },
+  { label: "Asked about dance program", value: "Asked about dance program" },
+  { label: "Asked for the right contact", value: "Asked for the right contact" },
+  { label: "Sent program info package / flyer", value: "Sent program info package / flyer" },
+  { label: "Discussed available dates", value: "Discussed available dates" },
+  { label: "Invited student mentors", value: "Invited student mentors" },
+];
+
 const summarySuggestions = {
+  Email: {
+    Outreach: STEP4_SUMMARY_SUGGESTIONS,
+    FollowUp: [
+      { label: "Followed up about workshop opportunities", value: "Followed up about workshop opportunities." },
+      { label: "Requested an update", value: "Requested an update." },
+    ],
+  },
+  Text: {
+    Outreach: [
+      { label: "Texted about workshop opportunities", value: "Texted about workshop opportunities." },
+      { label: "Introduced H4 via text", value: "Texted to introduce H4 and free dance programs." },
+      { label: "Asked for contact", value: "Texted to ask for the right contact for student programs." },
+    ],
+    FollowUp: [
+      { label: "Followed up via text", value: "Followed up via text about workshop opportunities." },
+      { label: "Checked in", value: "Sent a text check-in regarding our previous message." },
+    ],
+  },
+  Phone: [
+    { label: "Called school office", value: "Called school office." },
+    { label: "Called the school", value: "Called the school." },
+    { label: "Left voicemail", value: "Left voicemail." },
+    { label: "Discussed workshop opportunities", value: "Discussed workshop opportunities." },
+  ],
+  Visit: {
+    Outreach: [
+      { label: "Visited school to introduce H4", value: "Visited school to introduce H4." },
+      { label: "Dropped off materials", value: "Dropped off H4 introductory materials at the school office." },
+      { label: "Met with office staff", value: "Spoke with front office staff to introduce H4 programs." },
+    ],
+    FollowUp: [
+      { label: "Follow-up visit", value: "Followed up with an in-person school visit." },
+      { label: "Checked in with office", value: "Checked in with school office regarding program delivery." },
+    ],
+  },
+  Meeting: [
+    { label: "Discussed program delivery", value: "Discussed program delivery." },
+    { label: "Discussed workshop plans", value: "Discussed workshop plans." },
+    { label: "Discussed scheduling", value: "Discussed scheduling." },
+    { label: "Agreed on next steps", value: "Agreed on next steps." },
+  ],
+  Social: [
+    { label: "Sent direct message", value: "Sent direct message." },
+    { label: "Sent introductory message", value: "Sent introductory message." },
+    { label: "Followed up through social media", value: "Followed up through social media." },
+  ],
+};
+
+const bulkSummarySuggestions = {
   Email: {
     Outreach: [
       { label: "Introduced H4", value: "Sent an introductory email explaining H4 and our free dance programs." },
@@ -1022,6 +1240,102 @@ function getSummarySuggestions(channel, activityType) {
   return channelData[activityType] || channelData.Outreach || [];
 }
 
+const STEP3_OUTCOME_SUGGESTIONS = [
+  "No reply yet",
+  "Left voicemail",
+  "Spoke with someone",
+  "Office asked to email info",
+  "Receptionist gave teacher contact",
+  "Asked for more information",
+  "Interested",
+  "Checking with Principal / Dept Head",
+  "Confirmed / Locked in!",
+  "Not interested",
+];
+
+const STEP5_NEXT_ACTION_SUGGESTIONS = [
+  "Follow up if no reply",
+  "Schedule a workshop",
+  "Visit the school",
+  "Call school main office",
+  "Send info package by email",
+  "Confirm dates with teacher",
+  "Get Principal / Admin approval",
+  "Send booking confirmation",
+  "Send invoice / feedback survey",
+];
+
+const QUICK_DATE_SUGGESTIONS = [
+  { label: "Tomorrow", days: 1 },
+  { label: "In 3 days", days: 3 },
+  { label: "Next week", days: 7 },
+  { label: "In 2 weeks", days: 14 },
+];
+
+function renderOutcomeSuggestions() {
+  const container = el("outcome-suggestion-chips");
+  if (!container || (container.children && container.children.length > 0)) return;
+  for (const text of STEP3_OUTCOME_SUGGESTIONS) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "suggestion-chip";
+    chip.setAttribute("data-target", "log-outcome");
+    chip.setAttribute("data-value", text);
+    chip.textContent = text;
+    chip.onclick = () => {
+      chip._handledClick = true;
+      applySuggestion("log-outcome", text);
+    };
+    if (editing?.busy || el("log-outcome")?.disabled) chip.disabled = true;
+    container.append(chip);
+  }
+}
+
+function renderNextActionSuggestions() {
+  const container = el("next-action-suggestion-chips");
+  if (!container || (container.children && container.children.length > 0)) return;
+  for (const text of STEP5_NEXT_ACTION_SUGGESTIONS) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "suggestion-chip";
+    chip.setAttribute("data-target", "edit-nextAction");
+    chip.setAttribute("data-value", text);
+    chip.textContent = text;
+    chip.onclick = () => {
+      chip._handledClick = true;
+      applySuggestion("edit-nextAction", text);
+    };
+    if (editing?.busy || el("edit-nextAction")?.disabled) chip.disabled = true;
+    container.append(chip);
+  }
+}
+
+function renderQuickDateChips() {
+  const container = el("quick-date-suggestion-chips");
+  if (!container || (container.children && container.children.length > 0)) return;
+  for (const item of QUICK_DATE_SUGGESTIONS) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "suggestion-chip quick-date-chip";
+    chip.setAttribute("data-days", String(item.days));
+    chip.textContent = item.label;
+    chip.onclick = () => {
+      chip._handledClick = true;
+      applyQuickDate(item.days);
+    };
+    if (editing?.busy || (el("edit-followUpDue") || el("edit-follow-up-date"))?.disabled) chip.disabled = true;
+    container.append(chip);
+  }
+}
+
+function ensureAllEditorSuggestionPills() {
+  renderOutcomeSuggestions();
+  renderNextActionSuggestions();
+  renderQuickDateChips();
+  bindEditorSuggestionChips();
+  updateSuggestionStates();
+}
+
 function renderSummarySuggestions() {
   const container = el("summary-suggestion-chips");
   if (!container) return;
@@ -1036,10 +1350,14 @@ function renderSummarySuggestions() {
     chip.setAttribute("data-target", "log-summary");
     chip.setAttribute("data-value", item.value);
     chip.textContent = item.label;
-    chip.onclick = () => applySuggestion("log-summary", item.value);
+    chip.onclick = () => {
+      chip._handledClick = true;
+      applySuggestion("log-summary", item.value);
+    };
     if (editing?.busy || el("log-summary")?.disabled) chip.disabled = true;
     container.append(chip);
   }
+  updateSuggestionStates();
 }
 
 function evaluateColdEligibility(params) {
@@ -2583,6 +2901,7 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     }
 
     editorInputs(!!editing.pending);
+    ensureAllEditorSuggestionPills();
     renderSummarySuggestions();
     updateSuggestionStates();
     el("editor-save").disabled = !!staleDraft; el("editor-save").textContent = editing.pending ? "Retry save" : editorSaveLabel(editing);
@@ -3064,7 +3383,8 @@ function renderBulkSummarySuggestions() {
   if (!container) return;
   const channel = el("bulk-channel")?.value || "Email";
   const activityType = el("bulk-activityType")?.value || "Outreach";
-  const suggestions = getSummarySuggestions(channel, activityType);
+  const channelData = bulkSummarySuggestions[channel] || bulkSummarySuggestions.Email;
+  const suggestions = Array.isArray(channelData) ? channelData : (channelData[activityType] || channelData.Outreach || []);
   container.replaceChildren();
   for (const item of suggestions) {
     const chip = document.createElement("button");
@@ -5150,9 +5470,33 @@ el("unclaim-cancel-btn")?.addEventListener("click", () => {
 el("unclaim-confirm-btn")?.addEventListener("click", async () => {
   await unclaimSchool();
 });
+function bindEditorSuggestionChips() {
+  const chips = document.querySelectorAll?.(".quick-date-chip");
+  if (chips) {
+    for (const chip of chips) {
+      const days = chip.getAttribute?.("data-days");
+      if (days !== null && days !== undefined) {
+        chip.onclick = () => {
+          chip._handledClick = true;
+          applyQuickDate(days);
+        };
+      }
+    }
+  }
+}
+
 el("editor-form").addEventListener("click", (event) => {
   const chip = event.target.closest?.(".suggestion-chip");
   if (!chip) return;
+  if (chip._handledClick) {
+    chip._handledClick = false;
+    return;
+  }
+  const days = chip.getAttribute?.("data-days");
+  if (days !== null && days !== undefined && days !== "") {
+    applyQuickDate(days);
+    return;
+  }
   const targetId = chip.getAttribute("data-target");
   const value = chip.getAttribute("data-value");
   if (targetId && value) applySuggestion(targetId, value);
@@ -5160,6 +5504,9 @@ el("editor-form").addEventListener("click", (event) => {
 el("log-outcome")?.addEventListener("input", updateSuggestionStates);
 el("log-summary")?.addEventListener("input", updateSuggestionStates);
 el("edit-nextAction")?.addEventListener("input", updateSuggestionStates);
+el("edit-followUpDue")?.addEventListener("input", updateSuggestionStates);
+el("edit-followUpDue")?.addEventListener("change", updateSuggestionStates);
+ensureAllEditorSuggestionPills();
 el("log-channel")?.addEventListener("change", () => {
   renderSummarySuggestions();
   updateSuggestionStates();
