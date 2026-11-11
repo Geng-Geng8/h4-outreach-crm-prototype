@@ -4745,6 +4745,36 @@ test("LocalStorage DraftManager & Verified Save Lock: debounced auto-save, resto
   assert.equal(h.getEl("draft-restore-banner").hidden, true);
   assert.equal(h.getEl("edit-notes").value, "Original sheet notes");
   assert.equal(DraftManager.loadDraft("details", record.recordId), null);
+  h.context.closeSchoolEditor();
+
+  // 8. Preserve Local Drafts on User Logout:
+  // Type in the Outreach modal -> do NOT click Save -> Sign out -> Sign back in -> Reopen school -> restores cleanly
+  localStorageMap.set("auth_token", "temp-auth-token");
+  localStorageMap.set("user_cache", "temp-user-cache");
+  await h.context.openSchoolEditor(record.recordId, false, "activity");
+  h.getEl("log-outcome").value = "Left message with vice principal";
+  h.getEl("log-outcome").dispatchEvent(new h.context.Event("input", { bubbles: true }));
+  h.getEl("log-summary").value = "Typed before signing out without clicking Save.";
+  h.getEl("log-summary").dispatchEvent(new h.context.Event("input", { bubbles: true }));
+
+  const prevGoogleOpts = h.googleOptions();
+  h.getEl("sign-out").click();
+  await until(() => h.googleOptions() !== prevGoogleOpts);
+
+  // Auth/session keys are selectively removed, while h4_crm_draft_* keys are preserved
+  assert.equal(localStorageMap.has("auth_token"), false);
+  assert.equal(localStorageMap.has("user_cache"), false);
+  assert.equal(localStorageMap.has(`h4_crm_draft_activity_${record.recordId}`), true);
+  assert.equal(h.getEl("workspace").hidden, true);
+
+  // Sign back in on the same browser and reopen the school
+  await h.signIn("alex@example.test");
+  assert.equal(h.getEl("workspace").hidden, false);
+  await h.context.openSchoolEditor(record.recordId, false, "activity");
+  assert.equal(h.getEl("draft-restore-banner").hidden, false);
+  assert.equal(h.getEl("draft-restore-text").textContent, "Restored your unsaved draft from this device.");
+  assert.equal(h.getEl("log-outcome").value, "Left message with vice principal");
+  assert.equal(h.getEl("log-summary").value, "Typed before signing out without clicking Save.");
 });
 
 

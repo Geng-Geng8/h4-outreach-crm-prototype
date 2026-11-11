@@ -554,18 +554,47 @@ function refreshFailed(message) {
     if (config?.ready && !credential) showGoogleButton().catch(() => {});
   }
 }
-function forgetSession() {
-  sessionVersion++;
-  nonce = ""; resumeView = null;
-  window.google?.accounts?.id.cancel?.();
+const SESSION_STORAGE_KEYS = [sessionKey, resumeKey, "auth_token", "session_id", "user_cache"];
+
+function clearAuthAndSessionStorage() {
   try {
     sessionStorage.removeItem(sessionKey);
     sessionStorage.removeItem(resumeKey);
   } catch { /* Storage may be disabled. */ }
+  try {
+    const store = getLocalStorage();
+    if (!store) return;
+    for (const key of SESSION_STORAGE_KEYS) {
+      if (!key.startsWith("h4_crm_draft_")) {
+        store.removeItem(key);
+      }
+    }
+    if (typeof store.length === "number" && typeof store.key === "function") {
+      const toRemove = [];
+      for (let i = 0; i < store.length; i++) {
+        const k = store.key(i);
+        if (typeof k === "string" && !k.startsWith("h4_crm_draft_")) {
+          if (k.startsWith("h4.crm.") || k.startsWith("h4_crm_auth") || k.startsWith("h4_crm_session") || k.startsWith("h4_crm_user")) {
+            toRemove.push(k);
+          }
+        }
+      }
+      for (const k of toRemove) store.removeItem(k);
+    }
+  } catch { /* Storage may be disabled. */ }
+}
+
+function forgetSession() {
+  if (editing?.original && !editing.saved && hasFormChanges(editing)) {
+    saveCurrentModalDraft(false);
+  }
+  sessionVersion++;
+  nonce = ""; resumeView = null;
+  window.google?.accounts?.id.cancel?.();
+  clearAuthAndSessionStorage();
   if (el("session-restore")) el("session-restore").hidden = true;
   clearTimeout(draftSaveTimer); draftSaveTimer = null;
   editorSeq++; editorRead?.abort(); editing = null; editDrafts.clear(); savedSchoolGoals.clear();
-  DraftManager.clearAllDrafts();
   if (el("draft-restore-banner")) el("draft-restore-banner").hidden = true;
   if (el("draft-autosave-status")) { el("draft-autosave-status").textContent = ""; el("draft-autosave-status").hidden = true; }
   clearTimeout(saveToastTimer); el("save-toast").hidden = true;
