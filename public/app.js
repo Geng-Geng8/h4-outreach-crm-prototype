@@ -158,7 +158,10 @@ function serializeProgramTracks(tracks) {
     .join(", ");
 }
 
-function createProgramBadges(rawGoal) {
+function createProgramBadges(schoolOrGoal) {
+  const rawGoal = typeof schoolOrGoal === "object" && schoolOrGoal !== null
+    ? (schoolOrGoal.outreachGoal || schoolOrGoal.goal || "")
+    : String(schoolOrGoal || "");
   const tracks = parseProgramTracks(rawGoal);
   return tracks.map((track) => {
     const badge = document.createElement("span");
@@ -315,12 +318,14 @@ function populateGoalDropdown(currentGoal = "") {
 if (typeof window !== "undefined") {
   window.parseProgramTracks = parseProgramTracks;
   window.serializeProgramTracks = serializeProgramTracks;
+  window.createProgramBadges = createProgramBadges;
   window.addProgramFromControls = addProgramFromControls;
   window.renderProgramChips = renderProgramChips;
 }
 let editing = null, editorSeq = 0, editorRead;
 let saveToastTimer;
 const editDrafts = new Map();
+const savedSchoolGoals = new Map();
 const sessionKey = "h4.crm.session-token.v1";
 const resumeKey = "h4.crm.resume-view.v1";
 const resumableViews = ["home", "my-schools", "directory", "dashboard"];
@@ -412,7 +417,7 @@ function forgetSession() {
     sessionStorage.removeItem(resumeKey);
   } catch { /* Storage may be disabled. */ }
   if (el("session-restore")) el("session-restore").hidden = true;
-  editorSeq++; editorRead?.abort(); editing = null; editDrafts.clear();
+  editorSeq++; editorRead?.abort(); editing = null; editDrafts.clear(); savedSchoolGoals.clear();
   clearTimeout(saveToastTimer); el("save-toast").hidden = true;
   el("school-editor").close?.();
   for (const field of editFields) {
@@ -581,7 +586,7 @@ function renderSchools() {
     card.onclick = () => openSchoolEditor(school.recordId);
     const stage = schoolBadge(school.stage);
     const priority = document.createElement("span"); priority.className = "school-priority"; priority.textContent = school.priority ? `${school.priority} priority` : "";
-    const programBadges = createProgramBadges(school.outreachGoal ?? school.goal);
+    const programBadges = createProgramBadges(school.outreachGoal || school.goal || "");
     const heading = document.createElement("h2"); heading.textContent = school.schoolName;
     const meta = document.createElement("p"); meta.className = "school-meta"; meta.textContent = [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · ") || "Location not listed";
     const assignment = document.createElement("p"); assignment.className = "assignment"; assignment.textContent = school.assignedTo ? `Assigned to ${school.assignedTo}` : "Unassigned";
@@ -2277,6 +2282,29 @@ async function saveSchoolEdits(event) {
     if (session !== sessionVersion || editing !== edit || !credential) return;
     if (response.ok) {
       edit.original = { ...edit.original, ...edit.pending.patch, lastRequestId: data.record.lastRequestId };
+      const hasGoalInPatch = edit.pending?.patch && ("outreachGoal" in edit.pending.patch || "goal" in edit.pending.patch);
+      const savedGoal = String(
+        hasGoalInPatch
+          ? (edit.pending.patch.outreachGoal ?? edit.pending.patch.goal ?? "")
+          : (data.record?.outreachGoal ?? data.record?.goal ?? edit.original?.outreachGoal ?? edit.original?.goal ?? "")
+      );
+      edit.original.outreachGoal = savedGoal;
+      edit.original.goal = savedGoal;
+      savedSchoolGoals.set(edit.id, savedGoal);
+      const syncLocalGoal = () => {
+        for (const list of [schools, teamSchools]) {
+          const target = (list || []).find((s) => s.recordId === edit.id);
+          if (target) {
+            if (edit.pending?.patch) Object.assign(target, edit.pending.patch);
+            target.outreachGoal = savedGoal;
+            target.goal = savedGoal;
+          }
+        }
+        renderSchools();
+        renderHome();
+        renderDashboard();
+      };
+      syncLocalGoal();
       edit.pending = null; edit.saved = true; editDrafts.delete(editorDraftKey(edit));
       const outreachDraft = editDrafts.get(`activity:${edit.id}`);
       if (outreachDraft) {
@@ -2288,6 +2316,7 @@ async function saveSchoolEdits(event) {
       if (edit.mode === "details" && outreachDraft) {
         showSaveToast("✓ Contact saved");
         await refresh();
+        syncLocalGoal();
         await openSchoolEditor(edit.id, false, "activity");
         return;
       }
@@ -2295,6 +2324,7 @@ async function saveSchoolEdits(event) {
       closeSchoolEditor();
       showSaveToast(edit.mode === "activity" ? "✓ Outreach saved" : "✓ Saved");
       await refresh();
+      syncLocalGoal();
     } else if (response.status === 401 || response.status === 403) {
       forgetSession(); status("Your access changed. Please sign in again.");
       el("google-button").hidden = false;
@@ -3156,7 +3186,8 @@ async function openAction(id, action = "open") {
 function actionCard(school, reasons = []) {
   const card = dashboardNode("article", "", "school-card action-card");
   const badge = schoolBadge(school.stage);
-  card.append(badge, dashboardNode("h3", school.schoolName));
+  const programBadges = createProgramBadges(school.outreachGoal || school.goal || "");
+  card.append(badge, ...programBadges, dashboardNode("h3", school.schoolName));
   if (isSupervisor) card.append(dashboardNode("p", `Assigned to ${assignee(school)}`, "school-meta"));
   if (reasons.length) card.append(dashboardNode("p", reasons.join(" · "), "attention-reasons"));
   appendNextAction(card, school);
@@ -3292,7 +3323,7 @@ function renderDashboard() {
     cell("School").append(dashboardNode("strong", school.schoolName), dashboardNode("span", [school.schoolBoard, school.geographicRegion].filter(Boolean).join(" · "), "dashboard-school-meta"));
     cell("Assigned to").textContent = assignee(school);
     const badge = schoolBadge(school.stage, school.stage === "Not Contacted" ? "Claimed / not contacted" : school.stage || "Stage not set");
-    const programBadges = createProgramBadges(school.outreachGoal ?? school.goal);
+    const programBadges = createProgramBadges(school.outreachGoal || school.goal || "");
     cell("Stage").append(badge, ...programBadges);
     cell("Last contact").textContent = school.lastContacted || "Not recorded";
     const due = cell("Follow-up due"); due.textContent = school.followUpDue || "Not scheduled";
@@ -3325,6 +3356,13 @@ async function loadDashboard() {
     }
     if (!response.ok || !data.ok || !Array.isArray(data.schools)) throw new Error();
     teamSchools = data.schools; dashboardLoaded = true;
+    for (const s of teamSchools) {
+      const rawGoal = s.outreachGoal || s.goal || savedSchoolGoals.get(s.recordId) || "";
+      if (rawGoal || s.outreachGoal !== undefined || s.goal !== undefined) {
+        s.outreachGoal = rawGoal;
+        s.goal = rawGoal;
+      }
+    }
     dashboardOptions("dashboard-owner", "Everyone", [...new Set(teamSchools.flatMap((s) => (s.assignedTo || "").split(",").map((n) => n.trim()).filter(Boolean)))].sort());
     dashboardOptions("dashboard-stage", "All stages", [...pipelineStages, ...(teamSchools.some((s) => stageKey(s) === otherStage) ? [otherStage] : [])]);
     renderDashboard(); el("dashboard-content").hidden = false;
@@ -3683,6 +3721,13 @@ async function refresh() {
     }
     currentUser = data.currentUser;
     schools = data.schools;
+    for (const s of schools) {
+      const rawGoal = s.outreachGoal || s.goal || savedSchoolGoals.get(s.recordId) || "";
+      if (rawGoal || s.outreachGoal !== undefined || s.goal !== undefined) {
+        s.outreachGoal = rawGoal;
+        s.goal = rawGoal;
+      }
+    }
     overviewStudents = nextSupervisor ? data.overview?.students ?? [] : [];
     if (!nextSupervisor && el("home-view")) {
       el("overview-students").replaceChildren(); el("overview-pipeline").replaceChildren();

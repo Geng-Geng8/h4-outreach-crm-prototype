@@ -703,6 +703,8 @@ footer span span {
 .badge-program {
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
+  width: fit-content;
   gap: 4px;
   font-size: 10.5px;
   font-weight: 700;
@@ -714,6 +716,10 @@ footer span span {
   color: #3730a3;
   border: 1px solid #c7d2fe;
   line-height: 1.35;
+}
+.action-card > .badge-program {
+  margin-left: 0;
+  margin-top: 6px;
 }
 .badge-program.badge-program-completed {
   background: #f3e8ff;

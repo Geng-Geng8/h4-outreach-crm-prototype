@@ -70,6 +70,8 @@ export async function readHarness(t, overrides = {}) {
         if (range === "'School Directory'!A1:O1000" || range === "'School Directory'!A:O") return { range, values: tables["School Directory"] };
         const selected = new Map([
           ["'Schools'!A1:D1000", [0, 1, 2, 3]], ["'Schools'!A:D", [0, 1, 2, 3]],
+          ["'Schools'!H1:K1000", [7, 8, 9, 10]],
+          ["'Schools'!H1:L1000", [7, 8, 9, 10, 11]],
           ["'Schools'!I1:I1000", [8]], ["'Schools'!I:I", [8]],
           ["'Schools'!I1:K1000", [8, 9, 10]],
           ["'Schools'!I1:L1000", [8, 9, 10, 11]],

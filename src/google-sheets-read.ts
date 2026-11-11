@@ -15,7 +15,7 @@ export interface ReadOnlyConfig {
 export type CrmUser = { email: string; name: string; role: "Supervisor" | "co-op" };
 export type SchoolSummary = {
   recordId: string; schoolName: string; schoolBoard: string;
-  assignedTo: string; stage: string; priority: string; geographicRegion: string;
+  assignedTo: string; outreachGoal: string; goal: string; stage: string; priority: string; geographicRegion: string;
 };
 export type ActionSchool = SchoolSummary & {
   lastContacted: string; followUpDue: string; nextAction: string; isMySchool: boolean;
@@ -154,13 +154,13 @@ export class GoogleSheetsReadOnly {
     // Read only the columns needed for the minimal screen and ownership checks.
     // No notes, contacts, phone numbers, value, social handles, or Activity Log.
     const ranges = await this.read([
-      "'Schools'!A1:D1000", "'Schools'!I1:L1000", "'Schools'!M1:M1000",
+      "'Schools'!A1:D1000", "'Schools'!H1:L1000", "'Schools'!M1:M1000",
       "'Schools'!S1:S1000", "'Schools'!Z1:Z1000",
       ...(includeUsers ? ["'CRM Users'!A1:D1000"] : []),
     ]);
     const [base, stages, priorities, regions, owners, users] = ranges.map((range) => range.values ?? []);
     checkHeader(base?.[0], HEADERS.Schools.slice(0, 4));
-    checkHeader(stages?.[0], ["Stage", "Last Contacted", "Follow-Up Due", "Next Action"]); checkHeader(priorities?.[0], ["Priority"]);
+    checkHeader(stages?.[0], ["Outreach Goal", "Stage", "Last Contacted", "Follow-Up Due", "Next Action"]); checkHeader(priorities?.[0], ["Priority"]);
     checkHeader(regions?.[0], ["Geographic Region"]); checkHeader(owners?.[0], ["Owner Email"]);
     const summaries: (ActionSchool & { ownerEmail: string })[] = [];
     for (let index = 1; index < (base?.length ?? 0); index++) {
@@ -170,10 +170,11 @@ export class GoogleSheetsReadOnly {
       const ownerEmails = owner.split(",").map((e) => e.trim()).filter(Boolean);
       const isMySchool = ownerEmails.includes(user.email);
       if (user.role !== "Supervisor" && !isMySchool) continue;
+      const outreachGoal = value(stages?.[index]?.[0]);
       summaries.push({
         recordId: value(row[0]), schoolName: value(row[1]), schoolBoard: value(row[2]), ownerEmail: owner,
-        assignedTo: value(row[3]), stage: value(stages?.[index]?.[0]),
-        lastContacted: value(stages?.[index]?.[1]), followUpDue: value(stages?.[index]?.[2]), nextAction: value(stages?.[index]?.[3]),
+        assignedTo: value(row[3]), outreachGoal, goal: outreachGoal, stage: value(stages?.[index]?.[1]),
+        lastContacted: value(stages?.[index]?.[2]), followUpDue: value(stages?.[index]?.[3]), nextAction: value(stages?.[index]?.[4]),
         priority: value(priorities?.[index]?.[0]), geographicRegion: value(regions?.[index]?.[0]),
         isMySchool,
       });
@@ -187,12 +188,12 @@ export class GoogleSheetsReadOnly {
     // Team visibility is limited to progress summaries. Owner email is used
     // only for the server-computed permission; contacts and notes are not read.
     const ranges = await this.read([
-      "'Schools'!A1:D1000", "'Schools'!I1:K1000", "'Schools'!M1:M1000",
+      "'Schools'!A1:D1000", "'Schools'!H1:K1000", "'Schools'!M1:M1000",
       "'Schools'!S1:S1000", "'Schools'!Z1:Z1000",
     ]);
     const [base, progress, priorities, regions, owners] = ranges.map((range) => range.values ?? []);
     checkHeader(base?.[0], HEADERS.Schools.slice(0, 4));
-    checkHeader(progress?.[0], ["Stage", "Last Contacted", "Follow-Up Due"]);
+    checkHeader(progress?.[0], ["Outreach Goal", "Stage", "Last Contacted", "Follow-Up Due"]);
     checkHeader(priorities?.[0], ["Priority"]);
     checkHeader(regions?.[0], ["Geographic Region"]); checkHeader(owners?.[0], ["Owner Email"]);
     const summaries = [];
@@ -202,10 +203,11 @@ export class GoogleSheetsReadOnly {
       const owner = value(owners?.[index]?.[0]).trim().toLowerCase();
       const ownerEmails = owner.split(",").map((e) => e.trim()).filter(Boolean);
       const canEdit = user.role === "Supervisor" || ownerEmails.includes(user.email);
+      const outreachGoal = value(progress?.[index]?.[0]);
       summaries.push({
         recordId: value(row[0]), schoolName: value(row[1]), schoolBoard: value(row[2]),
-        assignedTo: value(row[3]), stage: value(progress?.[index]?.[0]),
-        lastContacted: value(progress?.[index]?.[1]), followUpDue: value(progress?.[index]?.[2]),
+        assignedTo: value(row[3]), outreachGoal, goal: outreachGoal, stage: value(progress?.[index]?.[1]),
+        lastContacted: value(progress?.[index]?.[2]), followUpDue: value(progress?.[index]?.[3]),
         priority: value(priorities?.[index]?.[0]), geographicRegion: value(regions?.[index]?.[0]),
         canEdit,
       });

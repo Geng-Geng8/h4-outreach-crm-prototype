@@ -29,11 +29,11 @@ test("team dashboard shares all progress summaries with students, but no private
   assert.equal(data.schools[0].lastContacted, "2026-10-14"); assert.equal(data.schools[0].followUpDue, "2026-10-20");
   assert.equal(data.schools[0].canEdit, true); assert.equal(data.schools[1].canEdit, false);
   assert.equal(data.schools[1].assignedTo, "Sam"); assert.equal(data.schools[1].stage, "Booked");
-  assert.deepEqual(Object.keys(data.schools[0]).sort(), ["recordId", "schoolName", "schoolBoard", "assignedTo", "stage", "priority", "geographicRegion", "lastContacted", "followUpDue", "canEdit"].sort());
+  assert.deepEqual(Object.keys(data.schools[0]).sort(), ["recordId", "schoolName", "schoolBoard", "assignedTo", "outreachGoal", "goal", "stage", "priority", "geographicRegion", "lastContacted", "followUpDue", "canEdit"].sort());
   assert.doesNotMatch(JSON.stringify(data), /PRIVATE_|@|ownerEmail|notes|activities|contactName|lastRequestId/);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.ok(sheetReads(h).every((call) => call.method === "GET"));
-  assert.deepEqual(schoolReads(h)[0].ranges, ["'Schools'!A1:D1000", "'Schools'!I1:K1000", "'Schools'!M1:M1000", "'Schools'!S1:S1000", "'Schools'!Z1:Z1000"]);
+  assert.deepEqual(schoolReads(h)[0].ranges, ["'Schools'!A1:D1000", "'Schools'!H1:K1000", "'Schools'!M1:M1000", "'Schools'!S1:S1000", "'Schools'!Z1:Z1000"]);
 });
 
 test("dashboard verifies supervisor membership and immediately rejects revocation and unlisted identities", async (t) => {
@@ -69,7 +69,7 @@ test("verified Google identity receives only its assigned school summaries", asy
   assert.equal(result.body.writesEnabled, false);
   assert.equal(result.body.visibility.scope, "assigned-school-summaries");
   assert.deepEqual(Object.keys(result.body.schools[0]).sort(), [
-    "recordId", "schoolName", "schoolBoard", "assignedTo", "stage", "priority", "geographicRegion", "lastContacted", "followUpDue", "nextAction", "isMySchool",
+    "recordId", "schoolName", "schoolBoard", "assignedTo", "outreachGoal", "goal", "stage", "priority", "geographicRegion", "lastContacted", "followUpDue", "nextAction", "isMySchool",
   ].sort());
   assert.equal(result.body.schools[0].isMySchool, true);
   assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_|Other Student School|sam@example\.test/);

@@ -4178,3 +4178,79 @@ test("outreach goal: multi-program track chips with active/completed states, aut
   assert.ok(savedLegacyPatch);
   assert.equal(savedLegacyPatch.outreachGoal, "Cypher Program");
 });
+
+test("outreach goal: grouped school overview cards render program badges, support goal fallback, and update in-memory immediately on save", async (t) => {
+  const goalFallbackSchool = {
+    ...reloadRecord,
+    recordId: "school-goal-fallback",
+    schoolName: "Madonna Catholic SS",
+    stage: "Engaged",
+    followUpDue: "2000-01-01",
+    nextAction: "Confirm SHSM pitch",
+    outreachGoal: undefined,
+    goal: "Dance Workshops (Completed), SHSM",
+  };
+  let currentRecord = { ...goalFallbackSchool, outreachGoal: "" };
+
+  const h = setupEnv({
+    fetchHandler: (url, init) => {
+      if (url.includes("/api/config")) return reloadFetch(url);
+      if (url.includes("/api/schools/detail")) {
+        return Promise.resolve(Response.json({ ok: true, record: currentRecord }));
+      }
+      if (url.includes("/api/schools/update")) {
+        const body = JSON.parse(init.body);
+        currentRecord = { ...currentRecord, ...body.patch, lastRequestId: body.requestId };
+        return Promise.resolve(Response.json({ ok: true, code: "SUCCESS", requestId: body.requestId, record: currentRecord }));
+      }
+      return Promise.resolve(Response.json({
+        ...reloadPayload(),
+        schools: [goalFallbackSchool],
+      }));
+    },
+  });
+  t.after(h.cleanup);
+  await h.signIn("alex@example.test");
+
+  // 1. Grouped Home / Overview action cards (#home-actions) render .badge-program and .badge-program-completed via `school.goal` fallback
+  const homeActionCard = h.getEl("home-actions").children[0];
+  assert.ok(homeActionCard, "Grouped home action card should exist");
+  const homeProgramBadges = homeActionCard.children.filter((c) => c.classList?.contains("badge-program"));
+  assert.equal(homeProgramBadges.length, 2, "Grouped action card should render 2 program badges via goal fallback");
+  assert.equal(homeProgramBadges[0].className, "badge badge-program badge-program-completed");
+  assert.equal(homeProgramBadges[0].textContent, "✓ Dance Workshops");
+  assert.equal(homeProgramBadges[1].className, "badge badge-program");
+  assert.equal(homeProgramBadges[1].textContent, "SHSM");
+
+  // 2. Schools view cards (#school-list) also render the badges from the `goal` fallback
+  const schoolCardBtn = h.getEl("school-list").children[0].children[0];
+  const schoolProgramBadges = schoolCardBtn.children.filter((c) => c.classList?.contains("badge-program"));
+  assert.equal(schoolProgramBadges.length, 2);
+  assert.equal(schoolProgramBadges[0].classList.contains("badge-program-completed"), true);
+  assert.equal(schoolProgramBadges[1].textContent, "SHSM");
+
+  // 3. Saving new program tracks updates both school.outreachGoal and school.goal in-memory and re-renders cards immediately
+  await h.context.openSchoolEditor(goalFallbackSchool.recordId, false, "details");
+  h.getEl("add-program-select").value = "Board Partnership";
+  h.getEl("add-program-status").value = "Completed";
+  h.getEl("add-program-btn").click();
+  h.getEl("add-program-select").value = "Keynotes";
+  h.getEl("add-program-status").value = "Active";
+  h.getEl("add-program-btn").click();
+
+  await h.context.saveSchoolEdits({ preventDefault() {} });
+
+  const updatedHomeCard = h.getEl("home-actions").children[0];
+  const updatedHomeBadges = updatedHomeCard.children.filter((c) => c.classList?.contains("badge-program"));
+  assert.equal(updatedHomeBadges.length, 2);
+  assert.equal(updatedHomeBadges[0].className, "badge badge-program badge-program-completed");
+  assert.equal(updatedHomeBadges[0].textContent, "✓ Board Partnership");
+  assert.equal(updatedHomeBadges[1].className, "badge badge-program");
+  assert.equal(updatedHomeBadges[1].textContent, "Keynotes");
+
+  const updatedSchoolCardBtn = h.getEl("school-list").children[0].children[0];
+  const updatedSchoolBadges = updatedSchoolCardBtn.children.filter((c) => c.classList?.contains("badge-program"));
+  assert.equal(updatedSchoolBadges.length, 2);
+  assert.equal(updatedSchoolBadges[0].textContent, "✓ Board Partnership");
+  assert.equal(updatedSchoolBadges[1].textContent, "Keynotes");
+});
