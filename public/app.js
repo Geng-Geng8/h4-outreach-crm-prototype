@@ -137,7 +137,8 @@ if (typeof window !== "undefined") {
 }
 
 function parseProgramTracks(rawGoal) {
-  const parts = String(rawGoal ?? "")
+  if (typeof rawGoal !== "string") return [];
+  const parts = rawGoal
     .split(",")
     .map((p) => p.trim())
     .filter(Boolean);
@@ -478,11 +479,11 @@ function forgetSession() {
   if (el("programs-view")) {
     el("programs-view").hidden = true;
     el("programs-view").classList?.add("hidden");
-    if (el("programs-overview-matrix")) el("programs-overview-matrix").replaceChildren();
-    if (el("programs-attention-list")) el("programs-attention-list").replaceChildren();
-    if (el("programs-active-list")) el("programs-active-list").replaceChildren();
-    if (el("programs-completed-list")) el("programs-completed-list").replaceChildren();
-    if (el("programs-kpi-strip")) el("programs-kpi-strip").replaceChildren();
+    el("programs-overview-matrix")?.replaceChildren?.();
+    el("programs-attention-list")?.replaceChildren?.();
+    el("programs-active-list")?.replaceChildren?.();
+    el("programs-completed-list")?.replaceChildren?.();
+    el("programs-kpi-strip")?.replaceChildren?.();
     if (el("programs-status")) el("programs-status").textContent = "";
     if (el("quick-tag-feedback")) el("quick-tag-feedback").textContent = "";
   }
@@ -3121,9 +3122,9 @@ function finalizeBulkBatch() {
 
 function updateWorkspaceHeading() {
   if (el("tab-home")) el("tab-home").textContent = isSupervisor ? "H4 Overview" : "My Outreach";
-  el("tab-my-schools").textContent = isSupervisor ? "Schools" : "My Schools";
-  el("workspace-heading").textContent = currentTab === "home" ? isSupervisor ? "H4 Overview." : "My Outreach." : currentTab === "dashboard" ? "Team Progress." : currentTab === "programs" ? "Program Tracks." : currentTab === "directory" ? "Find your next school." : isSupervisor ? "School overview." : "Your schools.";
-  el("workspace-description").textContent = currentTab === "home" ? isSupervisor ? "A clear view of the program. A little support where it counts." : "Your next step, without the guesswork." : currentTab === "dashboard" ? "Coordinate your outreach. Make every connection count." : currentTab === "programs" ? "Manage flagship tracks, triage school health, and track completed deliveries." : currentTab === "directory" ? "Browse available schools and start a new connection." : isSupervisor ? "School assignments across H4." : "Your assigned schools, ready for your next connection.";
+  if (el("tab-my-schools")) el("tab-my-schools").textContent = isSupervisor ? "Schools" : "My Schools";
+  if (el("workspace-heading")) el("workspace-heading").textContent = currentTab === "home" ? isSupervisor ? "H4 Overview." : "My Outreach." : currentTab === "dashboard" ? "Team Progress." : currentTab === "programs" ? "Program Tracks." : currentTab === "directory" ? "Find your next school." : isSupervisor ? "School overview." : "Your schools.";
+  if (el("workspace-description")) el("workspace-description").textContent = currentTab === "home" ? isSupervisor ? "A clear view of the program. A little support where it counts." : "Your next step, without the guesswork." : currentTab === "dashboard" ? "Coordinate your outreach. Make every connection count." : currentTab === "programs" ? "Manage flagship tracks, triage school health, and track completed deliveries." : currentTab === "directory" ? "Browse available schools and start a new connection." : isSupervisor ? "School assignments across H4." : "Your assigned schools, ready for your next connection.";
 }
 function switchTab(tab) {
   currentTab = tab;
@@ -3135,22 +3136,22 @@ function switchTab(tab) {
   el("tab-dashboard")?.classList.toggle("active", tab === "dashboard");
   el("tab-dashboard")?.setAttribute("aria-selected", String(tab === "dashboard"));
   if (el("dashboard-view")) el("dashboard-view").hidden = tab !== "dashboard";
-  el("tab-my-schools").classList.toggle("active", tab === "my-schools");
-  el("tab-my-schools").setAttribute("aria-selected", String(tab === "my-schools"));
+  el("tab-my-schools")?.classList.toggle("active", tab === "my-schools");
+  el("tab-my-schools")?.setAttribute("aria-selected", String(tab === "my-schools"));
   el("tab-programs")?.classList.toggle("active", tab === "programs");
   el("tab-programs")?.setAttribute("aria-selected", String(tab === "programs"));
   if (el("programs-view")) {
     el("programs-view").hidden = tab !== "programs";
     el("programs-view").classList?.toggle("hidden", tab !== "programs");
   }
-  el("tab-directory").classList.toggle("active", tab === "directory");
-  el("tab-directory").setAttribute("aria-selected", String(tab === "directory"));
-  el("tab-demo-claim").classList.toggle("active", tab === "demo-claim");
-  el("tab-demo-claim").setAttribute("aria-selected", String(tab === "demo-claim"));
+  el("tab-directory")?.classList.toggle("active", tab === "directory");
+  el("tab-directory")?.setAttribute("aria-selected", String(tab === "directory"));
+  el("tab-demo-claim")?.classList.toggle("active", tab === "demo-claim");
+  el("tab-demo-claim")?.setAttribute("aria-selected", String(tab === "demo-claim"));
 
-  el("schools-view").hidden = tab !== "my-schools";
-  el("directory-view").hidden = tab !== "directory";
-  el("demo-view").hidden = tab !== "demo-claim";
+  if (el("schools-view")) el("schools-view").hidden = tab !== "my-schools";
+  if (el("directory-view")) el("directory-view").hidden = tab !== "directory";
+  if (el("demo-view")) el("demo-view").hidden = tab !== "demo-claim";
 
   if (tab === "programs") {
     renderProgramsView();
@@ -3259,11 +3260,13 @@ function actionCard(school, reasons = []) {
   card.append(actions); return card;
 }
 function renderMetrics(id, entries) {
-  el(id).replaceChildren();
+  const container = el(id);
+  if (!container) return;
+  container.replaceChildren?.();
   for (const [label, count, onSelect] of entries) {
     const metric = dashboardNode(onSelect ? "button" : "div", "", "dashboard-metric");
     if (onSelect) { metric.type = "button"; metric.onclick = onSelect; metric.setAttribute("aria-label", `${label}: ${count}`); }
-    metric.append(dashboardNode("strong", String(count)), dashboardNode("span", label)); el(id).append(metric);
+    metric.append(dashboardNode("strong", String(count)), dashboardNode("span", label)); container.append(metric);
   }
 }
 function reviewSchools(filter, label, stage = "") {
@@ -3539,17 +3542,18 @@ function ensureProgramsNavPopulated(activeList, today) {
     { id: "program-pill-shsm", program: "SHSM", label: "SHSM" },
   ];
   for (const spec of primarySpecs) {
-    let btn = el(spec.id);
+    const btn = el(spec.id);
     if (!btn) continue;
     btn.type = "button";
     btn.setAttribute("data-program", spec.program);
-    if (pillContainer && !pillContainer.children.includes(btn)) {
+    const existingChildren = pillContainer?.children ? Array.from(pillContainer.children) : [];
+    if (pillContainer && !existingChildren.includes(btn)) {
       pillContainer.append(btn);
     }
     const isActive = selectedProgram.toLowerCase() === spec.program.toLowerCase();
     btn.className = `program-nav-pill${isActive ? " active" : ""}`;
     btn.setAttribute("aria-pressed", String(isActive));
-    btn.replaceChildren();
+    btn.replaceChildren?.();
     if (!spec.program) {
       btn.textContent = spec.label;
     } else {
@@ -3562,7 +3566,7 @@ function ensureProgramsNavPopulated(activeList, today) {
 
   const moreSelect = el("more-programs-select");
   if (moreSelect) {
-    moreSelect.replaceChildren();
+    moreSelect.replaceChildren?.();
     const placeholder = dashboardNode("option", "More programs…");
     placeholder.value = "";
     moreSelect.append(placeholder);
@@ -3681,14 +3685,14 @@ function renderProgramsView() {
   if (btnMine) {
     btnMine.textContent = `My Schools (${myList.length})`;
     const isMine = programsScope !== "all";
-    btnMine.classList.toggle("active", isMine);
-    btnMine.setAttribute("aria-pressed", String(isMine));
+    btnMine.classList?.toggle("active", isMine);
+    btnMine.setAttribute?.("aria-pressed", String(isMine));
   }
   if (btnAll) {
     btnAll.textContent = `All Team Schools (${allList.length})`;
     const isAll = programsScope === "all";
-    btnAll.classList.toggle("active", isAll);
-    btnAll.setAttribute("aria-pressed", String(isAll));
+    btnAll.classList?.toggle("active", isAll);
+    btnAll.setAttribute?.("aria-pressed", String(isAll));
   }
 
   ensureProgramsNavPopulated(activeList, today);
@@ -3708,7 +3712,7 @@ function renderProgramsView() {
     if (matrixEl) {
       matrixEl.hidden = false;
       matrixEl.classList?.remove("hidden");
-      matrixEl.replaceChildren();
+      matrixEl.replaceChildren?.();
 
       const activeSecondary = SECONDARY_PROGRAMS.filter(
         (prog) => categorizeSchoolsForProgram(prog, activeList, today).total > 0
@@ -3808,7 +3812,7 @@ function renderProgramsView() {
   const quickSelect = el("quick-tag-school-select");
   if (quickSelect) {
     const prevVal = quickSelect.value;
-    quickSelect.replaceChildren();
+    quickSelect.replaceChildren?.();
     const placeholder = dashboardNode("option", "Select a school…");
     placeholder.value = "";
     quickSelect.append(placeholder);
@@ -3840,7 +3844,7 @@ function renderProgramsView() {
     const emptyNode = el(emptyId);
     if (countNode) countNode.textContent = String(items.length);
     if (listNode) {
-      listNode.replaceChildren(
+      listNode.replaceChildren?.(
         ...items.map((school) => actionCard(school, isAttentionSection ? programAttentionReasons(school, today) : []))
       );
     }
@@ -4257,6 +4261,7 @@ async function refresh() {
       showGoogleButton().catch(() => { el("retry").hidden = false; });
     }, Math.max(0, data.sessionExpiresAt * 1000 - Date.now()));
   } catch (error) {
+    console.error("[Init Failure]", error);
     if (currentSession !== sessionVersion || currentSeq !== refreshSeq || (error.name === "AbortError" && !timedOut)) return;
     refreshFailed(timedOut ? "The refresh timed out." : "The connection was interrupted.");
   } finally {
@@ -4302,7 +4307,8 @@ async function initialize() {
       sessionWasExpired = false;
       status(expiredNotice ? "Your session expired. Please sign in again." : "Only accounts approved by H4 can view schools.");
     }
-  } catch {
+  } catch (err) {
+    console.error("[Init Failure]", err);
     finishRestore(credential ? "We couldn’t restore your workspace. Please try again." : "We couldn’t reach the app. Please try again.");
     status(browserOffline() ? "You’re not connected. Reconnect, then try again."
       : loadingGoogle ? "Google sign-in couldn’t load. Please try again."
@@ -4310,7 +4316,7 @@ async function initialize() {
   }
 }
 
-el("sign-out").addEventListener("click", () => {
+el("sign-out")?.addEventListener("click", () => {
   forgetSession(); window.google?.accounts?.id.disableAutoSelect();
   status("You’re signed out."); el("google-button").hidden = false;
   showGoogleButton().catch(() => { el("retry").hidden = false; });
@@ -4320,10 +4326,10 @@ el("restore-sign-in")?.addEventListener("click", () => {
   finishRestore("Continue with Google to return to your workspace.");
   if (config?.ready) showGoogleButton().catch(() => {});
 });
-el("editor-form").addEventListener("submit", saveSchoolEdits);
-el("editor-close").addEventListener("click", closeSchoolEditor);
-el("editor-reload").addEventListener("click", () => { if (editing) openSchoolEditor(editing.id, true, editing.mode); });
-el("school-editor").addEventListener("cancel", (event) => { event.preventDefault(); closeSchoolEditor(); });
+el("editor-form")?.addEventListener("submit", saveSchoolEdits);
+el("editor-close")?.addEventListener("click", closeSchoolEditor);
+el("editor-reload")?.addEventListener("click", () => { if (editing) openSchoolEditor(editing.id, true, editing.mode); });
+el("school-editor")?.addEventListener("cancel", (event) => { event.preventDefault(); closeSchoolEditor(); });
 el("edit-primary-owner")?.addEventListener("change", (e) => {
   if (!editing) return;
   editing.assigneesChanged = true;
@@ -4598,7 +4604,7 @@ window.addEventListener("beforeunload", (e) => {
     return e.returnValue;
   }
 });
-el("refresh").addEventListener("click", refresh);
+el("refresh")?.addEventListener("click", refresh);
 el("tab-home")?.addEventListener("click", () => switchTab("home"));
 el("home-refresh")?.addEventListener("click", refresh);
 el("home-find")?.addEventListener("click", () => switchTab("directory"));
@@ -4612,9 +4618,9 @@ el("schools-scope-clear")?.addEventListener("click", () => {
   supervisorSchoolScope = "all";
   reviewSchools(null, "");
 });
-el("retry").addEventListener("click", initialize);
-el("search").addEventListener("input", renderSchools);
-el("tab-my-schools").addEventListener("click", () => {
+el("retry")?.addEventListener("click", initialize);
+el("search")?.addEventListener("input", renderSchools);
+el("tab-my-schools")?.addEventListener("click", () => {
   supervisorSchoolScope = "mine";
   schoolScopeFilter = null;
   schoolStageFilter = "";
@@ -4658,10 +4664,10 @@ el("dashboard-refresh")?.addEventListener("click", loadDashboard);
 el("dashboard-clear")?.addEventListener("click", clearDashboardFilters);
 el("dashboard-search")?.addEventListener("input", renderDashboard);
 for (const id of ["dashboard-owner", "dashboard-stage", "dashboard-overdue"]) el(id)?.addEventListener("change", renderDashboard);
-el("tab-directory").addEventListener("click", () => switchTab("directory"));
-el("tab-demo-claim").addEventListener("click", () => switchTab("demo-claim"));
-el("dir-search").addEventListener("input", renderDirectory);
-el("dir-refresh").addEventListener("click", loadDirectory);
+el("tab-directory")?.addEventListener("click", () => switchTab("directory"));
+el("tab-demo-claim")?.addEventListener("click", () => switchTab("demo-claim"));
+el("dir-search")?.addEventListener("input", renderDirectory);
+el("dir-refresh")?.addEventListener("click", loadDirectory);
 async function reconnect() {
   const connected = await checkConnection();
   if (!connected) return;

@@ -4443,3 +4443,63 @@ test("Programs dashboard: overview matrix, MECE triage bucketing (SHSM & Dance W
   assert.equal(h.getEl("programs-active-list").children.length, 2, "Cedarbrae CI should now render in SHSM Active pipeline");
 });
 
+test("Programs defensive guards: missing DOM elements, HTMLCollection without .includes, and non-string outreachGoal values do not crash init", async (t) => {
+  // 1. Missing all Programs DOM elements (e.g. cached HTML) must not crash init or sign-in
+  const missingProgramIds = [
+    "tab-programs",
+    "programs-view",
+    "programs-toggle-mine",
+    "programs-toggle-all",
+    "programs-primary-pills",
+    "more-programs-select",
+    "quick-tag-school-select",
+    "quick-tag-school-btn",
+  ];
+  const hMissing = setupEnv({
+    missingIds: missingProgramIds,
+    fetchHandler: reloadFetch,
+  });
+  t.after(hMissing.cleanup);
+  await hMissing.signIn("alex@example.test");
+  assert.equal(hMissing.getEl("workspace").hidden, false);
+  assert.equal(hMissing.getEl("workspace-status").textContent, "Up to date");
+
+  // 2. Real browser HTMLCollection simulation (pillContainer.children without Array.prototype.includes) + non-string outreachGoal values
+  const edgeSchools = [
+    { ...reloadRecord, recordId: "edge-1", schoolName: "Null Goal School", outreachGoal: null, goal: undefined },
+    { ...reloadRecord, recordId: "edge-2", schoolName: "Number Goal School", outreachGoal: 12345, goal: null },
+    { ...reloadRecord, recordId: "edge-3", schoolName: "Valid SHSM School", outreachGoal: "SHSM", goal: "SHSM" },
+  ];
+  const hCollection = setupEnv({
+    fetchHandler: (url) => {
+      if (url.includes("/api/config")) return reloadFetch(url);
+      return Promise.resolve(
+        Response.json({
+          ...reloadPayload(),
+          schools: edgeSchools,
+        })
+      );
+    },
+  });
+  t.after(hCollection.cleanup);
+
+  // Strip .includes from #programs-primary-pills.children to mimic a native browser HTMLCollection
+  const rawChildren = hCollection.getEl("programs-primary-pills").children;
+  Object.defineProperty(rawChildren, "includes", { value: undefined });
+
+  await hCollection.signIn("alex@example.test");
+  assert.equal(hCollection.getEl("workspace").hidden, false);
+  assert.equal(hCollection.getEl("workspace-status").textContent, "Up to date");
+
+  // parseProgramTracks safely returns [] for non-strings
+  assert.equal(hCollection.context.parseProgramTracks(null).length, 0);
+  assert.equal(hCollection.context.parseProgramTracks(undefined).length, 0);
+  assert.equal(hCollection.context.parseProgramTracks(42).length, 0);
+  assert.equal(hCollection.context.parseProgramTracks("").length, 0);
+
+  hCollection.getEl("tab-programs").click();
+  assert.equal(hCollection.getEl("programs-view").hidden, false);
+  assert.equal(hCollection.getEl("program-pill-shsm").children[1].textContent, "1");
+});
+
+

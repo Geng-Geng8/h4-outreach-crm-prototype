@@ -33,7 +33,7 @@ export type DirectoryEntry = {
 };
 type ValueRange = { range: string; values?: Row[] };
 
-function value(cell: Cell | undefined) { return cell === undefined ? "" : String(cell); }
+function value(cell: Cell | null | undefined) { return cell === undefined || cell === null ? "" : String(cell); }
 function checkHeader(row: Row | undefined, expected: readonly string[]) {
   if (expected.some((header, index) => row?.[index] !== header)) throw new ApiError(503, "SCHEMA_MISMATCH");
 }
