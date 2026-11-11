@@ -3170,29 +3170,61 @@ function dashboardToday(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
   return ["year", "month", "day"].map((key) => parts.find((part) => part.type === key).value).join("-");
 }
+function normalizeSheetDate(dateInput) {
+  if (!dateInput || typeof dateInput !== "string") return "";
+  const str = dateInput.trim();
+  if (!str) return "";
+  const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(str);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return "";
+    const padded = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const parsed = new Date(`${padded}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== padded) return "";
+    return padded;
+  }
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(str);
+  if (slashMatch) {
+    const month = Number(slashMatch[1]);
+    const day = Number(slashMatch[2]);
+    const year = Number(slashMatch[3]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return "";
+    const padded = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const parsed = new Date(`${padded}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== padded) return "";
+    return padded;
+  }
+  return "";
+}
 function dueState(school, today = dashboardToday()) {
   const due = school?.followUpDue || school?.followUpDate;
   // Only unambiguous ISO dates are compared. Preserve other sheet formatting as text.
-  if (["Booked", "Cold", "Completed"].includes(school?.stage) || !/^\d{4}-\d{2}-\d{2}$/.test(due)
+  if (["Booked", "Cold", "Completed"].includes(school?.stage) || typeof due !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(due)
     || Number.isNaN(Date.parse(due)) || new Date(due).toISOString().slice(0, 10) !== due) return "none";
   return due < today ? "overdue" : due === today ? "today" : "upcoming";
 }
 function overdueSchool(school, today) { return dueState(school, today) === "overdue"; }
-function isOverdue(schoolOrDate, today = dashboardToday()) {
-  if (!schoolOrDate) return false;
-  if (typeof schoolOrDate === "object") {
-    if (["Booked", "Cold", "Completed"].includes(schoolOrDate.stage)) return false;
-    const due = schoolOrDate.followUpDate || schoolOrDate.followUpDue;
+function isOverdue(dateStrOrSchool, today = dashboardToday()) {
+  if (!dateStrOrSchool) return false;
+  if (typeof dateStrOrSchool === "object") {
+    if (["Booked", "Cold", "Completed"].includes(dateStrOrSchool.stage)) return false;
+    const due = dateStrOrSchool.followUpDue || dateStrOrSchool.followUpDate || "";
     return isOverdue(due, today);
   }
-  const str = String(schoolOrDate).trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(str) || Number.isNaN(Date.parse(str)) || new Date(str).toISOString().slice(0, 10) !== str) {
+  if (typeof dateStrOrSchool !== "string" || !dateStrOrSchool.trim()) return false;
+  try {
+    const normalized = normalizeSheetDate(dateStrOrSchool);
+    if (!normalized) return false;
+    return normalized < today;
+  } catch {
     return false;
   }
-  return str < today;
 }
 if (typeof window !== "undefined") {
   window.isOverdue = isOverdue;
+  window.normalizeSheetDate = normalizeSheetDate;
 }
 function dashboardOptions(id, allLabel, values) {
   const select = el(id), previous = select.value;
@@ -3478,6 +3510,7 @@ function categorizeSchoolsForProgram(programName, schoolList = getProgramScopedS
     return { completed, needsAttention, active, total: 0 };
   }
   for (const school of (schoolList || [])) {
+    if (!school) continue;
     const rawGoal = school.outreachGoal || school.goal || savedSchoolGoals.get(school.recordId) || "";
     const tracks = parseProgramTracks(rawGoal);
     const match = tracks.find((track) => track.name.toLowerCase() === target);
@@ -3487,8 +3520,13 @@ function categorizeSchoolsForProgram(programName, schoolList = getProgramScopedS
       completed.push(school);
       continue;
     }
-    const dueDate = school.followUpDate || school.followUpDue || "";
-    const isAttention = isOverdue(dueDate, today) || isOverdue(school, today) || school.priority === "High" || school.priority === "Urgent";
+    const dueDate = school.followUpDue || school.followUpDate || "";
+    const isAttention = (
+      isOverdue(school, today) ||
+      (!["Booked", "Cold"].includes(school.stage) && isOverdue(dueDate, today)) ||
+      school.priority === "High" ||
+      school.priority === "Urgent"
+    );
     if (isAttention) {
       needsAttention.push(school);
     } else {
@@ -3505,10 +3543,10 @@ function categorizeSchoolsForProgram(programName, schoolList = getProgramScopedS
 
 function programAttentionReasons(school, today = dashboardToday()) {
   const reasons = attentionReasons(school, today);
-  if ((school.priority === "High" || school.priority === "Urgent") && !reasons.some((r) => r.includes("priority"))) {
+  if ((school?.priority === "High" || school?.priority === "Urgent") && !reasons.some((r) => r.includes("priority"))) {
     reasons.unshift(`${school.priority} priority`);
   }
-  if (isOverdue(school.followUpDate || school.followUpDue, today) && !reasons.includes("Overdue follow-up")) {
+  if (!["Booked", "Cold", "Completed"].includes(school?.stage) && isOverdue(school?.followUpDue || school?.followUpDate, today) && !reasons.includes("Overdue follow-up")) {
     reasons.unshift("Overdue follow-up");
   }
   return reasons;
@@ -3675,203 +3713,207 @@ async function quickTagSchoolToProgram() {
 }
 
 function renderProgramsView() {
-  const view = el("programs-view");
-  if (!view) return;
-  const today = dashboardToday();
-  const { myList, allList, activeList } = getProgramScopedSchools();
+  try {
+    const view = el("programs-view");
+    if (!view) return;
+    const today = dashboardToday();
+    const { myList, allList, activeList } = getProgramScopedSchools();
 
-  const btnMine = el("programs-toggle-mine");
-  const btnAll = el("programs-toggle-all");
-  if (btnMine) {
-    btnMine.textContent = `My Schools (${myList.length})`;
-    const isMine = programsScope !== "all";
-    btnMine.classList?.toggle("active", isMine);
-    btnMine.setAttribute?.("aria-pressed", String(isMine));
-  }
-  if (btnAll) {
-    btnAll.textContent = `All Team Schools (${allList.length})`;
-    const isAll = programsScope === "all";
-    btnAll.classList?.toggle("active", isAll);
-    btnAll.setAttribute?.("aria-pressed", String(isAll));
-  }
-
-  ensureProgramsNavPopulated(activeList, today);
-
-  const matrixEl = el("programs-overview-matrix");
-  const drilldownEl = el("programs-drilldown");
-  const headingEl = el("programs-heading");
-  const subheadingEl = el("programs-subheading");
-  const statusEl = el("programs-status");
-
-  if (!selectedProgram) {
-    if (headingEl) headingEl.textContent = "Program tracks at a glance.";
-    if (subheadingEl) subheadingEl.textContent = "Track flagship programs, pipeline health, and completed deliveries across schools.";
-    if (statusEl) {
-      statusEl.textContent = `Showing ${programsScope === "all" ? "All Team Schools" : "My Schools"} (${activeList.length} ${activeList.length === 1 ? "school" : "schools"})`;
+    const btnMine = el("programs-toggle-mine");
+    const btnAll = el("programs-toggle-all");
+    if (btnMine) {
+      btnMine.textContent = `My Schools (${myList.length})`;
+      const isMine = programsScope !== "all";
+      btnMine.classList?.toggle("active", isMine);
+      btnMine.setAttribute?.("aria-pressed", String(isMine));
     }
-    if (matrixEl) {
-      matrixEl.hidden = false;
-      matrixEl.classList?.remove("hidden");
-      matrixEl.replaceChildren?.();
+    if (btnAll) {
+      btnAll.textContent = `All Team Schools (${allList.length})`;
+      const isAll = programsScope === "all";
+      btnAll.classList?.toggle("active", isAll);
+      btnAll.setAttribute?.("aria-pressed", String(isAll));
+    }
 
-      const activeSecondary = SECONDARY_PROGRAMS.filter(
-        (prog) => categorizeSchoolsForProgram(prog, activeList, today).total > 0
-      );
-      const programsToRender = [...FLAGSHIP_PROGRAMS, ...activeSecondary];
+    ensureProgramsNavPopulated(activeList, today);
 
-      for (const prog of programsToRender) {
-        const isFlagship = FLAGSHIP_PROGRAMS.includes(prog);
-        const stats = categorizeSchoolsForProgram(prog, activeList, today);
-        const card = dashboardNode(
-          "button",
-          "",
-          `school-card program-summary-card${isFlagship ? " flagship-program-card" : ""}`
-        );
-        card.type = "button";
-        card.setAttribute("data-program", prog);
-        card.setAttribute(
-          "aria-label",
-          `${prog}: Needs attention ${stats.needsAttention.length}, Active pipeline ${stats.active.length}, Completed ${stats.completed.length}`
-        );
+    const matrixEl = el("programs-overview-matrix");
+    const drilldownEl = el("programs-drilldown");
+    const headingEl = el("programs-heading");
+    const subheadingEl = el("programs-subheading");
+    const statusEl = el("programs-status");
 
-        const headerRow = dashboardNode("div", "", "program-card-header");
-        const eyebrow = dashboardNode(
-          "span",
-          isFlagship ? "Flagship Track" : "Program Track",
-          `program-card-eyebrow${isFlagship ? " is-flagship" : ""}`
-        );
-        const totalBadge = dashboardNode(
-          "span",
-          `${stats.total} ${stats.total === 1 ? "school" : "schools"}`,
-          "program-card-total"
-        );
-        headerRow.append(eyebrow, totalBadge);
-
-        const title = dashboardNode("h3", prog, "program-card-title");
-
-        const kpiRow = dashboardNode("div", "", "program-kpi-pills");
-        const pillAttention = dashboardNode(
-          "span",
-          `Needs attention: ${stats.needsAttention.length}`,
-          `program-kpi-pill kpi-attention${stats.needsAttention.length > 0 ? " has-count" : ""}`
-        );
-        const pillActive = dashboardNode(
-          "span",
-          `Active pipeline: ${stats.active.length}`,
-          `program-kpi-pill kpi-active${stats.active.length > 0 ? " has-count" : ""}`
-        );
-        const pillCompleted = dashboardNode(
-          "span",
-          `Completed: ${stats.completed.length}`,
-          `program-kpi-pill kpi-completed${stats.completed.length > 0 ? " has-count" : ""}`
-        );
-        kpiRow.append(pillAttention, pillActive, pillCompleted);
-
-        card.append(headerRow, title, kpiRow);
-        card.onclick = () => selectProgram(prog);
-        matrixEl.append(card);
+    if (!selectedProgram) {
+      if (headingEl) headingEl.textContent = "Program tracks at a glance.";
+      if (subheadingEl) subheadingEl.textContent = "Track flagship programs, pipeline health, and completed deliveries across schools.";
+      if (statusEl) {
+        statusEl.textContent = `Showing ${programsScope === "all" ? "All Team Schools" : "My Schools"} (${activeList.length} ${activeList.length === 1 ? "school" : "schools"})`;
       }
+      if (matrixEl) {
+        matrixEl.hidden = false;
+        matrixEl.classList?.remove("hidden");
+        matrixEl.replaceChildren?.();
+
+        const activeSecondary = SECONDARY_PROGRAMS.filter(
+          (prog) => categorizeSchoolsForProgram(prog, activeList, today).total > 0
+        );
+        const programsToRender = [...FLAGSHIP_PROGRAMS, ...activeSecondary];
+
+        for (const prog of programsToRender) {
+          const isFlagship = FLAGSHIP_PROGRAMS.includes(prog);
+          const stats = categorizeSchoolsForProgram(prog, activeList, today);
+          const card = dashboardNode(
+            "button",
+            "",
+            `school-card program-summary-card${isFlagship ? " flagship-program-card" : ""}`
+          );
+          card.type = "button";
+          card.setAttribute("data-program", prog);
+          card.setAttribute(
+            "aria-label",
+            `${prog}: Needs attention ${stats.needsAttention.length}, Active pipeline ${stats.active.length}, Completed ${stats.completed.length}`
+          );
+
+          const headerRow = dashboardNode("div", "", "program-card-header");
+          const eyebrow = dashboardNode(
+            "span",
+            isFlagship ? "Flagship Track" : "Program Track",
+            `program-card-eyebrow${isFlagship ? " is-flagship" : ""}`
+          );
+          const totalBadge = dashboardNode(
+            "span",
+            `${stats.total} ${stats.total === 1 ? "school" : "schools"}`,
+            "program-card-total"
+          );
+          headerRow.append(eyebrow, totalBadge);
+
+          const title = dashboardNode("h3", prog, "program-card-title");
+
+          const kpiRow = dashboardNode("div", "", "program-kpi-pills");
+          const pillAttention = dashboardNode(
+            "span",
+            `Needs attention: ${stats.needsAttention.length}`,
+            `program-kpi-pill kpi-attention${stats.needsAttention.length > 0 ? " has-count" : ""}`
+          );
+          const pillActive = dashboardNode(
+            "span",
+            `Active pipeline: ${stats.active.length}`,
+            `program-kpi-pill kpi-active${stats.active.length > 0 ? " has-count" : ""}`
+          );
+          const pillCompleted = dashboardNode(
+            "span",
+            `Completed: ${stats.completed.length}`,
+            `program-kpi-pill kpi-completed${stats.completed.length > 0 ? " has-count" : ""}`
+          );
+          kpiRow.append(pillAttention, pillActive, pillCompleted);
+
+          card.append(headerRow, title, kpiRow);
+          card.onclick = () => selectProgram(prog);
+          matrixEl.append(card);
+        }
+      }
+      if (drilldownEl) {
+        drilldownEl.hidden = true;
+        drilldownEl.classList?.add("hidden");
+      }
+      return;
+    }
+
+    // View Mode 2: Single Program Drill-Down
+    const buckets = categorizeSchoolsForProgram(selectedProgram, activeList, today);
+    if (headingEl) headingEl.textContent = selectedProgram;
+    if (subheadingEl) {
+      subheadingEl.textContent = FLAGSHIP_PROGRAMS.includes(selectedProgram)
+        ? `Flagship program track · ${buckets.total} tagged ${buckets.total === 1 ? "school" : "schools"} in ${programsScope === "all" ? "All Team Schools" : "My Schools"}.`
+        : `Program track · ${buckets.total} tagged ${buckets.total === 1 ? "school" : "schools"} in ${programsScope === "all" ? "All Team Schools" : "My Schools"}.`;
+    }
+    if (statusEl) {
+      statusEl.textContent = `${selectedProgram} · ${buckets.total} ${buckets.total === 1 ? "school" : "schools"} (${buckets.needsAttention.length} needs attention, ${buckets.active.length} active pipeline, ${buckets.completed.length} completed)`;
+    }
+
+    if (matrixEl) {
+      matrixEl.hidden = true;
+      matrixEl.classList?.add("hidden");
     }
     if (drilldownEl) {
-      drilldownEl.hidden = true;
-      drilldownEl.classList?.add("hidden");
+      drilldownEl.hidden = false;
+      drilldownEl.classList?.remove("hidden");
     }
-    return;
-  }
 
-  // View Mode 2: Single Program Drill-Down
-  const buckets = categorizeSchoolsForProgram(selectedProgram, activeList, today);
-  if (headingEl) headingEl.textContent = selectedProgram;
-  if (subheadingEl) {
-    subheadingEl.textContent = FLAGSHIP_PROGRAMS.includes(selectedProgram)
-      ? `Flagship program track · ${buckets.total} tagged ${buckets.total === 1 ? "school" : "schools"} in ${programsScope === "all" ? "All Team Schools" : "My Schools"}.`
-      : `Program track · ${buckets.total} tagged ${buckets.total === 1 ? "school" : "schools"} in ${programsScope === "all" ? "All Team Schools" : "My Schools"}.`;
-  }
-  if (statusEl) {
-    statusEl.textContent = `${selectedProgram} · ${buckets.total} ${buckets.total === 1 ? "school" : "schools"} (${buckets.needsAttention.length} needs attention, ${buckets.active.length} active pipeline, ${buckets.completed.length} completed)`;
-  }
-
-  if (matrixEl) {
-    matrixEl.hidden = true;
-    matrixEl.classList?.add("hidden");
-  }
-  if (drilldownEl) {
-    drilldownEl.hidden = false;
-    drilldownEl.classList?.remove("hidden");
-  }
-
-  if (el("programs-kpi-strip")) {
-    renderMetrics("programs-kpi-strip", [
-      ["Total Tagged", buckets.total],
-      ["Needs Attention", buckets.needsAttention.length],
-      ["Active Pipeline", buckets.active.length],
-      ["Completed", buckets.completed.length],
-    ]);
-  }
-
-  const quickSelect = el("quick-tag-school-select");
-  if (quickSelect) {
-    const prevVal = quickSelect.value;
-    quickSelect.replaceChildren?.();
-    const placeholder = dashboardNode("option", "Select a school…");
-    placeholder.value = "";
-    quickSelect.append(placeholder);
-
-    const untaggedSchools = activeList
-      .filter((s) => {
-        const tracks = parseProgramTracks(s.outreachGoal || s.goal || "");
-        return !tracks.some((t) => t.name.toLowerCase() === selectedProgram.toLowerCase());
-      })
-      .sort((a, b) => (a.schoolName || "").localeCompare(b.schoolName || ""));
-
-    for (const s of untaggedSchools) {
-      const opt = dashboardNode("option", s.schoolName);
-      opt.value = s.recordId;
-      quickSelect.append(opt);
+    if (el("programs-kpi-strip")) {
+      renderMetrics("programs-kpi-strip", [
+        ["Total Tagged", buckets.total],
+        ["Needs Attention", buckets.needsAttention.length],
+        ["Active Pipeline", buckets.active.length],
+        ["Completed", buckets.completed.length],
+      ]);
     }
-    quickSelect.value = untaggedSchools.some((s) => s.recordId === prevVal) ? prevVal : "";
-  }
 
-  const quickBtn = el("quick-tag-school-btn");
-  if (quickBtn) {
-    quickBtn.textContent = `+ Add School to ${selectedProgram}`;
-    quickBtn.disabled = config?.writesEnabled === false;
-  }
+    const quickSelect = el("quick-tag-school-select");
+    if (quickSelect) {
+      const prevVal = quickSelect.value;
+      quickSelect.replaceChildren?.();
+      const placeholder = dashboardNode("option", "Select a school…");
+      placeholder.value = "";
+      quickSelect.append(placeholder);
 
-  const renderBucketSection = (listId, countId, emptyId, items, isAttentionSection = false) => {
-    const listNode = el(listId);
-    const countNode = el(countId);
-    const emptyNode = el(emptyId);
-    if (countNode) countNode.textContent = String(items.length);
-    if (listNode) {
-      listNode.replaceChildren?.(
-        ...items.map((school) => actionCard(school, isAttentionSection ? programAttentionReasons(school, today) : []))
-      );
+      const untaggedSchools = activeList
+        .filter((s) => {
+          const tracks = parseProgramTracks(s.outreachGoal || s.goal || "");
+          return !tracks.some((t) => t.name.toLowerCase() === selectedProgram.toLowerCase());
+        })
+        .sort((a, b) => (a.schoolName || "").localeCompare(b.schoolName || ""));
+
+      for (const s of untaggedSchools) {
+        const opt = dashboardNode("option", s.schoolName);
+        opt.value = s.recordId;
+        quickSelect.append(opt);
+      }
+      quickSelect.value = untaggedSchools.some((s) => s.recordId === prevVal) ? prevVal : "";
     }
-    if (emptyNode) emptyNode.hidden = items.length > 0;
-  };
 
-  renderBucketSection(
-    "programs-attention-list",
-    "programs-attention-count",
-    "programs-attention-empty",
-    buckets.needsAttention,
-    true
-  );
-  renderBucketSection(
-    "programs-active-list",
-    "programs-active-count",
-    "programs-active-empty",
-    buckets.active,
-    false
-  );
-  renderBucketSection(
-    "programs-completed-list",
-    "programs-completed-count",
-    "programs-completed-empty",
-    buckets.completed,
-    false
-  );
+    const quickBtn = el("quick-tag-school-btn");
+    if (quickBtn) {
+      quickBtn.textContent = `+ Add School to ${selectedProgram}`;
+      quickBtn.disabled = config?.writesEnabled === false;
+    }
+
+    const renderBucketSection = (listId, countId, emptyId, items, isAttentionSection = false) => {
+      const listNode = el(listId);
+      const countNode = el(countId);
+      const emptyNode = el(emptyId);
+      if (countNode) countNode.textContent = String(items.length);
+      if (listNode) {
+        listNode.replaceChildren?.(
+          ...items.map((school) => actionCard(school, isAttentionSection ? programAttentionReasons(school, today) : []))
+        );
+      }
+      if (emptyNode) emptyNode.hidden = items.length > 0;
+    };
+
+    renderBucketSection(
+      "programs-attention-list",
+      "programs-attention-count",
+      "programs-attention-empty",
+      buckets.needsAttention,
+      true
+    );
+    renderBucketSection(
+      "programs-active-list",
+      "programs-active-count",
+      "programs-active-empty",
+      buckets.active,
+      false
+    );
+    renderBucketSection(
+      "programs-completed-list",
+      "programs-completed-count",
+      "programs-completed-empty",
+      buckets.completed,
+      false
+    );
+  } catch (err) {
+    console.error("[Programs View Render Error]", err);
+  }
 }
 
 if (typeof window !== "undefined") {
@@ -4249,7 +4291,14 @@ async function refresh() {
     resumeView = null;
     switchTab(currentTab);
     el("workspace-status").textContent = config?.writesEnabled ? "Up to date" : "Up to date · viewing only";
-    renderSchools(); renderHome(); renderProgramsView(); el("welcome").hidden = true; el("workspace").hidden = false;
+    renderSchools();
+    renderHome();
+    try {
+      renderProgramsView();
+    } catch (programsErr) {
+      console.error("[Programs View Init Error]", programsErr);
+    }
+    el("welcome").hidden = true; el("workspace").hidden = false;
     if (el("session-restore")) el("session-restore").hidden = true;
     rememberSession(credential);
     rememberView();

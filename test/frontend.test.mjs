@@ -4500,6 +4500,28 @@ test("Programs defensive guards: missing DOM elements, HTMLCollection without .i
   hCollection.getEl("tab-programs").click();
   assert.equal(hCollection.getEl("programs-view").hidden, false);
   assert.equal(hCollection.getEl("program-pill-shsm").children[1].textContent, "1");
+
+  // 3. Live dataset edge cases: empty followUpDue (""), mixed MM/DD/YYYY and YYYY-MM-DD dates, and Booked stage with past followUpDue
+  assert.equal(hCollection.context.isOverdue(""), false);
+  assert.equal(hCollection.context.isOverdue("   "), false);
+  assert.equal(hCollection.context.isOverdue(null), false);
+  assert.equal(hCollection.context.isOverdue(undefined), false);
+  assert.equal(hCollection.context.isOverdue("not-a-date"), false);
+  assert.equal(hCollection.context.isOverdue("11/6/2020", "2026-11-10"), true);
+  assert.equal(hCollection.context.isOverdue("12/25/2099", "2026-11-10"), false);
+  assert.equal(hCollection.context.isOverdue({ stage: "Booked", followUpDue: "11/6/2020" }, "2026-11-10"), false);
+
+  const liveShapeSchools = [
+    { ...reloadRecord, recordId: "live-1", schoolName: "Empty Due Date School", stage: "Contacted", priority: "Medium", followUpDue: "", outreachGoal: "SHSM" },
+    { ...reloadRecord, recordId: "live-2", schoolName: "Slash Date Overdue School", stage: "Interested", priority: "Medium", followUpDue: "11/6/2020", outreachGoal: "SHSM" },
+    { ...reloadRecord, recordId: "live-3", schoolName: "Booked Past Date School", stage: "Booked", priority: "Medium", followUpDue: "2020-01-01", outreachGoal: "SHSM" },
+  ];
+  const buckets = hCollection.context.categorizeSchoolsForProgram("SHSM", liveShapeSchools, "2026-11-10");
+  assert.equal(buckets.total, 3);
+  assert.equal(buckets.needsAttention.length, 1);
+  assert.equal(buckets.needsAttention[0].schoolName, "Slash Date Overdue School");
+  assert.equal(buckets.active.length, 2, "Empty due date and Booked stage with past date belong in Active pipeline");
 });
+
 
 
