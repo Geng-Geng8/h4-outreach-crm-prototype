@@ -1,9 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import {
-  ApiError, C, ContactCol, padded, record, editableRecord, contactRecord, schoolWrites,
-  assertStudentPrivacy, evaluateColdEligibility, DEFAULT_DECLINE_REASON, UNRESPONSIVE_COLD_REASON, EXPLICIT_REJECTION_REASONS,
+  ApiError, C, ContactCol, ActivityCol, DeliveryCol, DELIVERY_TRACKS, padded, record, editableRecord, contactRecord, deliveryRecord, schoolWrites, deliveryWrites,
+  assertStudentPrivacy, assertMentorPrivacy, evaluateColdEligibility, DEFAULT_DECLINE_REASON, UNRESPONSIVE_COLD_REASON, EXPLICIT_REJECTION_REASONS,
   VALID_STAGES,
-  type Batch, type Row, type Snapshot, type ValueRange,
+  type Batch, type DeliveryTrack, type Row, type Snapshot, type ValueRange,
 } from "./schema";
 import { SyntheticSheets } from "./sheets";
 import { GoogleSheetsCoordinator } from "./google-sheets-write";
@@ -27,7 +27,7 @@ type Result = { status: number; body: Record<string, unknown> };
 type Journal = { request_id: string; fingerprint: string; state: string; plan: string; result: string };
 type Plan = { batch: Batch; result: Result };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const paths = new Set(["/api/schools/claim", "/api/schools/update", "/api/schools/contacts", "/api/schools/reassign", "/api/schools/unclaim", "/api/activities"]);
+const paths = new Set(["/api/schools/claim", "/api/schools/update", "/api/schools/contacts", "/api/schools/reassign", "/api/schools/unclaim", "/api/activities", "/api/delivery/update"]);
 
 function json(status: number, body: object): Response {
   return Response.json(body, { status, headers: { "cache-control": "no-store" } });
@@ -62,6 +62,16 @@ function date(input: unknown): string {
     throw new ApiError(422, "INVALID_DATE");
   }
   return value;
+}
+function time24(input: unknown): string {
+  const value = text(input, 5);
+  if (value !== "" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+    throw new ApiError(422, "INVALID_TIME");
+  }
+  return value;
+}
+function parseGoalTags(goal: unknown): string[] {
+  return String(goal ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 function today(env: Env): string {
   if (env.PROOF_TODAY) return date(env.PROOF_TODAY);
@@ -150,6 +160,89 @@ export class SheetCoordinator extends DurableObject<Env> {
             }));
           return json(200, { ok: true, record: editableRecord(row), contacts, users });
         }
+        if (pathname === "/api/delivery" && request.method === "GET") {
+          if (!proofEnabled(this.env)) throw new ApiError(503, "LOCAL_PROOF_DISABLED");
+          const snapshot = await this.sheets().read();
+          actorFrom(snapshot, request.headers.get("x-proof-actor")?.trim().toLowerCase() ?? "");
+          const eligibleStages = new Set(["Booked", "Completed", "Engaged"]);
+
+          const existingMap = new Map<string, ReturnType<typeof deliveryRecord>>();
+          for (const dRow of snapshot["Program Delivery"]?.slice(1) ?? []) {
+            const rec = deliveryRecord(dRow);
+            if (rec.recordId && rec.programTrack) {
+              existingMap.set(`${rec.recordId}::${rec.programTrack}`, rec);
+            }
+          }
+
+          const historyMap = new Map<string, { activityId: string; date: string; editedBy: string; summary: string; requestId: string }[]>();
+          for (const aRow of snapshot["Activity Log"]?.slice(1) ?? []) {
+            if (String(aRow[ActivityCol.activityType] ?? "") !== "Program Delivery") continue;
+            const recId = String(aRow[ActivityCol.relatedRecordId] ?? "");
+            const track = String(aRow[ActivityCol.outcome] ?? "");
+            if (!recId || !track) continue;
+            const key = `${recId}::${track}`;
+            const list = historyMap.get(key) ?? [];
+            list.push({
+              activityId: String(aRow[ActivityCol.id] ?? ""),
+              date: String(aRow[ActivityCol.date] ?? ""),
+              editedBy: String(aRow[ActivityCol.assignedTo] ?? ""),
+              summary: String(aRow[ActivityCol.messageSummary] ?? ""),
+              requestId: String(aRow[ActivityCol.requestId] ?? ""),
+            });
+            historyMap.set(key, list);
+          }
+
+          const deliveries = [];
+          for (const sRow of snapshot.Schools.slice(1)) {
+            const recordId = String(sRow[C.id] ?? "").trim();
+            if (!recordId) continue;
+            const stage = String(sRow[C.stage] ?? "").trim();
+            if (!eligibleStages.has(stage)) continue;
+            const tags = parseGoalTags(sRow[C.goal]);
+            const matchingTracks = DELIVERY_TRACKS.filter((track) => tags.includes(track));
+            if (matchingTracks.length === 0) continue;
+
+            const schoolName = String(sRow[C.name] ?? "");
+            const schoolBoard = String(sRow[C.board] ?? "");
+            const region = String(sRow[C.region] ?? "");
+            const assignedTo = String(sRow[C.assigned] ?? "");
+
+            for (const track of matchingTracks) {
+              const key = `${recordId}::${track}`;
+              const existing = existingMap.get(key);
+              const history = [...(historyMap.get(key) ?? [])].reverse();
+              deliveries.push({
+                deliveryId: existing?.deliveryId ?? "",
+                recordId,
+                schoolName,
+                schoolBoard,
+                region,
+                stage,
+                assignedTo,
+                programTrack: track,
+                teachersCount: existing?.teachersCount ?? 0,
+                studentsCount: existing?.studentsCount ?? 0,
+                danceTeamConfirmed: existing?.danceTeamConfirmed ?? false,
+                introWorkshopDone: existing?.introWorkshopDone ?? false,
+                musicSubmitted: existing?.musicSubmitted ?? false,
+                videoSubmitted: existing?.videoSubmitted ?? false,
+                finaleConfirmed: existing?.finaleConfirmed ?? false,
+                thankYouSent: existing?.thankYouSent ?? false,
+                workshopDate: existing?.workshopDate ?? "",
+                classTime: existing?.classTime ?? "",
+                schoolStartTime: existing?.schoolStartTime ?? "",
+                schoolEndTime: existing?.schoolEndTime ?? "",
+                studentMentors: existing?.studentMentors ?? "",
+                deliveryNotes: existing?.deliveryNotes ?? "",
+                lastEditedBy: existing?.lastEditedBy ?? "",
+                lastEditedAt: existing?.lastEditedAt ?? "",
+                lastRequestId: existing?.lastRequestId ?? "",
+                history,
+              });
+            }
+          }
+          return json(200, { ok: true, deliveries });
+        }
         if (pathname === "/api/users" && request.method === "GET") {
           if (!proofEnabled(this.env)) throw new ApiError(503, "LOCAL_PROOF_DISABLED");
           const snapshot = await this.sheets().read();
@@ -235,9 +328,9 @@ export class SheetCoordinator extends DurableObject<Env> {
       const plan = JSON.parse(pending.plan) as Plan;
       const activities = snapshot["Activity Log"].slice(1).filter((row) => row[11] === pending.request_id);
       const rangeChecks = plan.batch.data.map(({ range, values }) => {
-        const match = /^'(Schools|Activity Log|Contacts)'!([A-Z]+)(\d+):[A-Z]+\d+$/.exec(range);
+        const match = /^'(Schools|Activity Log|Contacts|Program Delivery)'!([A-Z]+)(\d+):[A-Z]+\d+$/.exec(range);
         if (!match) return { range, matches: false };
-        const tab = match[1] as "Schools" | "Activity Log" | "Contacts";
+        const tab = match[1] as "Schools" | "Activity Log" | "Contacts" | "Program Delivery";
         const column = match[2] === "S" ? 18 : 0;
         const actual = snapshot[tab][Number(match[3]) - 1] ?? [];
         const matches = values[0]!.every((value, index) => value === (actual[column + index] ?? ""));
@@ -332,9 +425,9 @@ export class SheetCoordinator extends DurableObject<Env> {
       const plan = JSON.parse(pending.plan) as Plan;
       const activities = snapshot["Activity Log"].slice(1).filter((row) => row[11] === pending.request_id);
       const allRangesMatch = plan.batch.data.every(({ range, values }) => {
-        const match = /^'(Schools|Activity Log|Contacts)'!([A-Z]+)(\d+):[A-Z]+\d+$/.exec(range);
+        const match = /^'(Schools|Activity Log|Contacts|Program Delivery)'!([A-Z]+)(\d+):[A-Z]+\d+$/.exec(range);
         if (!match) return false;
-        const tab = match[1] as "Schools" | "Activity Log" | "Contacts";
+        const tab = match[1] as "Schools" | "Activity Log" | "Contacts" | "Program Delivery";
         const column = match[2] === "S" ? 18 : 0;
         const actual = snapshot[tab][Number(match[3]) - 1] ?? [];
         return values[0]!.every((value, index) => value === (actual[column + index] ?? ""));
@@ -353,9 +446,9 @@ export class SheetCoordinator extends DurableObject<Env> {
       }
 
       const anyRangesMatch = plan.batch.data.some(({ range, values }) => {
-        const match = /^'(Schools|Activity Log|Contacts)'!([A-Z]+)(\d+):[A-Z]+\d+$/.exec(range);
+        const match = /^'(Schools|Activity Log|Contacts|Program Delivery)'!([A-Z]+)(\d+):[A-Z]+\d+$/.exec(range);
         if (!match) return false;
-        const tab = match[1] as "Schools" | "Activity Log" | "Contacts";
+        const tab = match[1] as "Schools" | "Activity Log" | "Contacts" | "Program Delivery";
         const column = match[2] === "S" ? 18 : 0;
         const actual = snapshot[tab][Number(match[3]) - 1] ?? [];
         return values[0]!.every((value, index) => value === (actual[column + index] ?? ""));
@@ -439,9 +532,9 @@ export class SheetCoordinator extends DurableObject<Env> {
     // Every proof mutation writes its marker in Activity Log!L in the SAME batch.
     const activities = snapshot["Activity Log"].slice(1).filter((row) => row[11] === operation.request_id);
     if (activities.length === 1 && plan.batch.data.every(({ range, values }) => {
-      const match = /^'(Schools|Activity Log|Contacts)'!([A-Z]+)(\d+):[A-Z]+\d+$/.exec(range);
+      const match = /^'(Schools|Activity Log|Contacts|Program Delivery)'!([A-Z]+)(\d+):[A-Z]+\d+$/.exec(range);
       if (!match) return false;
-      const tab = match[1] as "Schools" | "Activity Log" | "Contacts";
+      const tab = match[1] as "Schools" | "Activity Log" | "Contacts" | "Program Delivery";
       const column = match[2] === "S" ? 18 : 0;
       const actual = snapshot[tab][Number(match[3]) - 1] ?? [];
       return values[0]!.every((value, index) => value === (actual[column + index] ?? ""));
@@ -463,6 +556,206 @@ export class SheetCoordinator extends DurableObject<Env> {
     let contactIdsStr = "";
     const contactRanges: ValueRange[] = [];
     const day = today(this.env);
+    if (path === "/api/delivery/update") {
+      onlyKeys(input, [
+        "requestId", "recordId", "programTrack", "expectedLastRequestId",
+        "teachersCount", "studentsCount",
+        "danceTeamConfirmed", "introWorkshopDone", "musicSubmitted",
+        "videoSubmitted", "finaleConfirmed", "thankYouSent",
+        "workshopDate", "classTime", "schoolStartTime", "schoolEndTime",
+        "studentMentors", "deliveryNotes",
+      ]);
+      if (typeof input.recordId !== "string" || !uuid.test(input.recordId)) {
+        throw new ApiError(422, "INVALID_RECORD_ID");
+      }
+      if (typeof input.programTrack !== "string" || !(DELIVERY_TRACKS as readonly string[]).includes(input.programTrack)) {
+        throw new ApiError(422, "INVALID_PROGRAM_TRACK");
+      }
+      const programTrack = input.programTrack as DeliveryTrack;
+
+      const schoolMatches = snapshot.Schools.slice(1).filter((sRow) => sRow[C.id] === input.recordId);
+      if (schoolMatches.length !== 1) {
+        throw new ApiError(schoolMatches.length ? 503 : 404, schoolMatches.length ? "DUPLICATE_RECORD_ID" : "RECORD_NOT_FOUND");
+      }
+      const schoolRow = padded(schoolMatches[0]);
+      const tags = parseGoalTags(schoolRow[C.goal]);
+      if (!tags.includes(programTrack)) {
+        throw new ApiError(422, "TRACK_NOT_TAGGED", { programTrack });
+      }
+
+      const deliveryRows = snapshot["Program Delivery"] ?? [];
+      const existingMatches = deliveryRows
+        .map((dRow, index) => ({ dRow, number: index + 1 }))
+        .filter(({ dRow, number }) => number > 1 && dRow[DeliveryCol.recordId] === input.recordId && dRow[DeliveryCol.programTrack] === programTrack);
+      if (existingMatches.length > 1) {
+        throw new ApiError(503, "DUPLICATE_DELIVERY_RECORD");
+      }
+      const existing = existingMatches[0];
+
+      if (input.expectedLastRequestId !== undefined && typeof input.expectedLastRequestId !== "string") {
+        throw new ApiError(422, "INVALID_EXPECTED_REQUEST_ID");
+      }
+      const expectedLastRequestId = typeof input.expectedLastRequestId === "string" ? input.expectedLastRequestId : "";
+      if (existing) {
+        const currentLastRequestId = String(existing.dRow[DeliveryCol.lastRequestId] ?? "");
+        if (expectedLastRequestId !== currentLastRequestId) {
+          throw new ApiError(409, "CONFLICT", { currentDelivery: deliveryRecord(existing.dRow) });
+        }
+      } else if (expectedLastRequestId !== "") {
+        throw new ApiError(409, "CONFLICT");
+      }
+
+      const prev = existing ? deliveryRecord(existing.dRow) : {
+        deliveryId: "",
+        recordId: String(schoolRow[C.id]),
+        schoolName: String(schoolRow[C.name] ?? ""),
+        programTrack,
+        teachersCount: 0,
+        studentsCount: 0,
+        danceTeamConfirmed: false,
+        introWorkshopDone: false,
+        musicSubmitted: false,
+        videoSubmitted: false,
+        finaleConfirmed: false,
+        thankYouSent: false,
+        workshopDate: "",
+        classTime: "",
+        schoolStartTime: "",
+        schoolEndTime: "",
+        studentMentors: "",
+        deliveryNotes: "",
+        lastEditedBy: "",
+        lastEditedAt: "",
+        lastRequestId: "",
+      };
+
+      const parseCount = (val: unknown, fallback: number): number => {
+        if (val === undefined) return fallback;
+        if (typeof val !== "number" || !Number.isInteger(val) || val < 0) {
+          throw new ApiError(422, "INVALID_COUNT");
+        }
+        return val;
+      };
+      const parseBool = (val: unknown, fallback: boolean): boolean => {
+        if (val === undefined) return fallback;
+        if (typeof val !== "boolean") {
+          throw new ApiError(422, "INVALID_BOOLEAN");
+        }
+        return val;
+      };
+
+      const nextTeachersCount = parseCount(input.teachersCount, prev.teachersCount);
+      const nextStudentsCount = parseCount(input.studentsCount, prev.studentsCount);
+      const nextDanceTeamConfirmed = parseBool(input.danceTeamConfirmed, prev.danceTeamConfirmed);
+      const nextIntroWorkshopDone = parseBool(input.introWorkshopDone, prev.introWorkshopDone);
+      const nextMusicSubmitted = parseBool(input.musicSubmitted, prev.musicSubmitted);
+      const nextVideoSubmitted = parseBool(input.videoSubmitted, prev.videoSubmitted);
+      const nextFinaleConfirmed = parseBool(input.finaleConfirmed, prev.finaleConfirmed);
+      const nextThankYouSent = parseBool(input.thankYouSent, prev.thankYouSent);
+      const nextWorkshopDate = input.workshopDate !== undefined ? date(input.workshopDate) : prev.workshopDate;
+      const nextClassTime = input.classTime !== undefined ? time24(input.classTime) : prev.classTime;
+      const nextSchoolStartTime = input.schoolStartTime !== undefined ? time24(input.schoolStartTime) : prev.schoolStartTime;
+      const nextSchoolEndTime = input.schoolEndTime !== undefined ? time24(input.schoolEndTime) : prev.schoolEndTime;
+      const nextStudentMentors = input.studentMentors !== undefined ? text(input.studentMentors, 1000) : prev.studentMentors;
+      const nextDeliveryNotes = input.deliveryNotes !== undefined ? text(input.deliveryNotes, 4000) : prev.deliveryNotes;
+
+      assertMentorPrivacy(nextStudentMentors);
+
+      const diffs: string[] = [];
+      const boolLabel = (v: boolean) => (v ? "Yes" : "No");
+      const strLabel = (v: string) => (v || "(none)");
+      if (nextTeachersCount !== prev.teachersCount) diffs.push(`Teachers Count: ${prev.teachersCount} → ${nextTeachersCount}`);
+      if (nextStudentsCount !== prev.studentsCount) diffs.push(`Students Count: ${prev.studentsCount} → ${nextStudentsCount}`);
+      if (nextDanceTeamConfirmed !== prev.danceTeamConfirmed) diffs.push(`Dance Team Confirmed: ${boolLabel(prev.danceTeamConfirmed)} → ${boolLabel(nextDanceTeamConfirmed)}`);
+      if (nextIntroWorkshopDone !== prev.introWorkshopDone) diffs.push(`Intro Workshop Done: ${boolLabel(prev.introWorkshopDone)} → ${boolLabel(nextIntroWorkshopDone)}`);
+      if (nextMusicSubmitted !== prev.musicSubmitted) diffs.push(`Music Submitted: ${boolLabel(prev.musicSubmitted)} → ${boolLabel(nextMusicSubmitted)}`);
+      if (nextVideoSubmitted !== prev.videoSubmitted) diffs.push(`Video Submitted: ${boolLabel(prev.videoSubmitted)} → ${boolLabel(nextVideoSubmitted)}`);
+      if (nextFinaleConfirmed !== prev.finaleConfirmed) diffs.push(`Finale Confirmed: ${boolLabel(prev.finaleConfirmed)} → ${boolLabel(nextFinaleConfirmed)}`);
+      if (nextThankYouSent !== prev.thankYouSent) diffs.push(`Thank You Sent: ${boolLabel(prev.thankYouSent)} → ${boolLabel(nextThankYouSent)}`);
+      if (nextWorkshopDate !== prev.workshopDate) diffs.push(`Workshop Date: ${strLabel(prev.workshopDate)} → ${strLabel(nextWorkshopDate)}`);
+      if (nextClassTime !== prev.classTime) diffs.push(`Class Time: ${strLabel(prev.classTime)} → ${strLabel(nextClassTime)}`);
+      if (nextSchoolStartTime !== prev.schoolStartTime) diffs.push(`School Start Time: ${strLabel(prev.schoolStartTime)} → ${strLabel(nextSchoolStartTime)}`);
+      if (nextSchoolEndTime !== prev.schoolEndTime) diffs.push(`School End Time: ${strLabel(prev.schoolEndTime)} → ${strLabel(nextSchoolEndTime)}`);
+      if (nextStudentMentors !== prev.studentMentors) diffs.push(`Student Mentors: ${strLabel(prev.studentMentors)} → ${strLabel(nextStudentMentors)}`);
+      if (nextDeliveryNotes !== prev.deliveryNotes) diffs.push(`Delivery Notes: ${strLabel(prev.deliveryNotes)} → ${strLabel(nextDeliveryNotes)}`);
+
+      const diffString = diffs.length > 0 ? diffs.join("; ") : (existing ? "No field changes" : "Initialized delivery record");
+      const deliveryId = prev.deliveryId || crypto.randomUUID();
+      const editedAt = new Date().toISOString();
+
+      let deliveryRowNumber: number;
+      if (existing) {
+        deliveryRowNumber = existing.number;
+      } else {
+        deliveryRowNumber = 2;
+        while ((deliveryRows[deliveryRowNumber - 1] ?? []).some((cell) => cell !== "")) deliveryRowNumber++;
+      }
+
+      const deliveryRow: Row = [
+        deliveryId,
+        String(schoolRow[C.id]!),
+        String(schoolRow[C.name] ?? ""),
+        programTrack,
+        nextTeachersCount,
+        nextStudentsCount,
+        nextDanceTeamConfirmed ? "TRUE" : "FALSE",
+        nextIntroWorkshopDone ? "TRUE" : "FALSE",
+        nextMusicSubmitted ? "TRUE" : "FALSE",
+        nextVideoSubmitted ? "TRUE" : "FALSE",
+        nextFinaleConfirmed ? "TRUE" : "FALSE",
+        nextThankYouSent ? "TRUE" : "FALSE",
+        nextWorkshopDate,
+        nextClassTime,
+        nextSchoolStartTime,
+        nextSchoolEndTime,
+        nextStudentMentors,
+        nextDeliveryNotes,
+        actor.name,
+        editedAt,
+        requestId,
+      ];
+
+      let activityNumber = 2;
+      while ((snapshot["Activity Log"][activityNumber - 1] ?? []).some((cell) => cell !== "")) activityNumber++;
+      const activity: Row = [
+        crypto.randomUUID(),
+        day,
+        String(schoolRow[C.name] ?? ""),
+        actor.name,
+        "App",
+        programTrack,
+        "",
+        diffString,
+        "",
+        "",
+        String(schoolRow[C.id]!),
+        requestId,
+        actor.email,
+        "Program Delivery",
+        this.env.GOOGLE_SHEET_ID === "synthetic-h4" ? "Local synthetic proof" : "App",
+        deliveryId,
+      ];
+
+      return {
+        batch: {
+          valueInputOption: "RAW",
+          data: [
+            ...deliveryWrites(deliveryRowNumber, deliveryRow),
+            { range: `'Activity Log'!A${activityNumber}:P${activityNumber}`, values: [activity] },
+          ],
+        },
+        result: {
+          status: 200,
+          body: {
+            ok: true,
+            code: "SUCCESS",
+            requestId,
+            delivery: deliveryRecord(deliveryRow),
+            diff: diffString,
+          },
+        },
+      };
+    }
     if (path === "/api/schools/claim") {
       onlyKeys(input, ["requestId", "osn"]);
       const osn = text(input.osn, 20);

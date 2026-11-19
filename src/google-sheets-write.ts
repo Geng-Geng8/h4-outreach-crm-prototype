@@ -19,7 +19,15 @@ export class GoogleSheetsCoordinator extends GoogleSheetsReadOnly {
   async snapshot(): Promise<Snapshot> {
     const query = new URLSearchParams({ valueRenderOption: "FORMULA", dateTimeRenderOption: "FORMATTED_STRING" });
     const tabs = Object.keys(HEADERS) as Tab[];
-    for (const tab of tabs) query.append("ranges", `'${tab}'!${tab === "Schools" ? "A:AF" : tab === "CRM Users" ? "A:D" : tab === "Contacts" ? "A:N" : tab === "Activity Log" ? "A:P" : "A:O"}`);
+    for (const tab of tabs) {
+      const range = tab === "Schools" ? "A:AF"
+        : tab === "CRM Users" ? "A:D"
+        : tab === "Contacts" ? "A:N"
+        : tab === "Activity Log" ? "A:P"
+        : tab === "Program Delivery" ? "A:U"
+        : "A:O";
+      query.append("ranges", `'${tab}'!${range}`);
+    }
     const response = await this.request("GET", `values:batchGet?${query}`);
     if (!response.ok) throw new ApiError(503, response.status === 403 ? "TEST_SHEET_ACCESS_REQUIRED" : "SHEETS_READ_FAILED");
     const data = await response.json<{ valueRanges?: { values?: Row[] }[] }>();
@@ -42,7 +50,19 @@ export class GoogleSheetsCoordinator extends GoogleSheetsReadOnly {
   }
 
   async write(batch: Batch): Promise<Response> {
-    if (batch.valueInputOption !== "RAW" || ![3, 4, 5].includes(batch.data.length)) throw new ApiError(422, "INVALID_WRITE_RANGES");
+    if (batch.valueInputOption !== "RAW") throw new ApiError(422, "INVALID_WRITE_RANGES");
+
+    if (batch.data.length === 2) {
+      const d = /^'Program Delivery'!A(\d+):U\1$/.exec(batch.data[0]!.range);
+      const log = /^'Activity Log'!A(\d+):P\1$/.exec(batch.data[1]!.range);
+      if (!d || Number(d[1]) < 2 || batch.data[0]!.values.length !== 1 || batch.data[0]!.values[0]?.length !== 21 ||
+          !log || Number(log[1]) < 2 || batch.data[1]!.values.length !== 1 || batch.data[1]!.values[0]?.length !== 16) {
+        throw new ApiError(422, "INVALID_WRITE_RANGES");
+      }
+      return this.request("POST", "values:batchUpdate", batch);
+    }
+
+    if (![3, 4, 5].includes(batch.data.length)) throw new ApiError(422, "INVALID_WRITE_RANGES");
     const a = /^'Schools'!A(\d+):P\1$/.exec(batch.data[0]!.range);
     const b = /^'Schools'!S(\d+):AF\1$/.exec(batch.data[1]!.range);
     if (!a || !b || a[1] !== b[1] || Number(a[1]) < 2 || Number(a[1]) > 500) {

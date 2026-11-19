@@ -46,6 +46,7 @@ export function fixture() {
       `office${number}@example.test`, "", "https://example.test", "Example Region", "Area A",
       "https://example.test/source", "Available",
     ])],
+    "Program Delivery": [[...HEADERS["Program Delivery"]]],
   };
 }
 
@@ -67,10 +68,10 @@ export class FakeSheets {
   delayMs = 12;
 
   apply(batch) {
-    if (batch.valueInputOption !== "RAW" || ![3, 4, 5].includes(batch.data.length)) throw new Error("Invalid batch contract");
+    if (batch.valueInputOption !== "RAW" || ![2, 3, 4, 5].includes(batch.data.length)) throw new Error("Invalid batch contract");
     const next = structuredClone(this.tables);
     for (const [index, range] of batch.data.entries()) {
-      const match = /^'(Schools|Activity Log|Contacts)'!([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range.range);
+      const match = /^'(Schools|Activity Log|Contacts|Program Delivery)'!([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range.range);
       if (!match) throw new Error("Unexpected write range");
       const [, tab, startColumn, startRow, endColumn, endRow] = match;
       const from = columnIndex(startColumn), to = columnIndex(endColumn);
@@ -81,8 +82,9 @@ export class FakeSheets {
       }
       if (tab === "Activity Log" && (from !== 0 || to !== 15)) throw new Error("Invalid activity range");
       if (tab === "Contacts" && (from !== 0 || to !== 13)) throw new Error("Invalid contacts range");
+      if (tab === "Program Delivery" && (from !== 0 || to !== 20)) throw new Error("Invalid delivery range");
       const number = Number(startRow) - 1;
-      next[tab][number] ??= Array(tab === "Schools" ? 32 : tab === "Contacts" ? 14 : 16).fill("");
+      next[tab][number] ??= Array(tab === "Schools" ? 32 : tab === "Contacts" ? 14 : tab === "Program Delivery" ? 21 : 16).fill("");
       range.values[0].forEach((value, offset) => { next[tab][number][from + offset] = value; });
       // Fail after some ranges have been staged, proving no partial commit escapes.
       if (this.fault === "reject" && index === 1) throw new Error("Injected batch validation failure");
@@ -109,7 +111,7 @@ export class FakeSheets {
           return new Response("Read temporarily unavailable", { status });
         }
         const ranges = url.searchParams.getAll("ranges");
-        if (ranges.length !== 5 || url.searchParams.get("valueRenderOption") !== "FORMULA") {
+        if (ranges.length !== Object.keys(HEADERS).length || url.searchParams.get("valueRenderOption") !== "FORMULA") {
           throw new Error("Unexpected read contract");
         }
         const valueRanges = ranges.map((range) => {

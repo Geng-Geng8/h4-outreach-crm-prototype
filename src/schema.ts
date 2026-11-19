@@ -27,6 +27,15 @@ export const HEADERS = {
     "Grade Range", "City / Municipality", "Street Address", "Postal Code", "Email",
     "Phone", "Website", "Geographic Region", "Board Area", "Zone Source Link", "Status",
   ],
+  "Program Delivery": [
+    "Delivery ID", "Record ID", "School Name", "Program Track",
+    "Teachers Count", "Students Count", "Dance Team Confirmed",
+    "Intro Workshop Done", "Music Submitted", "Video Submitted",
+    "Finale Confirmed", "Thank You Sent", "Workshop Date",
+    "Class Time", "School Start Time", "School End Time",
+    "Student Mentors", "Delivery Notes", "Last Edited By",
+    "Last Edited At", "Last Request ID",
+  ],
 } as const;
 
 export type Cell = string | number | boolean;
@@ -56,6 +65,64 @@ export const ActivityCol = {
   relatedRecordId: 10, requestId: 11, actorEmail: 12, activityType: 13, platform: 14,
   contactIds: 15,
 } as const;
+
+export const DELIVERY_TRACKS = ["Cypher Program", "Competitive Arts"] as const;
+export type DeliveryTrack = (typeof DELIVERY_TRACKS)[number];
+
+export const DeliveryCol = {
+  id: 0,
+  recordId: 1,
+  schoolName: 2,
+  programTrack: 3,
+  teachersCount: 4,
+  studentsCount: 5,
+  danceTeamConfirmed: 6,
+  introWorkshopDone: 7,
+  musicSubmitted: 8,
+  videoSubmitted: 9,
+  finaleConfirmed: 10,
+  thankYouSent: 11,
+  workshopDate: 12,
+  classTime: 13,
+  schoolStartTime: 14,
+  schoolEndTime: 15,
+  studentMentors: 16,
+  deliveryNotes: 17,
+  lastEditedBy: 18,
+  lastEditedAt: 19,
+  lastRequestId: 20,
+} as const;
+
+export function deliveryRecord(row: Row) {
+  const toBool = (cell: Cell | undefined) => String(cell ?? "").trim().toUpperCase() === "TRUE";
+  const toCount = (cell: Cell | undefined) => {
+    const n = Number(cell ?? 0);
+    return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : 0;
+  };
+  return {
+    deliveryId: String(row[DeliveryCol.id] ?? ""),
+    recordId: String(row[DeliveryCol.recordId] ?? ""),
+    schoolName: String(row[DeliveryCol.schoolName] ?? ""),
+    programTrack: String(row[DeliveryCol.programTrack] ?? ""),
+    teachersCount: toCount(row[DeliveryCol.teachersCount]),
+    studentsCount: toCount(row[DeliveryCol.studentsCount]),
+    danceTeamConfirmed: toBool(row[DeliveryCol.danceTeamConfirmed]),
+    introWorkshopDone: toBool(row[DeliveryCol.introWorkshopDone]),
+    musicSubmitted: toBool(row[DeliveryCol.musicSubmitted]),
+    videoSubmitted: toBool(row[DeliveryCol.videoSubmitted]),
+    finaleConfirmed: toBool(row[DeliveryCol.finaleConfirmed]),
+    thankYouSent: toBool(row[DeliveryCol.thankYouSent]),
+    workshopDate: String(row[DeliveryCol.workshopDate] ?? ""),
+    classTime: String(row[DeliveryCol.classTime] ?? ""),
+    schoolStartTime: String(row[DeliveryCol.schoolStartTime] ?? ""),
+    schoolEndTime: String(row[DeliveryCol.schoolEndTime] ?? ""),
+    studentMentors: String(row[DeliveryCol.studentMentors] ?? ""),
+    deliveryNotes: String(row[DeliveryCol.deliveryNotes] ?? ""),
+    lastEditedBy: String(row[DeliveryCol.lastEditedBy] ?? ""),
+    lastEditedAt: String(row[DeliveryCol.lastEditedAt] ?? ""),
+    lastRequestId: String(row[DeliveryCol.lastRequestId] ?? ""),
+  };
+}
 
 export function contactRecord(row: Row) {
   return {
@@ -102,6 +169,23 @@ export function assertStudentPrivacy(category: string, email: string, phone: str
   }
 }
 
+export function assertMentorPrivacy(studentMentors: string) {
+  if (!studentMentors.trim()) return;
+  if (/\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/.test(studentMentors) || /\(\d{3}\)\s*\d{3}[-.\s]?\d{4}\b/.test(studentMentors)) {
+    throw new ApiError(422, "STUDENT_PRIVACY_VIOLATION", {
+      message: "Phone numbers cannot be stored in Student Mentors under student privacy rules.",
+    });
+  }
+  const emailDomainMatches = studentMentors.toLowerCase().matchAll(/@([a-z0-9.-]+\.[a-z]{2,})\b/g);
+  for (const match of emailDomainMatches) {
+    if (CONSUMER_EMAIL_DOMAINS.has(match[1]!)) {
+      throw new ApiError(422, "STUDENT_PRIVACY_VIOLATION", {
+        message: "Consumer email addresses (such as Gmail, Yahoo, Hotmail, iCloud) cannot be stored in Student Mentors under student privacy rules.",
+      });
+    }
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -122,6 +206,12 @@ export function schoolWrites(rowNumber: number, row: Row): ValueRange[] {
   return [
     { range: `'Schools'!A${rowNumber}:P${rowNumber}`, values: [row.slice(0, 16)] },
     { range: `'Schools'!S${rowNumber}:AF${rowNumber}`, values: [row.slice(18, 32)] },
+  ];
+}
+
+export function deliveryWrites(rowNumber: number, row: Row): ValueRange[] {
+  return [
+    { range: `'Program Delivery'!A${rowNumber}:U${rowNumber}`, values: [row.slice(0, 21)] },
   ];
 }
 
