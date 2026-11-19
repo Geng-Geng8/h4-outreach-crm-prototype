@@ -111,16 +111,23 @@ async function fingerprint(actor: string, path: string, input: Input): Promise<s
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical({ actor, path, input })));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
+function normalizeRole(raw: unknown): Actor["role"] | null {
+  const role = String(raw ?? "").trim().toLowerCase();
+  if (role === "supervisor") return "Supervisor";
+  if (role === "co-op") return "co-op";
+  if (role === "volunteer") return "Volunteer";
+  return null;
+}
 function actorFrom(snapshot: Snapshot, email: string): Actor {
   const matches = snapshot["CRM Users"].slice(1).filter((row) => String(row[0]).toLowerCase() === email);
   if (matches.length !== 1) throw new ApiError(403, "USER_NOT_ALLOWED");
   const row = matches[0]!;
   const active = String(row[3] ?? "").trim().toUpperCase();
-  const role = String(row[2] ?? "").trim();
-  if (!["", "TRUE"].includes(active) || !["Supervisor", "co-op", "Volunteer"].includes(role)) {
+  const role = normalizeRole(row[2]);
+  if (!["", "TRUE"].includes(active) || !role) {
     throw new ApiError(403, "USER_NOT_ALLOWED");
   }
-  return { email, name: String(row[1]), role: role as Actor["role"] };
+  return { email, name: String(row[1]), role };
 }
 function writableBlank(row: Row): boolean {
   return row.every((cell, index) => index === 16 || index === 17 || cell === "");
@@ -168,16 +175,16 @@ export class SheetCoordinator extends DurableObject<Env> {
             .filter((cRow) => cRow[ContactCol.recordId] === id && String(cRow[ContactCol.active]).trim().toUpperCase() === "TRUE")
             .map(contactRecord);
           const users = snapshot["CRM Users"].slice(1)
-            .filter((uRow) => {
+            .flatMap((uRow) => {
               const active = String(uRow[3] ?? "").trim().toUpperCase();
-              const role = String(uRow[2] ?? "").trim();
-              return ["", "TRUE"].includes(active) && ["Supervisor", "co-op", "Volunteer"].includes(role);
-            })
-            .map((uRow) => ({
-              email: String(uRow[0]).trim().toLowerCase(),
-              name: String(uRow[1]).trim() || String(uRow[0]).trim(),
-              role: String(uRow[2]).trim() as Actor["role"],
-            }));
+              const role = normalizeRole(uRow[2]);
+              if (!["", "TRUE"].includes(active) || !role) return [];
+              return [{
+                email: String(uRow[0]).trim().toLowerCase(),
+                name: String(uRow[1]).trim() || String(uRow[0]).trim(),
+                role,
+              }];
+            });
           return json(200, { ok: true, record: editableRecord(row), contacts, users });
         }
         if (pathname === "/api/delivery" && request.method === "GET") {
@@ -268,16 +275,16 @@ export class SheetCoordinator extends DurableObject<Env> {
           const snapshot = await this.sheets().read();
           actorFrom(snapshot, request.headers.get("x-proof-actor")?.trim().toLowerCase() ?? "");
           const users = snapshot["CRM Users"].slice(1)
-            .filter((uRow) => {
+            .flatMap((uRow) => {
               const active = String(uRow[3] ?? "").trim().toUpperCase();
-              const role = String(uRow[2] ?? "").trim();
-              return ["", "TRUE"].includes(active) && ["Supervisor", "co-op", "Volunteer"].includes(role);
-            })
-            .map((uRow) => ({
-              email: String(uRow[0]).trim().toLowerCase(),
-              name: String(uRow[1]).trim() || String(uRow[0]).trim(),
-              role: String(uRow[2]).trim() as Actor["role"],
-            }));
+              const role = normalizeRole(uRow[2]);
+              if (!["", "TRUE"].includes(active) || !role) return [];
+              return [{
+                email: String(uRow[0]).trim().toLowerCase(),
+                name: String(uRow[1]).trim() || String(uRow[0]).trim(),
+                role,
+              }];
+            });
           return json(200, { ok: true, users });
         }
         if (request.method === "GET" && pathname === "/api/schools/demo-status") {

@@ -393,4 +393,14 @@ test("Volunteer role: can authenticate, self-join a claimed school, appear in /a
   }, VOLUNTEER);
   assert.equal(unclaimRes.status, 403);
   assert.equal(unclaimRes.body.code, "SUPERVISOR_ROLE_REQUIRED");
+
+  // Lowercase "volunteer" also authenticates and normalizes to "Volunteer"
+  const LOWER_VOL = "casey@example.test";
+  h.sheets.tables["CRM Users"].push([LOWER_VOL, "Casey", "volunteer", "TRUE"]);
+  const lowerUsersRes = await h.get("/api/users", LOWER_VOL);
+  assert.equal(lowerUsersRes.status, 200);
+  assert.deepEqual(
+    lowerUsersRes.body.users.find((u) => u.email === LOWER_VOL),
+    { email: LOWER_VOL, name: "Casey", role: "Volunteer" },
+  );
 });

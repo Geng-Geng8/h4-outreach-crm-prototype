@@ -6150,6 +6150,24 @@ test("Volunteer role UI: renders Volunteer header label, View only + Join School
   assert.ok(primaryLabels.includes("Morgan (Supervisor)"));
   assert.ok(primaryLabels.includes("Alex (Student)"));
   assert.ok(primaryLabels.includes("Jordan (Volunteer)"));
+
+  // Lowercase "volunteer" role also renders "Volunteer" in the header pill
+  const lowerEnv = setupEnv({
+    fetchHandler: async (url) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Casey", email: "casey@example.test", role: "volunteer" },
+          schools: [],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(lowerEnv.cleanup);
+  await lowerEnv.signIn("casey@example.test");
+  assert.equal(lowerEnv.getEl("user-role").textContent, "Volunteer");
 });
 
 

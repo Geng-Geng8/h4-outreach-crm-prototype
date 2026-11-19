@@ -34,6 +34,13 @@ export type DirectoryEntry = {
 type ValueRange = { range: string; values?: Row[] };
 
 function value(cell: Cell | null | undefined) { return cell === undefined || cell === null ? "" : String(cell); }
+function normalizeRole(cell: Cell | null | undefined): CrmUser["role"] | null {
+  const role = value(cell).trim().toLowerCase();
+  if (role === "supervisor") return "Supervisor";
+  if (role === "co-op") return "co-op";
+  if (role === "volunteer") return "Volunteer";
+  return null;
+}
 function checkHeader(row: Row | undefined, expected: readonly string[]) {
   if (expected.some((header, index) => row?.[index] !== header)) throw new ApiError(503, "SCHEMA_MISMATCH");
 }
@@ -139,11 +146,11 @@ export class GoogleSheetsReadOnly {
     if (matches.length !== 1) throw new ApiError(403, "USER_NOT_ALLOWED");
     const row = matches[0]!;
     const active = value(row[3]).trim().toUpperCase();
-    const role = value(row[2]).trim();
-    if (!["TRUE", ""].includes(active) || !["Supervisor", "co-op", "Volunteer"].includes(role)) {
+    const role = normalizeRole(row[2]);
+    if (!["TRUE", ""].includes(active) || !role) {
       throw new ApiError(403, "USER_NOT_ALLOWED");
     }
-    return { email, name: value(row[1]).trim() || email, role: role as CrmUser["role"] };
+    return { email, name: value(row[1]).trim() || email, role };
   }
 
   async schools(user: CrmUser): Promise<ActionSchool[]> {
@@ -227,7 +234,8 @@ export class GoogleSheetsReadOnly {
       const email = value(row[0]).trim().toLowerCase();
       if (!email) continue;
       const id = await studentId(email), active = ["TRUE", ""].includes(value(row[3]).trim().toUpperCase());
-      const student = ["co-op", "Volunteer"].includes(value(row[2]).trim());
+      const role = normalizeRole(row[2]);
+      const student = role === "co-op" || role === "Volunteer";
       owners.set(email, { id, active, student });
       if (student) students.push({ id, name: value(row[1]).trim() || "Unnamed student", active });
     }
@@ -260,16 +268,16 @@ export class GoogleSheetsReadOnly {
     const [users] = await this.read(["'CRM Users'!A1:D1000"]);
     checkHeader(users?.values?.[0], HEADERS["CRM Users"]);
     return (users?.values ?? []).slice(1)
-      .filter((row) => {
+      .flatMap((row) => {
         const active = value(row[3]).trim().toUpperCase();
-        const role = value(row[2]).trim();
-        return ["TRUE", ""].includes(active) && ["Supervisor", "co-op", "Volunteer"].includes(role);
-      })
-      .map((row) => ({
-        email: value(row[0]).trim().toLowerCase(),
-        name: value(row[1]).trim() || value(row[0]).trim(),
-        role: value(row[2]).trim() as CrmUser["role"],
-      }));
+        const role = normalizeRole(row[2]);
+        if (!["TRUE", ""].includes(active) || !role) return [];
+        return [{
+          email: value(row[0]).trim().toLowerCase(),
+          name: value(row[1]).trim() || value(row[0]).trim(),
+          role,
+        }];
+      });
   }
 
   async directory(): Promise<DirectoryEntry[]> {

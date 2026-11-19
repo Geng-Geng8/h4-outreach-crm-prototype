@@ -550,5 +550,13 @@ test("Volunteer role can authenticate, bootstrap, view team schools read-only, a
   const supBoot = await h.bootstrap(supToken);
   assert.equal(supBoot.status, 200);
   assert.ok(supBoot.body.overview.students.some((s) => s.name === "Jordan" && s.active === true));
+
+  // 5. Lowercase "volunteer" in CRM Users normalizes cleanly to "Volunteer"
+  const LOWER_VOL = "casey@example.test";
+  h.tables["CRM Users"].push([LOWER_VOL, "Casey", "volunteer", true]);
+  const lowerToken = await h.token({ email: LOWER_VOL, sub: "fixture-volunteer-casey" });
+  const lowerBoot = await h.bootstrap(lowerToken);
+  assert.equal(lowerBoot.status, 200);
+  assert.equal(lowerBoot.body.currentUser.role, "Volunteer");
 });
 
