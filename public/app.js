@@ -57,9 +57,24 @@ let teamSchools = [], dashboardLoaded = false, dashboardSeq = 0, dashboardReques
 let overviewStudents = [], schoolScopeFilter = null, schoolStageFilter = "", schoolScopeLabel = "", homeShowAll = false;
 let supervisorSchoolScope = "mine";
 let programsScope = "mine", selectedProgram = "", programStatusFilter = "all";
+const DELIVERY_PROGRAM_TRACKS = ["Cypher Program", "Competitive Arts"];
+let programsSubView = "pipeline"; // "pipeline" | "delivery"
+let deliveryItems = [];
+let deliveryLoaded = false;
+let deliveryLoading = false;
+let deliverySeq = 0;
+let deliveryRequest = null;
+let deliveryFilter = "all";
+const deliveryPendingCards = new Set();
+let deliveryRetryAction = null;
+let deliveryEditing = null;
 var state = {
   get programStatusFilter() { return programStatusFilter; },
   set programStatusFilter(val) { programStatusFilter = String(val || "all").trim() || "all"; },
+  get programsSubView() { return programsSubView; },
+  set programsSubView(val) { programsSubView = val === "delivery" ? "delivery" : "pipeline"; },
+  get deliveryFilter() { return deliveryFilter; },
+  set deliveryFilter(val) { deliveryFilter = String(val || "all").trim() || "all"; },
 };
 const STAGE_CONFIG = {
   "Not Contacted": {
@@ -742,6 +757,12 @@ function forgetSession() {
   credential = ""; schools = []; directory = []; demoSchools = []; isSupervisor = false; currentUser = null;
   pendingClaims.clear(); supervisorSchoolScope = "mine";
   programsScope = "mine"; selectedProgram = ""; programStatusFilter = "all";
+  programsSubView = "pipeline";
+  deliveryRequest?.abort(); deliverySeq++;
+  deliveryItems = []; deliveryLoaded = false; deliveryLoading = false;
+  deliveryFilter = "all"; deliveryPendingCards.clear(); deliveryRetryAction = null; deliveryEditing = null;
+  el("delivery-edit-modal")?.close?.();
+  el("delivery-history-modal")?.close?.();
   if (el("schools-supervisor-toggle")) el("schools-supervisor-toggle").hidden = true;
   if (el("programs-view")) {
     el("programs-view").hidden = true;
@@ -755,10 +776,18 @@ function forgetSession() {
       "programs-cold-list",
       "programs-active-list",
       "programs-completed-list",
+      "delivery-hero-strip",
+      "delivery-filter-bar",
+      "delivery-confirmed-list",
+      "delivery-fence-list",
+      "delivery-history-list",
     ]) {
       el(listId)?.replaceChildren?.();
     }
     el("programs-kpi-strip")?.replaceChildren?.();
+    if (el("programs-subview-bar")) el("programs-subview-bar").hidden = true;
+    if (el("delivery-board")) el("delivery-board").hidden = true;
+    if (el("delivery-notice")) el("delivery-notice").hidden = true;
     if (el("programs-status")) el("programs-status").textContent = "";
     if (el("quick-tag-feedback")) el("quick-tag-feedback").textContent = "";
   }
@@ -4424,18 +4453,37 @@ function setProgramStatusFilter(bucket = "all") {
   renderProgramsView();
 }
 
+function isDeliveryTrack(programName) {
+  const lower = String(programName || "").trim().toLowerCase();
+  return DELIVERY_PROGRAM_TRACKS.some((t) => t.toLowerCase() === lower);
+}
+
+function canonicalDeliveryTrack(programName) {
+  const lower = String(programName || "").trim().toLowerCase();
+  return DELIVERY_PROGRAM_TRACKS.find((t) => t.toLowerCase() === lower) || "";
+}
+
 function selectProgram(programName = "") {
   const nextProgram = String(programName || "").trim();
-  if (nextProgram.toLowerCase() !== selectedProgram.toLowerCase()) {
+  const changed = nextProgram.toLowerCase() !== selectedProgram.toLowerCase();
+  if (changed) {
     programStatusFilter = "all";
   }
   selectedProgram = nextProgram;
+  if (!isDeliveryTrack(selectedProgram)) {
+    programsSubView = "pipeline";
+  } else if (programsSubView === "delivery" && changed) {
+    deliveryFilter = "all";
+  }
   const moreSelect = el("more-programs-select");
   if (moreSelect) {
     moreSelect.value = SECONDARY_PROGRAMS.includes(selectedProgram) ? selectedProgram : "";
   }
   if (el("quick-tag-feedback")) el("quick-tag-feedback").textContent = "";
   renderProgramsView();
+  if (programsSubView === "delivery" && isDeliveryTrack(selectedProgram) && !deliveryLoaded && credential) {
+    loadDeliveryRecords();
+  }
 }
 
 function setProgramsScope(scope) {
@@ -4710,15 +4758,43 @@ function renderProgramsView() {
     }
 
     // View Mode 2: Single Program Drill-Down
+    const supportsDelivery = isDeliveryTrack(selectedProgram);
+    if (!supportsDelivery && programsSubView === "delivery") {
+      programsSubView = "pipeline";
+    }
+    const isDeliveryMode = supportsDelivery && programsSubView === "delivery";
+
+    const subviewBar = el("programs-subview-bar");
+    if (subviewBar) {
+      subviewBar.hidden = !supportsDelivery;
+      subviewBar.classList?.toggle("hidden", !supportsDelivery);
+    }
+    const pipelineBtn = el("subview-pipeline-btn");
+    if (pipelineBtn) {
+      pipelineBtn.classList?.toggle("active", !isDeliveryMode);
+      pipelineBtn.setAttribute?.("aria-pressed", String(!isDeliveryMode));
+    }
+    const deliveryBtn = el("subview-delivery-btn");
+    if (deliveryBtn) {
+      deliveryBtn.classList?.toggle("active", isDeliveryMode);
+      deliveryBtn.setAttribute?.("aria-pressed", String(isDeliveryMode));
+    }
+
     const buckets = categorizeSchoolsForProgram(selectedProgram, activeList, today);
     const activeFilter = programStatusFilter || "all";
     if (headingEl) headingEl.textContent = selectedProgram;
     if (subheadingEl) {
-      subheadingEl.textContent = FLAGSHIP_PROGRAMS.includes(selectedProgram)
-        ? `Flagship program track · ${buckets.total} tagged ${buckets.total === 1 ? "school" : "schools"} in ${programsScope === "all" ? "All Team Schools" : "My Schools"}.`
-        : `Program track · ${buckets.total} tagged ${buckets.total === 1 ? "school" : "schools"} in ${programsScope === "all" ? "All Team Schools" : "My Schools"}.`;
+      if (isDeliveryMode) {
+        subheadingEl.textContent = selectedProgram === "Competitive Arts"
+          ? "Competitive Arts (Sem 2 / Mar) · Live logistics, readiness checklist, and edit history."
+          : "Cypher Program (Nov–Mar) · Live logistics, readiness checklist, and edit history.";
+      } else {
+        subheadingEl.textContent = FLAGSHIP_PROGRAMS.includes(selectedProgram)
+          ? `Flagship program track · ${buckets.total} tagged ${buckets.total === 1 ? "school" : "schools"} in ${programsScope === "all" ? "All Team Schools" : "My Schools"}.`
+          : `Program track · ${buckets.total} tagged ${buckets.total === 1 ? "school" : "schools"} in ${programsScope === "all" ? "All Team Schools" : "My Schools"}.`;
+      }
     }
-    if (statusEl) {
+    if (statusEl && !isDeliveryMode) {
       statusEl.textContent = `${selectedProgram} · ${buckets.total} ${buckets.total === 1 ? "school" : "schools"} (${buckets.confirmed.length} confirmed, ${buckets.onTheFence.length} on the fence, ${buckets.waitingOnReply.length} waiting on reply, ${buckets.cold.length} cold, ${buckets.needsAttention.length} overdue follow-up, ${buckets.completed.length} completed)`;
     }
 
@@ -4731,7 +4807,43 @@ function renderProgramsView() {
       drilldownEl.classList?.remove("hidden");
     }
 
+    const deliveryBoardEl = el("delivery-board");
     const kpiStrip = el("programs-kpi-strip");
+    const quickTagBar = el("programs-quick-tag-bar");
+
+    if (isDeliveryMode) {
+      if (kpiStrip) { kpiStrip.hidden = true; kpiStrip.classList?.add("hidden"); }
+      if (quickTagBar) { quickTagBar.hidden = true; quickTagBar.classList?.add("hidden"); }
+      for (const sectionId of [
+        "programs-section-confirmed",
+        "programs-section-fence",
+        "programs-section-attention",
+        "programs-section-waiting",
+        "programs-section-cold",
+        "programs-section-completed",
+        "programs-section-active",
+      ]) {
+        const sNode = el(sectionId);
+        if (sNode) {
+          sNode.hidden = true;
+          sNode.classList?.add("hidden");
+        }
+      }
+      if (deliveryBoardEl) {
+        deliveryBoardEl.hidden = false;
+        deliveryBoardEl.classList?.remove("hidden");
+      }
+      renderDeliveryBoard();
+      return;
+    }
+
+    if (deliveryBoardEl) {
+      deliveryBoardEl.hidden = true;
+      deliveryBoardEl.classList?.add("hidden");
+    }
+    if (kpiStrip) { kpiStrip.hidden = false; kpiStrip.classList?.remove("hidden"); }
+    if (quickTagBar) { quickTagBar.hidden = false; quickTagBar.classList?.remove("hidden"); }
+
     if (kpiStrip) {
       kpiStrip.replaceChildren?.();
       const statCards = [
@@ -4900,6 +5012,975 @@ function renderProgramsView() {
   }
 }
 
+const DELIVERY_READINESS_FIELDS = [
+  { key: "danceTeamConfirmed", shortLabel: "Team", label: "Dance Team Confirmed" },
+  { key: "introWorkshopDone", shortLabel: "Intro", label: "Intro Workshop Done" },
+  { key: "musicSubmitted", shortLabel: "Music", label: "Music Submitted" },
+  { key: "videoSubmitted", shortLabel: "Video", label: "Video Submitted" },
+  { key: "finaleConfirmed", shortLabel: "Finale", label: "Finale Confirmed" },
+  { key: "thankYouSent", shortLabel: "Thanks", label: "Thank You Sent" },
+];
+
+const DELIVERY_FILTERS = [
+  { key: "all", label: "All", match: () => true },
+  { key: "need-music", label: "Need Music", match: (item) => !item.musicSubmitted },
+  { key: "need-video", label: "Need Video", match: (item) => !item.videoSubmitted },
+  { key: "no-finale", label: "No Finale RSVP", match: (item) => !item.finaleConfirmed },
+  { key: "need-datetime", label: "Need Date / Time", match: (item) => !item.workshopDate || !item.classTime },
+  { key: "need-mentors", label: "Need Mentors", match: (item) => !String(item.studentMentors || "").trim() },
+  { key: "need-thanks", label: "Need Thank You", match: (item) => !item.thankYouSent },
+  {
+    key: "all-set",
+    label: "All Set ✓",
+    match: (item) => Boolean(
+      item.danceTeamConfirmed &&
+      item.introWorkshopDone &&
+      item.musicSubmitted &&
+      item.videoSubmitted &&
+      item.finaleConfirmed
+    ),
+  },
+];
+
+function deliveryCardKey(recordId, programTrack) {
+  return `${recordId}::${programTrack}`;
+}
+
+function deliveryDraftKey(recordId, programTrack) {
+  return `h4_crm_delivery_draft_${recordId}_${programTrack}`;
+}
+
+function saveDeliveryDraft(recordId, programTrack, payload) {
+  if (!recordId || !programTrack) return false;
+  try {
+    const store = getLocalStorage();
+    if (!store) return false;
+    store.setItem(deliveryDraftKey(recordId, programTrack), JSON.stringify({ payload, updatedAt: Date.now() }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function loadDeliveryDraft(recordId, programTrack) {
+  if (!recordId || !programTrack) return null;
+  try {
+    const store = getLocalStorage();
+    if (!store) return null;
+    const raw = store.getItem(deliveryDraftKey(recordId, programTrack));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.payload || typeof parsed.payload !== "object") {
+      store.removeItem(deliveryDraftKey(recordId, programTrack));
+      return null;
+    }
+    return parsed.payload;
+  } catch {
+    return null;
+  }
+}
+
+function clearDeliveryDraft(recordId, programTrack) {
+  if (!recordId || !programTrack) return false;
+  try {
+    const store = getLocalStorage();
+    if (!store) return false;
+    store.removeItem(deliveryDraftKey(recordId, programTrack));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function formatDeliveryTime12h(timeStr) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(timeStr || "").trim());
+  if (!match) return String(timeStr || "").trim();
+  const h = Number(match[1]);
+  const m = match[2];
+  if (h < 0 || h > 23) return String(timeStr || "").trim();
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  return `${h12}:${m} ${period}`;
+}
+
+function formatDeliveryDate(dateStr, includeYear = true) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || "").trim());
+  if (!match) return String(dateStr || "").trim();
+  const dt = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (Number.isNaN(dt.getTime())) return String(dateStr || "").trim();
+  return new Intl.DateTimeFormat(
+    "en-US",
+    includeYear
+      ? { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }
+      : { month: "short", day: "numeric", timeZone: "UTC" }
+  ).format(dt);
+}
+
+function formatDeliveryRelativeTime(isoStr) {
+  if (!isoStr) return "";
+  const ts = Date.parse(isoStr);
+  if (!Number.isFinite(ts)) return String(isoStr);
+  const diffMs = Date.now() - ts;
+  if (diffMs < 60_000) return "just now";
+  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m ago`;
+  if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)}h ago`;
+  if (diffMs < 7 * 86_400_000) return `${Math.floor(diffMs / 86_400_000)}d ago`;
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(ts));
+}
+
+function showDeliveryNotice(message, { kind = "warning", onRetry = null } = {}) {
+  const notice = el("delivery-notice");
+  const textEl = el("delivery-notice-text");
+  const retryBtn = el("delivery-notice-retry");
+  deliveryRetryAction = typeof onRetry === "function" ? onRetry : null;
+  if (!notice) return;
+  if (textEl) textEl.textContent = message;
+  notice.setAttribute?.("data-kind", kind);
+  notice.hidden = false;
+  if (retryBtn) {
+    retryBtn.hidden = !deliveryRetryAction;
+  }
+}
+
+function clearDeliveryNotice() {
+  deliveryRetryAction = null;
+  const notice = el("delivery-notice");
+  const textEl = el("delivery-notice-text");
+  const retryBtn = el("delivery-notice-retry");
+  if (textEl) textEl.textContent = "";
+  if (retryBtn) retryBtn.hidden = true;
+  if (notice) notice.hidden = true;
+}
+
+function mergeDeliveryUpdate(recordId, programTrack, updatedDelivery, diff, requestId) {
+  const idx = deliveryItems.findIndex((d) => d.recordId === recordId && d.programTrack === programTrack);
+  if (idx === -1) return null;
+  const existing = deliveryItems[idx];
+  const prevHistory = Array.isArray(existing.history) ? existing.history : [];
+  let nextHistory = prevHistory;
+  if (diff && requestId && !prevHistory.some((h) => h.requestId === requestId)) {
+    nextHistory = [
+      {
+        activityId: requestId,
+        date: dashboardToday(),
+        editedBy: updatedDelivery?.lastEditedBy || currentUser?.name || "Team member",
+        summary: diff,
+        requestId,
+      },
+      ...prevHistory,
+    ];
+  }
+  const merged = {
+    ...existing,
+    ...updatedDelivery,
+    schoolName: updatedDelivery?.schoolName || existing.schoolName,
+    schoolBoard: existing.schoolBoard,
+    region: existing.region,
+    stage: existing.stage,
+    assignedTo: existing.assignedTo,
+    history: nextHistory,
+  };
+  deliveryItems[idx] = merged;
+  return merged;
+}
+
+async function loadDeliveryRecords({ preserveNotice = false } = {}) {
+  if (!credential) return false;
+  const session = sessionVersion;
+  const seq = ++deliverySeq;
+  deliveryRequest?.abort();
+  deliveryRequest = new AbortController();
+  deliveryLoading = true;
+  if (el("delivery-refresh-btn")) el("delivery-refresh-btn").disabled = true;
+  if (el("programs-status") && programsSubView === "delivery") {
+    el("programs-status").textContent = "Loading Program Delivery board…";
+  }
+
+  try {
+    const response = await apiFetch("./api/delivery", {
+      headers: { Authorization: `Bearer ${credential}` },
+      credentials: "omit",
+      cache: "no-store",
+      signal: deliveryRequest.signal,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (session !== sessionVersion || seq !== deliverySeq || !credential) return false;
+    if (response.status === 401 || response.status === 403) {
+      forgetSession();
+      status(messages[data.code] ?? "Your access changed. Please sign in again.");
+      if (el("google-button")) el("google-button").hidden = false;
+      if (config?.ready) await showGoogleButton();
+      return false;
+    }
+    if (!response.ok) {
+      showDeliveryNotice(data.message || "Could not load Program Delivery data.", {
+        kind: "error",
+        onRetry: () => loadDeliveryRecords(),
+      });
+      return false;
+    }
+    deliveryItems = Array.isArray(data.deliveries) ? data.deliveries : [];
+    deliveryLoaded = true;
+    if (!preserveNotice) clearDeliveryNotice();
+    if (programsSubView === "delivery" && isDeliveryTrack(selectedProgram)) {
+      renderDeliveryBoard();
+    }
+    return true;
+  } catch (err) {
+    if (err?.name === "AbortError") return false;
+    if (session === sessionVersion && seq === deliverySeq) {
+      showDeliveryNotice("Could not reach the server to load Program Delivery data.", {
+        kind: "error",
+        onRetry: () => loadDeliveryRecords(),
+      });
+    }
+    return false;
+  } finally {
+    if (seq === deliverySeq) {
+      deliveryLoading = false;
+      if (el("delivery-refresh-btn")) el("delivery-refresh-btn").disabled = false;
+      if (session === sessionVersion && programsSubView === "delivery" && isDeliveryTrack(selectedProgram)) {
+        renderDeliveryBoard();
+      }
+    }
+  }
+}
+
+async function setProgramsSubView(subView, { skipFetch = false } = {}) {
+  const next = subView === "delivery" ? "delivery" : "pipeline";
+  if (next === "delivery" && !isDeliveryTrack(selectedProgram)) {
+    selectedProgram = "Cypher Program";
+  }
+  programsSubView = next;
+  renderProgramsView();
+  if (next === "delivery" && !skipFetch && credential) {
+    await loadDeliveryRecords();
+  }
+}
+
+async function openDeliveryBoard(track = "Cypher Program") {
+  const targetTrack = canonicalDeliveryTrack(track) || "Cypher Program";
+  if (selectedProgram.toLowerCase() !== targetTrack.toLowerCase()) {
+    deliveryFilter = "all";
+  }
+  selectedProgram = targetTrack;
+  programsSubView = "delivery";
+  if (currentTab !== "programs") {
+    switchTab("programs");
+  } else {
+    renderProgramsView();
+  }
+  if (credential) {
+    await loadDeliveryRecords();
+  }
+}
+
+function setDeliveryFilter(filterKey = "all") {
+  deliveryFilter = DELIVERY_FILTERS.some((f) => f.key === filterKey) ? filterKey : "all";
+  renderDeliveryBoard();
+}
+
+function createDeliveryCard(item) {
+  const cardKey = deliveryCardKey(item.recordId, item.programTrack);
+  const isSaving = deliveryPendingCards.has(cardKey);
+  const writesBlocked = config?.writesEnabled === false;
+
+  const card = dashboardNode("article", "", `delivery-card${isSaving ? " is-saving" : ""}`);
+  card.setAttribute("data-record-id", item.recordId);
+  card.setAttribute("data-program-track", item.programTrack);
+  card.setAttribute("data-stage", item.stage || "");
+
+  // Top Row: School Name + Headcount Pill
+  const topRow = dashboardNode("div", "", "delivery-card-top");
+  const titleWrap = dashboardNode("div", "", "delivery-card-title-wrap");
+  const nameHeading = dashboardNode("h4", item.schoolName || "Unnamed School", "delivery-school-name");
+  const metaParts = [item.schoolBoard, item.region, item.assignedTo ? `Owner: ${item.assignedTo}` : ""].filter(Boolean);
+  if (item.stage === "Completed") metaParts.push("Completed");
+  const metaLine = dashboardNode("p", metaParts.join(" · "), "delivery-school-meta");
+  titleWrap.append(nameHeading);
+  if (metaParts.length > 0) titleWrap.append(metaLine);
+
+  const students = Number(item.studentsCount) || 0;
+  const teachers = Number(item.teachersCount) || 0;
+  const total = students + teachers;
+  const headcountPill = dashboardNode(
+    "span",
+    `👥 ${total} · ${students} stu / ${teachers} tch`,
+    "delivery-headcount-pill"
+  );
+  topRow.append(titleWrap, headcountPill);
+
+  // Schedule Strip
+  const scheduleStrip = dashboardNode("div", "", "delivery-schedule-strip");
+  if (item.workshopDate) {
+    scheduleStrip.append(
+      dashboardNode("span", `📅 ${formatDeliveryDate(item.workshopDate, true)}`, "delivery-schedule-badge")
+    );
+  } else {
+    scheduleStrip.append(
+      dashboardNode("span", "📅 Date needed", "delivery-schedule-badge is-missing")
+    );
+  }
+  if (item.classTime) {
+    scheduleStrip.append(
+      dashboardNode("span", `🕘 Class ${formatDeliveryTime12h(item.classTime)}`, "delivery-schedule-badge")
+    );
+  } else {
+    scheduleStrip.append(
+      dashboardNode("span", "🕘 Time needed", "delivery-schedule-badge is-missing")
+    );
+  }
+  if (item.schoolStartTime || item.schoolEndTime) {
+    const startFmt = item.schoolStartTime ? formatDeliveryTime12h(item.schoolStartTime) : "?";
+    const endFmt = item.schoolEndTime ? formatDeliveryTime12h(item.schoolEndTime) : "?";
+    scheduleStrip.append(
+      dashboardNode("span", `🔔 Bell ${startFmt}–${endFmt}`, "delivery-schedule-badge")
+    );
+  }
+
+  // 6 Tap-to-Toggle Readiness Pills
+  const pillsGrid = dashboardNode("div", "", "delivery-readiness-grid");
+  pillsGrid.setAttribute("role", "group");
+  pillsGrid.setAttribute("aria-label", `Readiness checklist for ${item.schoolName}`);
+  for (const field of DELIVERY_READINESS_FIELDS) {
+    const active = Boolean(item[field.key]);
+    const pill = dashboardNode("button", "", `delivery-pill${active ? " is-done" : ""}`);
+    pill.type = "button";
+    pill.setAttribute("data-field", field.key);
+    pill.setAttribute("aria-pressed", String(active));
+    pill.setAttribute("aria-label", `${field.label} for ${item.schoolName}`);
+    pill.disabled = isSaving || writesBlocked;
+    pill.append(
+      dashboardNode("span", active ? "✓" : "○", "delivery-pill-check"),
+      dashboardNode("span", field.shortLabel, "delivery-pill-label")
+    );
+    pill.onclick = () => toggleDeliveryReadiness(item.recordId, item.programTrack, field.key);
+    pillsGrid.append(pill);
+  }
+
+  card.append(topRow, scheduleStrip, pillsGrid);
+
+  // Mentor Preview
+  const mentorsText = String(item.studentMentors || "").trim();
+  if (mentorsText) {
+    const mentorsBox = dashboardNode("div", "", "delivery-mentors-box");
+    mentorsBox.append(
+      dashboardNode("span", "Student Mentors", "delivery-box-label"),
+      dashboardNode("span", mentorsText, "delivery-box-text")
+    );
+    card.append(mentorsBox);
+  }
+
+  // Delivery Notes
+  const notesText = String(item.deliveryNotes || "").trim();
+  if (notesText) {
+    const notesBox = dashboardNode("div", "", "delivery-notes-box");
+    notesBox.append(
+      dashboardNode("span", "Delivery Notes", "delivery-box-label"),
+      dashboardNode("span", notesText, "delivery-box-text")
+    );
+    card.append(notesBox);
+  }
+
+  // Audit Footer & Action Buttons
+  const footer = dashboardNode("div", "", "delivery-card-footer");
+  let stampText = "Not yet edited";
+  if (item.lastEditedBy) {
+    const rel = formatDeliveryRelativeTime(item.lastEditedAt);
+    stampText = rel ? `Last edited by ${item.lastEditedBy} · ${rel}` : `Last edited by ${item.lastEditedBy}`;
+  }
+  const stamp = dashboardNode("span", stampText, "delivery-audit-stamp");
+
+  const actions = dashboardNode("div", "", "delivery-card-actions");
+  const editBtn = dashboardNode("button", "Edit Details", "button secondary compact-button delivery-action-edit");
+  editBtn.type = "button";
+  editBtn.disabled = isSaving || writesBlocked;
+  editBtn.onclick = () => openDeliveryEditModal(item.recordId, item.programTrack);
+
+  const historyCount = Array.isArray(item.history) ? item.history.length : 0;
+  const historyBtn = dashboardNode("button", `History (${historyCount})`, "button secondary compact-button delivery-action-history");
+  historyBtn.type = "button";
+  historyBtn.onclick = () => openDeliveryHistoryModal(item.recordId, item.programTrack);
+
+  const viewSchoolBtn = dashboardNode("button", "View School", "button secondary compact-button delivery-action-school");
+  viewSchoolBtn.type = "button";
+  viewSchoolBtn.onclick = () => openSchoolEditor(item.recordId, false, "details");
+
+  actions.append(editBtn, historyBtn, viewSchoolBtn);
+  footer.append(stamp, actions);
+  card.append(footer);
+
+  return card;
+}
+
+function renderDeliveryBoard() {
+  const board = el("delivery-board");
+  if (!board) return;
+  const track = canonicalDeliveryTrack(selectedProgram) || "Cypher Program";
+  const today = dashboardToday();
+
+  // Track Switcher buttons
+  const cypherBtn = el("delivery-track-cypher");
+  const compBtn = el("delivery-track-competitive");
+  if (cypherBtn) {
+    const active = track === "Cypher Program";
+    cypherBtn.classList?.toggle("active", active);
+    cypherBtn.setAttribute?.("aria-pressed", String(active));
+  }
+  if (compBtn) {
+    const active = track === "Competitive Arts";
+    compBtn.classList?.toggle("active", active);
+    compBtn.setAttribute?.("aria-pressed", String(active));
+  }
+
+  const trackItems = deliveryItems.filter((item) => item && item.programTrack === track);
+  const confirmedAll = trackItems.filter((item) => item.stage === "Booked" || item.stage === "Completed");
+  const fenceAll = trackItems.filter((item) => item.stage === "Engaged");
+
+  // Status summary
+  if (el("programs-status") && !deliveryLoading) {
+    el("programs-status").textContent = `${track} Delivery · ${confirmedAll.length} confirmed, ${fenceAll.length} on the fence`;
+  }
+
+  // 1. At-a-Glance Hero Strip
+  const heroStrip = el("delivery-hero-strip");
+  if (heroStrip) {
+    heroStrip.replaceChildren?.();
+    const confirmedStudents = confirmedAll.reduce((sum, i) => sum + (Number(i.studentsCount) || 0), 0);
+    const confirmedTeachers = confirmedAll.reduce((sum, i) => sum + (Number(i.teachersCount) || 0), 0);
+    const confirmedTotal = confirmedStudents + confirmedTeachers;
+
+    const totalChecks = confirmedAll.length * DELIVERY_READINESS_FIELDS.length;
+    const doneChecks = confirmedAll.reduce(
+      (sum, i) => sum + DELIVERY_READINESS_FIELDS.filter((f) => Boolean(i[f.key])).length,
+      0
+    );
+    const readinessPct = totalChecks > 0 ? Math.round((doneChecks / totalChecks) * 100) : 0;
+
+    const finaleCount = confirmedAll.filter((i) => Boolean(i.finaleConfirmed)).length;
+
+    const upcoming = confirmedAll
+      .filter((i) => i.workshopDate && i.workshopDate >= today)
+      .sort((a, b) => {
+        const cmpDate = a.workshopDate.localeCompare(b.workshopDate);
+        if (cmpDate !== 0) return cmpDate;
+        return (a.classTime || "99:99").localeCompare(b.classTime || "99:99");
+      })[0];
+    const nextVisitText = upcoming
+      ? `${formatDeliveryDate(upcoming.workshopDate, false)} · ${upcoming.schoolName}${upcoming.classTime ? ` · ${formatDeliveryTime12h(upcoming.classTime)}` : ""}`
+      : "No upcoming dates set";
+
+    // Card 1: Confirmed Reach
+    const reachCard = dashboardNode("div", "", "delivery-hero-card");
+    reachCard.setAttribute("data-hero-metric", "reach");
+    reachCard.append(
+      dashboardNode("span", "Confirmed Reach", "delivery-hero-label"),
+      dashboardNode("strong", `${confirmedTotal} total`, "delivery-hero-value"),
+      dashboardNode("span", `${confirmedStudents} students / ${confirmedTeachers} teachers`, "delivery-hero-sub")
+    );
+
+    // Card 2: Readiness Progress
+    const readinessCard = dashboardNode("div", "", "delivery-hero-card");
+    readinessCard.setAttribute("data-hero-metric", "readiness");
+    const progressTrack = dashboardNode("div", "", "delivery-progress-track");
+    progressTrack.setAttribute("role", "progressbar");
+    progressTrack.setAttribute("aria-label", "Confirmed schools readiness progress");
+    progressTrack.setAttribute("aria-valuemin", "0");
+    progressTrack.setAttribute("aria-valuemax", "100");
+    progressTrack.setAttribute("aria-valuenow", String(readinessPct));
+    const progressFill = dashboardNode("div", "", "delivery-progress-fill");
+    if (progressFill.style) progressFill.style.width = `${readinessPct}%`;
+    progressTrack.append(progressFill);
+    readinessCard.append(
+      dashboardNode("span", "Readiness Progress", "delivery-hero-label"),
+      dashboardNode("strong", `${readinessPct}%`, "delivery-hero-value"),
+      dashboardNode("span", `${doneChecks} / ${totalChecks} checks complete`, "delivery-hero-sub"),
+      progressTrack
+    );
+
+    // Card 3: Finale Locked In
+    const finaleCard = dashboardNode("div", "", "delivery-hero-card");
+    finaleCard.setAttribute("data-hero-metric", "finale");
+    finaleCard.append(
+      dashboardNode("span", "Finale Locked In", "delivery-hero-label"),
+      dashboardNode("strong", `${finaleCount} / ${confirmedAll.length}`, "delivery-hero-value"),
+      dashboardNode("span", "schools confirmed for Finale", "delivery-hero-sub")
+    );
+
+    // Card 4: Next Upcoming Visit
+    const visitCard = dashboardNode("div", "", "delivery-hero-card");
+    visitCard.setAttribute("data-hero-metric", "next-visit");
+    visitCard.append(
+      dashboardNode("span", "Next Upcoming Visit", "delivery-hero-label"),
+      dashboardNode("strong", nextVisitText, "delivery-hero-value is-compact"),
+      dashboardNode("span", upcoming ? "Earliest confirmed date" : "Add workshop dates on cards", "delivery-hero-sub")
+    );
+
+    heroStrip.append(reachCard, readinessCard, finaleCard, visitCard);
+  }
+
+  // 2. Plain-English Situation Filter Chips
+  const filterBar = el("delivery-filter-bar");
+  if (filterBar) {
+    filterBar.replaceChildren?.();
+    for (const f of DELIVERY_FILTERS) {
+      const count = trackItems.filter(f.match).length;
+      const isPressed = deliveryFilter === f.key;
+      const chip = dashboardNode("button", "", `delivery-filter-chip${isPressed ? " active" : ""}`);
+      chip.type = "button";
+      chip.setAttribute("data-delivery-filter", f.key);
+      chip.setAttribute("aria-pressed", String(isPressed));
+      chip.append(
+        dashboardNode("span", f.label, "delivery-chip-label"),
+        dashboardNode("span", String(count), "delivery-chip-count")
+      );
+      chip.onclick = () => setDeliveryFilter(f.key);
+      filterBar.append(chip);
+    }
+  }
+
+  // 3. Apply Active Situation Filter
+  const activeFilterSpec = DELIVERY_FILTERS.find((f) => f.key === deliveryFilter) || DELIVERY_FILTERS[0];
+  const confirmedFiltered = confirmedAll.filter(activeFilterSpec.match);
+  const fenceFiltered = fenceAll.filter(activeFilterSpec.match);
+
+  const emptyTrackEl = el("delivery-empty-track");
+  const emptyFilterEl = el("delivery-empty-filter");
+  const confirmedSection = el("delivery-section-confirmed");
+  const fenceSection = el("delivery-section-fence");
+  const confirmedList = el("delivery-confirmed-list");
+  const fenceList = el("delivery-fence-list");
+  const confirmedSummary = el("delivery-confirmed-summary");
+  const fenceSummary = el("delivery-fence-summary");
+
+  if (deliveryLoading && !deliveryLoaded) {
+    if (emptyTrackEl) emptyTrackEl.hidden = true;
+    if (emptyFilterEl) emptyFilterEl.hidden = true;
+    if (confirmedSection) confirmedSection.hidden = true;
+    if (fenceSection) fenceSection.hidden = true;
+    return;
+  }
+
+  if (trackItems.length === 0) {
+    if (emptyTrackEl) {
+      emptyTrackEl.hidden = false;
+      if (el("delivery-empty-track-text")) {
+        el("delivery-empty-track-text").textContent = `No Confirmed or On the Fence schools are tagged for ${track} yet. Tag a school and move it to On the Fence or Confirmed to manage delivery logistics here.`;
+      }
+    }
+    if (emptyFilterEl) emptyFilterEl.hidden = true;
+    if (confirmedSection) confirmedSection.hidden = true;
+    if (fenceSection) fenceSection.hidden = true;
+    confirmedList?.replaceChildren?.();
+    fenceList?.replaceChildren?.();
+    return;
+  }
+
+  if (emptyTrackEl) emptyTrackEl.hidden = true;
+
+  if (confirmedFiltered.length === 0 && fenceFiltered.length === 0) {
+    if (emptyFilterEl) emptyFilterEl.hidden = false;
+    if (confirmedSection) confirmedSection.hidden = true;
+    if (fenceSection) fenceSection.hidden = true;
+    confirmedList?.replaceChildren?.();
+    fenceList?.replaceChildren?.();
+    return;
+  }
+
+  if (emptyFilterEl) emptyFilterEl.hidden = true;
+
+  // Top Section: Confirmed Schools
+  if (confirmedSection) {
+    confirmedSection.hidden = confirmedFiltered.length === 0;
+  }
+  if (confirmedSummary) {
+    const visibleParticipants = confirmedFiltered.reduce(
+      (sum, i) => sum + (Number(i.studentsCount) || 0) + (Number(i.teachersCount) || 0),
+      0
+    );
+    confirmedSummary.textContent = `${confirmedFiltered.length} ${confirmedFiltered.length === 1 ? "school" : "schools"} · ${visibleParticipants} participants`;
+  }
+  if (confirmedList) {
+    confirmedList.replaceChildren?.(...confirmedFiltered.map((item) => createDeliveryCard(item)));
+  }
+
+  // Bottom Section: On the Fence
+  if (fenceSection) {
+    fenceSection.hidden = fenceFiltered.length === 0;
+  }
+  if (fenceSummary) {
+    fenceSummary.textContent = `${fenceFiltered.length} ${fenceFiltered.length === 1 ? "school" : "schools"}`;
+  }
+  if (fenceList) {
+    fenceList.replaceChildren?.(...fenceFiltered.map((item) => createDeliveryCard(item)));
+  }
+}
+
+async function toggleDeliveryReadiness(recordId, programTrack, field) {
+  if (!credential || config?.writesEnabled === false) return false;
+  const item = deliveryItems.find((d) => d.recordId === recordId && d.programTrack === programTrack);
+  if (!item) return false;
+  const key = deliveryCardKey(recordId, programTrack);
+  if (deliveryPendingCards.has(key)) return false;
+
+  deliveryPendingCards.add(key);
+  renderDeliveryBoard();
+
+  const session = sessionVersion;
+  const requestId = crypto.randomUUID();
+  const nextValue = !Boolean(item[field]);
+  const payload = {
+    requestId,
+    recordId,
+    programTrack,
+    expectedLastRequestId: item.lastRequestId || "",
+    [field]: nextValue,
+  };
+
+  try {
+    const response = await apiFetch("./api/delivery/update", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      credentials: "omit",
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (session !== sessionVersion || !credential) return false;
+
+    if (response.status === 401 || response.status === 403) {
+      forgetSession();
+      status(messages[data.code] ?? "Your access changed. Please sign in again.");
+      if (el("google-button")) el("google-button").hidden = false;
+      if (config?.ready) await showGoogleButton();
+      return false;
+    }
+
+    if (response.status === 409) {
+      deliveryPendingCards.delete(key);
+      await loadDeliveryRecords({ preserveNotice: true });
+      showDeliveryNotice("Updated by another team member — refreshed latest status.", { kind: "warning" });
+      showSaveToast("Updated by another team member — refreshed latest status.");
+      return false;
+    }
+
+    if (!response.ok) {
+      deliveryPendingCards.delete(key);
+      renderDeliveryBoard();
+      showDeliveryNotice(data.message || "Could not save readiness change. Please try again.", {
+        kind: "error",
+        onRetry: () => toggleDeliveryReadiness(recordId, programTrack, field),
+      });
+      return false;
+    }
+
+    mergeDeliveryUpdate(recordId, programTrack, data.delivery, data.diff, data.requestId || requestId);
+    deliveryPendingCards.delete(key);
+    clearDeliveryNotice();
+    renderDeliveryBoard();
+    return true;
+  } catch {
+    if (session === sessionVersion) {
+      deliveryPendingCards.delete(key);
+      renderDeliveryBoard();
+      showDeliveryNotice("Network error — readiness toggle reverted. Tap Retry to try again.", {
+        kind: "error",
+        onRetry: () => toggleDeliveryReadiness(recordId, programTrack, field),
+      });
+    }
+    return false;
+  }
+}
+
+function readDeliveryEditFormValues() {
+  const toNonNegIntStr = (id) => String(el(id)?.value ?? "").trim();
+  return {
+    teachersCount: toNonNegIntStr("delivery-edit-teachers"),
+    studentsCount: toNonNegIntStr("delivery-edit-students"),
+    danceTeamConfirmed: Boolean(el("delivery-edit-danceTeamConfirmed")?.checked),
+    introWorkshopDone: Boolean(el("delivery-edit-introWorkshopDone")?.checked),
+    musicSubmitted: Boolean(el("delivery-edit-musicSubmitted")?.checked),
+    videoSubmitted: Boolean(el("delivery-edit-videoSubmitted")?.checked),
+    finaleConfirmed: Boolean(el("delivery-edit-finaleConfirmed")?.checked),
+    thankYouSent: Boolean(el("delivery-edit-thankYouSent")?.checked),
+    workshopDate: String(el("delivery-edit-workshopDate")?.value ?? "").trim(),
+    classTime: String(el("delivery-edit-classTime")?.value ?? "").trim(),
+    schoolStartTime: String(el("delivery-edit-schoolStartTime")?.value ?? "").trim(),
+    schoolEndTime: String(el("delivery-edit-schoolEndTime")?.value ?? "").trim(),
+    studentMentors: String(el("delivery-edit-studentMentors")?.value ?? ""),
+    deliveryNotes: String(el("delivery-edit-deliveryNotes")?.value ?? ""),
+  };
+}
+
+function populateDeliveryEditForm(values) {
+  if (el("delivery-edit-teachers")) el("delivery-edit-teachers").value = String(values.teachersCount ?? 0);
+  if (el("delivery-edit-students")) el("delivery-edit-students").value = String(values.studentsCount ?? 0);
+  for (const f of DELIVERY_READINESS_FIELDS) {
+    const input = el(`delivery-edit-${f.key}`);
+    if (input) input.checked = Boolean(values[f.key]);
+  }
+  if (el("delivery-edit-workshopDate")) el("delivery-edit-workshopDate").value = String(values.workshopDate ?? "");
+  if (el("delivery-edit-classTime")) el("delivery-edit-classTime").value = String(values.classTime ?? "");
+  if (el("delivery-edit-schoolStartTime")) el("delivery-edit-schoolStartTime").value = String(values.schoolStartTime ?? "");
+  if (el("delivery-edit-schoolEndTime")) el("delivery-edit-schoolEndTime").value = String(values.schoolEndTime ?? "");
+  if (el("delivery-edit-studentMentors")) el("delivery-edit-studentMentors").value = String(values.studentMentors ?? "");
+  if (el("delivery-edit-deliveryNotes")) el("delivery-edit-deliveryNotes").value = String(values.deliveryNotes ?? "");
+  updateDeliveryTotalPreview();
+}
+
+function updateDeliveryTotalPreview() {
+  const preview = el("delivery-edit-total-preview");
+  if (!preview) return;
+  const tRaw = Number(el("delivery-edit-teachers")?.value ?? 0);
+  const sRaw = Number(el("delivery-edit-students")?.value ?? 0);
+  const teachers = Number.isFinite(tRaw) && tRaw >= 0 ? Math.trunc(tRaw) : 0;
+  const students = Number.isFinite(sRaw) && sRaw >= 0 ? Math.trunc(sRaw) : 0;
+  const total = teachers + students;
+  preview.textContent = `Total Participants: ${total} (${students} ${students === 1 ? "student" : "students"} + ${teachers} ${teachers === 1 ? "teacher" : "teachers"})`;
+}
+
+function openDeliveryEditModal(recordId, programTrack) {
+  const item = deliveryItems.find((d) => d.recordId === recordId && d.programTrack === programTrack);
+  if (!item) return;
+  const modal = el("delivery-edit-modal");
+  if (!modal) return;
+
+  deliveryEditing = {
+    recordId,
+    programTrack,
+    item,
+    busy: false,
+    retryRequestId: null,
+  };
+
+  if (el("delivery-edit-track")) el("delivery-edit-track").textContent = `PROGRAM DELIVERY · ${programTrack.toUpperCase()}`;
+  if (el("delivery-edit-title")) el("delivery-edit-title").textContent = item.schoolName || "Edit delivery details";
+  if (el("delivery-edit-meta")) {
+    const stageLabel = item.stage === "Engaged" ? "On the Fence" : (item.stage === "Completed" ? "Completed" : "Confirmed");
+    el("delivery-edit-meta").textContent = [stageLabel, item.schoolBoard, item.region].filter(Boolean).join(" · ");
+  }
+
+  const draft = loadDeliveryDraft(recordId, programTrack);
+  if (draft) {
+    populateDeliveryEditForm(draft);
+    if (el("delivery-draft-banner")) el("delivery-draft-banner").hidden = false;
+  } else {
+    populateDeliveryEditForm(item);
+    if (el("delivery-draft-banner")) el("delivery-draft-banner").hidden = true;
+  }
+
+  const feedback = el("delivery-edit-feedback");
+  if (feedback) {
+    feedback.textContent = "";
+    feedback.removeAttribute?.("data-kind");
+  }
+  const saveBtn = el("delivery-edit-save");
+  if (saveBtn) {
+    saveBtn.disabled = config?.writesEnabled === false;
+    saveBtn.textContent = "Save delivery details";
+  }
+  if (el("delivery-edit-close")) el("delivery-edit-close").disabled = false;
+  if (el("delivery-edit-cancel")) el("delivery-edit-cancel").disabled = false;
+
+  if (!modal.open) modal.showModal?.();
+}
+
+function closeDeliveryEditModal() {
+  if (deliveryEditing?.busy) return;
+  deliveryEditing = null;
+  el("delivery-edit-modal")?.close?.();
+}
+
+async function saveDeliveryEdits(event) {
+  event?.preventDefault?.();
+  if (!deliveryEditing || deliveryEditing.busy || !credential || config?.writesEnabled === false) return false;
+
+  const feedback = el("delivery-edit-feedback");
+  const saveBtn = el("delivery-edit-save");
+  const closeBtn = el("delivery-edit-close");
+  const cancelBtn = el("delivery-edit-cancel");
+
+  const values = readDeliveryEditFormValues();
+  const parseCountField = (raw, label) => {
+    if (raw === "") return 0;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new Error(`${label} must be a whole number (0 or more).`);
+    }
+    return n;
+  };
+
+  let teachersCount = 0;
+  let studentsCount = 0;
+  try {
+    teachersCount = parseCountField(values.teachersCount, "Teachers Count");
+    studentsCount = parseCountField(values.studentsCount, "Students Count");
+  } catch (validationErr) {
+    if (feedback) {
+      feedback.textContent = validationErr.message;
+      feedback.setAttribute?.("data-kind", "error");
+    }
+    return false;
+  }
+
+  const editState = deliveryEditing;
+  const requestId = editState.retryRequestId || crypto.randomUUID();
+  editState.busy = true;
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+  }
+  if (closeBtn) closeBtn.disabled = true;
+  if (cancelBtn) cancelBtn.disabled = true;
+  if (feedback) {
+    feedback.textContent = "Saving delivery details…";
+    feedback.removeAttribute?.("data-kind");
+  }
+
+  const session = sessionVersion;
+  const payload = {
+    requestId,
+    recordId: editState.recordId,
+    programTrack: editState.programTrack,
+    expectedLastRequestId: editState.item.lastRequestId || "",
+    teachersCount,
+    studentsCount,
+    danceTeamConfirmed: values.danceTeamConfirmed,
+    introWorkshopDone: values.introWorkshopDone,
+    musicSubmitted: values.musicSubmitted,
+    videoSubmitted: values.videoSubmitted,
+    finaleConfirmed: values.finaleConfirmed,
+    thankYouSent: values.thankYouSent,
+    workshopDate: values.workshopDate,
+    classTime: values.classTime,
+    schoolStartTime: values.schoolStartTime,
+    schoolEndTime: values.schoolEndTime,
+    studentMentors: values.studentMentors,
+    deliveryNotes: values.deliveryNotes,
+  };
+
+  try {
+    const response = await apiFetch("./api/delivery/update", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      credentials: "omit",
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (session !== sessionVersion || !credential) return false;
+
+    if (response.status === 401 || response.status === 403) {
+      editState.busy = false;
+      forgetSession();
+      status(messages[data.code] ?? "Your access changed. Please sign in again.");
+      if (el("google-button")) el("google-button").hidden = false;
+      if (config?.ready) await showGoogleButton();
+      return false;
+    }
+
+    if (response.status === 409) {
+      editState.busy = false;
+      editState.retryRequestId = null;
+      await loadDeliveryRecords({ preserveNotice: true });
+      const refreshed = deliveryItems.find(
+        (d) => d.recordId === editState.recordId && d.programTrack === editState.programTrack
+      );
+      if (refreshed) editState.item = refreshed;
+      if (feedback) {
+        feedback.textContent = "Updated by another team member — refreshed latest status. Review your edits and save again.";
+        feedback.setAttribute?.("data-kind", "error");
+      }
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save delivery details"; }
+      if (closeBtn) closeBtn.disabled = false;
+      if (cancelBtn) cancelBtn.disabled = false;
+      return false;
+    }
+
+    if (!response.ok) {
+      editState.busy = false;
+      editState.retryRequestId = response.status >= 500 ? requestId : null;
+      if (feedback) {
+        feedback.textContent = data.message || "Could not save delivery details — your draft is saved on this device. Please try again.";
+        feedback.setAttribute?.("data-kind", "error");
+      }
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save delivery details"; }
+      if (closeBtn) closeBtn.disabled = false;
+      if (cancelBtn) cancelBtn.disabled = false;
+      return false;
+    }
+
+    editState.busy = false;
+    clearDeliveryDraft(editState.recordId, editState.programTrack);
+    mergeDeliveryUpdate(
+      editState.recordId,
+      editState.programTrack,
+      data.delivery,
+      data.diff,
+      data.requestId || requestId
+    );
+    clearDeliveryNotice();
+    closeDeliveryEditModal();
+    showSaveToast("Delivery details saved!");
+    renderDeliveryBoard();
+    return true;
+  } catch {
+    if (session === sessionVersion) {
+      editState.busy = false;
+      editState.retryRequestId = requestId;
+      if (feedback) {
+        feedback.textContent = "Could not save — your draft is saved on this device. Please try again.";
+        feedback.setAttribute?.("data-kind", "error");
+      }
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save delivery details"; }
+      if (closeBtn) closeBtn.disabled = false;
+      if (cancelBtn) cancelBtn.disabled = false;
+    }
+    return false;
+  }
+}
+
+function openDeliveryHistoryModal(recordId, programTrack) {
+  const item = deliveryItems.find((d) => d.recordId === recordId && d.programTrack === programTrack);
+  if (!item) return;
+  const modal = el("delivery-history-modal");
+  if (!modal) return;
+
+  if (el("delivery-history-track")) el("delivery-history-track").textContent = `EDIT HISTORY · ${programTrack.toUpperCase()}`;
+  if (el("delivery-history-title")) el("delivery-history-title").textContent = item.schoolName || "Delivery edit history";
+  if (el("delivery-history-meta")) {
+    const count = Array.isArray(item.history) ? item.history.length : 0;
+    el("delivery-history-meta").textContent = `${count} ${count === 1 ? "recorded edit" : "recorded edits"}`;
+  }
+
+  const list = el("delivery-history-list");
+  if (list) {
+    list.replaceChildren?.();
+    const history = Array.isArray(item.history) ? item.history : [];
+    if (history.length === 0) {
+      list.append(dashboardNode("p", "No edits recorded yet.", "empty-state"));
+    } else {
+      for (const entry of history) {
+        const row = dashboardNode("article", "", "delivery-history-item");
+        const meta = dashboardNode("div", "", "delivery-history-meta");
+        meta.append(
+          dashboardNode("span", entry.editedBy || "Team member", "delivery-history-actor"),
+          dashboardNode("span", entry.date || "", "delivery-history-date")
+        );
+        const summary = dashboardNode("p", entry.summary || "Updated delivery record", "delivery-history-summary");
+        row.append(meta, summary);
+        list.append(row);
+      }
+    }
+  }
+
+  if (!modal.open) modal.showModal?.();
+}
+
+function closeDeliveryHistoryModal() {
+  el("delivery-history-modal")?.close?.();
+}
+
 if (typeof window !== "undefined") {
   window.FLAGSHIP_PROGRAMS = FLAGSHIP_PROGRAMS;
   window.SECONDARY_PROGRAMS = SECONDARY_PROGRAMS;
@@ -4909,6 +5990,19 @@ if (typeof window !== "undefined") {
   window.setProgramsScope = setProgramsScope;
   window.setProgramStatusFilter = setProgramStatusFilter;
   window.quickTagSchoolToProgram = quickTagSchoolToProgram;
+  window.setProgramsSubView = setProgramsSubView;
+  window.openDeliveryBoard = openDeliveryBoard;
+  window.loadDeliveryRecords = loadDeliveryRecords;
+  window.renderDeliveryBoard = renderDeliveryBoard;
+  window.setDeliveryFilter = setDeliveryFilter;
+  window.toggleDeliveryReadiness = toggleDeliveryReadiness;
+  window.openDeliveryEditModal = openDeliveryEditModal;
+  window.saveDeliveryEdits = saveDeliveryEdits;
+  window.closeDeliveryEditModal = closeDeliveryEditModal;
+  window.openDeliveryHistoryModal = openDeliveryHistoryModal;
+  window.closeDeliveryHistoryModal = closeDeliveryHistoryModal;
+  window.formatDeliveryTime12h = formatDeliveryTime12h;
+  window.formatDeliveryDate = formatDeliveryDate;
 }
 
 function renderDirectory() {
@@ -5750,9 +6844,84 @@ el("tab-programs")?.addEventListener("click", () => {
 });
 el("programs-toggle-mine")?.addEventListener("click", () => setProgramsScope("mine"));
 el("programs-toggle-all")?.addEventListener("click", () => setProgramsScope("all"));
+el("open-delivery-board-btn")?.addEventListener("click", () => {
+  openDeliveryBoard(isDeliveryTrack(selectedProgram) ? selectedProgram : "Cypher Program");
+});
+el("subview-pipeline-btn")?.addEventListener("click", () => setProgramsSubView("pipeline"));
+el("subview-delivery-btn")?.addEventListener("click", () => setProgramsSubView("delivery"));
+el("delivery-track-cypher")?.addEventListener("click", () => openDeliveryBoard("Cypher Program"));
+el("delivery-track-competitive")?.addEventListener("click", () => openDeliveryBoard("Competitive Arts"));
+el("delivery-refresh-btn")?.addEventListener("click", () => loadDeliveryRecords());
+el("delivery-show-all-btn")?.addEventListener("click", () => setDeliveryFilter("all"));
+el("delivery-notice-retry")?.addEventListener("click", () => {
+  const retry = deliveryRetryAction;
+  if (typeof retry === "function") retry();
+});
+el("delivery-edit-form")?.addEventListener("submit", saveDeliveryEdits);
+el("delivery-edit-close")?.addEventListener("click", closeDeliveryEditModal);
+el("delivery-edit-cancel")?.addEventListener("click", closeDeliveryEditModal);
+el("delivery-draft-discard")?.addEventListener("click", () => {
+  if (!deliveryEditing) return;
+  clearDeliveryDraft(deliveryEditing.recordId, deliveryEditing.programTrack);
+  populateDeliveryEditForm(deliveryEditing.item);
+  if (el("delivery-draft-banner")) el("delivery-draft-banner").hidden = true;
+});
+const handleDeliveryDraftInput = () => {
+  if (!deliveryEditing) return;
+  updateDeliveryTotalPreview();
+  saveDeliveryDraft(deliveryEditing.recordId, deliveryEditing.programTrack, readDeliveryEditFormValues());
+};
+for (const fieldId of [
+  "delivery-edit-teachers",
+  "delivery-edit-students",
+  "delivery-edit-workshopDate",
+  "delivery-edit-classTime",
+  "delivery-edit-schoolStartTime",
+  "delivery-edit-schoolEndTime",
+  "delivery-edit-studentMentors",
+  "delivery-edit-deliveryNotes",
+]) {
+  el(fieldId)?.addEventListener("input", handleDeliveryDraftInput);
+  el(fieldId)?.addEventListener("change", handleDeliveryDraftInput);
+}
+for (const field of DELIVERY_READINESS_FIELDS) {
+  el(`delivery-edit-${field.key}`)?.addEventListener("change", handleDeliveryDraftInput);
+}
+el("delivery-edit-modal")?.addEventListener("cancel", (event) => {
+  if (deliveryEditing?.busy) {
+    event.preventDefault();
+    return;
+  }
+  deliveryEditing = null;
+});
+el("delivery-history-close")?.addEventListener("click", closeDeliveryHistoryModal);
+el("delivery-history-done")?.addEventListener("click", closeDeliveryHistoryModal);
+
+// Light-dismiss fallback for browsers without native <dialog closedby="any"> (e.g. Safari)
+if (typeof HTMLDialogElement !== "undefined" && !("closedBy" in HTMLDialogElement.prototype)) {
+  const isOutsideDialog = (e, dialog) => {
+    const r = dialog.getBoundingClientRect();
+    return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+  };
+  for (const dialogId of ["delivery-edit-modal", "delivery-history-modal"]) {
+    const dlg = el(dialogId);
+    if (!dlg) continue;
+    let pressedOutside = false;
+    dlg.addEventListener("pointerdown", (e) => {
+      pressedOutside = isOutsideDialog(e, dlg);
+    });
+    dlg.addEventListener("pointerup", (e) => {
+      if (!pressedOutside || !isOutsideDialog(e, dlg)) return;
+      if (dialogId === "delivery-edit-modal") closeDeliveryEditModal();
+      else closeDeliveryHistoryModal();
+    });
+  }
+}
+
 el("programs-refresh")?.addEventListener("click", async () => {
   await refresh();
   if (!isSupervisor && credential) await loadDashboard();
+  if (programsSubView === "delivery" && credential) await loadDeliveryRecords();
 });
 el("more-programs-select")?.addEventListener("change", (e) => {
   const val = e?.target?.value ?? el("more-programs-select")?.value ?? "";

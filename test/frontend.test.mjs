@@ -5173,6 +5173,468 @@ test("Quick-tap suggestion pills, quick-date chips, and smart outcome chaining a
   assert.equal(getEl("log-outcome").value, "Confirmed / Locked in!");
 });
 
+test("Program Delivery Board: switching tracks, two-tier sections, hero stats, plain-English filters, and empty states", async (t) => {
+  const deliveryData = [
+    {
+      deliveryId: "del-1",
+      recordId: "11111111-1111-4111-8111-111111111111",
+      schoolName: "Holy Name Catholic School",
+      schoolBoard: "TCDSB",
+      region: "Toronto",
+      stage: "Booked",
+      assignedTo: "Alex",
+      programTrack: "Cypher Program",
+      teachersCount: 2,
+      studentsCount: 24,
+      danceTeamConfirmed: true,
+      introWorkshopDone: true,
+      musicSubmitted: true,
+      videoSubmitted: true,
+      finaleConfirmed: true,
+      thankYouSent: false,
+      workshopDate: "2099-12-09",
+      classTime: "09:00",
+      schoolStartTime: "08:30",
+      schoolEndTime: "15:00",
+      studentMentors: "Maya L., Jordan K.",
+      deliveryNotes: "Gym A reserved",
+      lastEditedBy: "Sam",
+      lastEditedAt: new Date().toISOString(),
+      lastRequestId: "req-holy-1",
+      history: [
+        {
+          activityId: "act-1",
+          date: "2026-11-18",
+          editedBy: "Sam",
+          summary: "Music Submitted: No → Yes; Class Time: (none) → 09:00",
+          requestId: "req-holy-1",
+        },
+      ],
+    },
+    {
+      deliveryId: "del-2",
+      recordId: "22222222-2222-4222-8222-222222222222",
+      schoolName: "Birchmount Park CI",
+      schoolBoard: "TDSB",
+      region: "Scarborough",
+      stage: "Completed",
+      assignedTo: "Alex",
+      programTrack: "Cypher Program",
+      teachersCount: 1,
+      studentsCount: 15,
+      danceTeamConfirmed: true,
+      introWorkshopDone: false,
+      musicSubmitted: false,
+      videoSubmitted: false,
+      finaleConfirmed: false,
+      thankYouSent: false,
+      workshopDate: "",
+      classTime: "",
+      schoolStartTime: "",
+      schoolEndTime: "",
+      studentMentors: "",
+      deliveryNotes: "",
+      lastEditedBy: "",
+      lastEditedAt: "",
+      lastRequestId: "",
+      history: [],
+    },
+    {
+      deliveryId: "del-3",
+      recordId: "33333333-3333-4333-8333-333333333333",
+      schoolName: "Cedarbrae Collegiate",
+      schoolBoard: "TDSB",
+      region: "Scarborough",
+      stage: "Engaged",
+      assignedTo: "Sam",
+      programTrack: "Cypher Program",
+      teachersCount: 3,
+      studentsCount: 40,
+      danceTeamConfirmed: false,
+      introWorkshopDone: false,
+      musicSubmitted: false,
+      videoSubmitted: false,
+      finaleConfirmed: false,
+      thankYouSent: false,
+      workshopDate: "2099-12-01",
+      classTime: "12:30",
+      schoolStartTime: "",
+      schoolEndTime: "",
+      studentMentors: "",
+      deliveryNotes: "Waiting on principal confirmation",
+      lastEditedBy: "",
+      lastEditedAt: "",
+      lastRequestId: "",
+      history: [],
+    },
+    {
+      deliveryId: "del-4",
+      recordId: "44444444-4444-4444-8444-444444444444",
+      schoolName: "St. Basil Secondary",
+      schoolBoard: "TCDSB",
+      region: "North York",
+      stage: "Booked",
+      assignedTo: "Alex",
+      programTrack: "Competitive Arts",
+      teachersCount: 2,
+      studentsCount: 30,
+      danceTeamConfirmed: true,
+      introWorkshopDone: true,
+      musicSubmitted: false,
+      videoSubmitted: true,
+      finaleConfirmed: true,
+      thankYouSent: false,
+      workshopDate: "2099-03-14",
+      classTime: "13:15",
+      schoolStartTime: "08:45",
+      schoolEndTime: "15:10",
+      studentMentors: "Taylor R.",
+      deliveryNotes: "",
+      lastEditedBy: "Alex",
+      lastEditedAt: new Date().toISOString(),
+      lastRequestId: "req-basil-1",
+      history: [],
+    },
+  ];
+
+  const deliveryFetches = [];
+  const h = setupEnv({
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: [
+            { recordId: deliveryData[0].recordId, schoolName: deliveryData[0].schoolName, outreachGoal: "Cypher Program", stage: "Booked", lastRequestId: "v1" },
+            { recordId: deliveryData[3].recordId, schoolName: deliveryData[3].schoolName, outreachGoal: "Competitive Arts", stage: "Booked", lastRequestId: "v2" },
+          ],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/delivery")) {
+        assert.match(init.headers?.Authorization || "", /^Bearer /);
+        deliveryFetches.push(url);
+        return Response.json({ ok: true, deliveries: deliveryData });
+      }
+      return Response.json({ ok: true, schools: [] });
+    },
+  });
+  t.after(h.cleanup);
+
+  await h.signIn("alex@example.test");
+  h.getEl("tab-programs").click();
+  h.context.selectProgram("Cypher Program");
+
+  // Sub-view bar appears for Cypher Program (defaults to Outreach Pipeline)
+  assert.equal(h.getEl("programs-subview-bar").hidden, false);
+  assert.equal(h.getEl("delivery-board").hidden, true);
+  assert.equal(h.getEl("subview-pipeline-btn").getAttribute("aria-pressed"), "true");
+  assert.equal(h.getEl("subview-delivery-btn").getAttribute("aria-pressed"), "false");
+
+  // Switch to Delivery Board -> fetches GET /api/delivery with Bearer token
+  await h.context.setProgramsSubView("delivery");
+  assert.equal(deliveryFetches.length, 1);
+  assert.equal(h.getEl("delivery-board").hidden, false);
+  assert.equal(h.getEl("subview-delivery-btn").getAttribute("aria-pressed"), "true");
+  assert.equal(h.getEl("programs-kpi-strip").hidden, true);
+
+  // Two-tier priority sections: Confirmed Schools (Booked + Completed = 2) at top, On the Fence (Engaged = 1) at bottom
+  assert.equal(h.getEl("delivery-section-confirmed").hidden, false);
+  assert.equal(h.getEl("delivery-section-fence").hidden, false);
+  assert.equal(h.getEl("delivery-confirmed-list").children.length, 2);
+  assert.equal(h.getEl("delivery-fence-list").children.length, 1);
+  assert.equal(h.getEl("delivery-confirmed-list").children[0].getAttribute("data-record-id"), deliveryData[0].recordId);
+  assert.equal(h.getEl("delivery-confirmed-list").children[1].getAttribute("data-record-id"), deliveryData[1].recordId);
+  assert.equal(h.getEl("delivery-fence-list").children[0].getAttribute("data-record-id"), deliveryData[2].recordId);
+
+  // Hero Strip checks (only Confirmed schools counted: 24+15=39 students, 2+1=3 teachers -> 42 total; 6/12 = 50% ready; 1/2 finale; next visit Dec 9 · Holy Name · 9:00 AM)
+  const heroCards = h.getEl("delivery-hero-strip").children;
+  assert.equal(heroCards.length, 4);
+  assert.equal(heroCards[0].children[1].textContent, "42 total");
+  assert.equal(heroCards[0].children[2].textContent, "39 students / 3 teachers");
+  assert.equal(heroCards[1].children[1].textContent, "50%");
+  assert.equal(heroCards[2].children[1].textContent, "1 / 2");
+  assert.equal(heroCards[3].children[1].textContent, "Dec 9 · Holy Name Catholic School · 9:00 AM");
+
+  // Verify 12h time formatting helper & card schedule badges
+  assert.equal(h.context.formatDeliveryTime12h("12:30"), "12:30 PM");
+  assert.equal(h.context.formatDeliveryTime12h("08:30"), "8:30 AM");
+  assert.equal(h.context.formatDeliveryTime12h("15:00"), "3:00 PM");
+
+  // Plain-English Filters: Need Music -> Birchmount (Confirmed) + Cedarbrae (On the Fence)
+  const clickFilter = (key) => {
+    const chip = h.getEl("delivery-filter-bar").children.find((c) => c.getAttribute("data-delivery-filter") === key);
+    assert.ok(chip, `Filter chip ${key} should exist`);
+    chip.click();
+  };
+
+  clickFilter("need-music");
+  assert.equal(h.getEl("delivery-confirmed-list").children.length, 1);
+  assert.equal(h.getEl("delivery-confirmed-list").children[0].getAttribute("data-record-id"), deliveryData[1].recordId);
+  assert.equal(h.getEl("delivery-fence-list").children.length, 1);
+
+  // No Finale RSVP -> Birchmount + Cedarbrae
+  clickFilter("no-finale");
+  assert.equal(h.getEl("delivery-confirmed-list").children.length, 1);
+  assert.equal(h.getEl("delivery-fence-list").children.length, 1);
+
+  // Need Mentors -> Birchmount + Cedarbrae
+  clickFilter("need-mentors");
+  assert.equal(h.getEl("delivery-confirmed-list").children.length, 1);
+  assert.equal(h.getEl("delivery-fence-list").children.length, 1);
+
+  // All Set ✓ -> Only Holy Name (all 5 core flags true, thankYouSent not required)
+  clickFilter("all-set");
+  assert.equal(h.getEl("delivery-confirmed-list").children.length, 1);
+  assert.equal(h.getEl("delivery-confirmed-list").children[0].getAttribute("data-record-id"), deliveryData[0].recordId);
+  assert.equal(h.getEl("delivery-section-fence").hidden, true);
+
+  // Switch to Competitive Arts via 1-tap track switcher
+  await h.context.openDeliveryBoard("Competitive Arts");
+  assert.equal(h.getEl("delivery-track-competitive").getAttribute("aria-pressed"), "true");
+  assert.equal(h.getEl("delivery-confirmed-list").children.length, 1);
+  assert.equal(h.getEl("delivery-confirmed-list").children[0].getAttribute("data-record-id"), deliveryData[3].recordId);
+  assert.equal(h.getEl("delivery-section-fence").hidden, true);
+
+  // Filter on Competitive Arts with 0 matches -> shows empty-filter state, and [Show All] restores
+  clickFilter("all-set");
+  assert.equal(h.getEl("delivery-empty-filter").hidden, false);
+  assert.equal(h.getEl("delivery-section-confirmed").hidden, true);
+  h.getEl("delivery-show-all-btn").click();
+  assert.equal(h.getEl("delivery-empty-filter").hidden, true);
+  assert.equal(h.getEl("delivery-section-confirmed").hidden, false);
+});
+
+test("Program Delivery Board: 1-tap readiness toggle, concurrency lock, 409 conflict refresh, History modal, and Edit Details with localStorage drafts", async (t) => {
+  const localStorageMap = new Map();
+  let serverItem = {
+    deliveryId: "del-10",
+    recordId: "55555555-5555-4555-8555-555555555555",
+    schoolName: "St. Michael's Choir School",
+    schoolBoard: "TCDSB",
+    region: "Toronto",
+    stage: "Booked",
+    assignedTo: "Sam",
+    programTrack: "Cypher Program",
+    teachersCount: 1,
+    studentsCount: 18,
+    danceTeamConfirmed: true,
+    introWorkshopDone: false,
+    musicSubmitted: false,
+    videoSubmitted: false,
+    finaleConfirmed: false,
+    thankYouSent: false,
+    workshopDate: "2099-01-15",
+    classTime: "12:30",
+    schoolStartTime: "08:30",
+    schoolEndTime: "15:00",
+    studentMentors: "Maya L.",
+    deliveryNotes: "Initial notes",
+    lastEditedBy: "Sam",
+    lastEditedAt: "2026-11-18T14:00:00.000Z",
+    lastRequestId: "req-initial-1",
+    history: [
+      {
+        activityId: "act-init",
+        date: "2026-11-18",
+        editedBy: "Sam",
+        summary: "Dance Team Confirmed: No → Yes",
+        requestId: "req-initial-1",
+      },
+    ],
+  };
+
+  const posts = [];
+  let postMode = "ok";
+  let holdPostResolve = null;
+
+  const h = setupEnv({
+    localStorageMap,
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: [{ recordId: serverItem.recordId, schoolName: serverItem.schoolName, outreachGoal: "Cypher Program", stage: "Booked", lastRequestId: "v1" }],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/delivery/update")) {
+        const body = JSON.parse(init.body);
+        posts.push(body);
+        if (postMode === "hold") {
+          return new Promise((resolve) => {
+            holdPostResolve = () => {
+              serverItem = {
+                ...serverItem,
+                musicSubmitted: Boolean(body.musicSubmitted),
+                lastEditedBy: "Alex",
+                lastEditedAt: new Date().toISOString(),
+                lastRequestId: body.requestId,
+                history: [
+                  {
+                    activityId: body.requestId,
+                    date: "2026-11-19",
+                    editedBy: "Alex",
+                    summary: "Music Submitted: No → Yes",
+                    requestId: body.requestId,
+                  },
+                  ...serverItem.history,
+                ],
+              };
+              resolve(Response.json({
+                ok: true,
+                code: "SUCCESS",
+                requestId: body.requestId,
+                delivery: serverItem,
+                diff: "Music Submitted: No → Yes",
+              }));
+            };
+          });
+        }
+        if (postMode === "conflict") {
+          serverItem = {
+            ...serverItem,
+            videoSubmitted: true,
+            lastEditedBy: "Morgan",
+            lastEditedAt: new Date().toISOString(),
+            lastRequestId: "req-morgan-99",
+          };
+          return Response.json({ ok: false, code: "CONFLICT", currentDelivery: serverItem }, { status: 409 });
+        }
+        if (postMode === "network") {
+          throw new TypeError("Offline");
+        }
+        // Normal 200 OK for Edit Details submit
+        serverItem = {
+          ...serverItem,
+          teachersCount: body.teachersCount ?? serverItem.teachersCount,
+          studentsCount: body.studentsCount ?? serverItem.studentsCount,
+          danceTeamConfirmed: body.danceTeamConfirmed ?? serverItem.danceTeamConfirmed,
+          introWorkshopDone: body.introWorkshopDone ?? serverItem.introWorkshopDone,
+          musicSubmitted: body.musicSubmitted ?? serverItem.musicSubmitted,
+          videoSubmitted: body.videoSubmitted ?? serverItem.videoSubmitted,
+          finaleConfirmed: body.finaleConfirmed ?? serverItem.finaleConfirmed,
+          thankYouSent: body.thankYouSent ?? serverItem.thankYouSent,
+          workshopDate: body.workshopDate ?? serverItem.workshopDate,
+          classTime: body.classTime ?? serverItem.classTime,
+          schoolStartTime: body.schoolStartTime ?? serverItem.schoolStartTime,
+          schoolEndTime: body.schoolEndTime ?? serverItem.schoolEndTime,
+          studentMentors: body.studentMentors ?? serverItem.studentMentors,
+          deliveryNotes: body.deliveryNotes ?? serverItem.deliveryNotes,
+          lastEditedBy: "Alex",
+          lastEditedAt: new Date().toISOString(),
+          lastRequestId: body.requestId,
+        };
+        return Response.json({
+          ok: true,
+          code: "SUCCESS",
+          requestId: body.requestId,
+          delivery: serverItem,
+          diff: "Students Count: 18 → 30; Finale Confirmed: No → Yes",
+        });
+      }
+      if (url.includes("/api/delivery")) {
+        return Response.json({ ok: true, deliveries: [serverItem] });
+      }
+      return Response.json({ ok: true, schools: [] });
+    },
+  });
+  t.after(h.cleanup);
+
+  await h.signIn("alex@example.test");
+  await h.context.openDeliveryBoard("Cypher Program");
+
+  // 1. Tap Music pill -> locks card while POST is in flight, ignores rapid double-tap, sends expectedLastRequestId
+  postMode = "hold";
+  const getCard = () => h.getEl("delivery-confirmed-list").children[0];
+  const findPill = (field) => getCard().children[2].children.find((p) => p.getAttribute("data-field") === field);
+
+  const togglePromise = h.context.toggleDeliveryReadiness(serverItem.recordId, "Cypher Program", "musicSubmitted");
+  // Rapid second tap while in-flight must be ignored and pills disabled
+  assert.equal(findPill("musicSubmitted").disabled, true);
+  await h.context.toggleDeliveryReadiness(serverItem.recordId, "Cypher Program", "musicSubmitted");
+  assert.equal(posts.length, 1, "In-flight lock must prevent concurrent double-tap POST");
+  assert.equal(posts[0].expectedLastRequestId, "req-initial-1");
+  assert.equal(posts[0].musicSubmitted, true);
+
+  holdPostResolve();
+  await togglePromise;
+
+  // Verify updated pill state and Last edited by stamp
+  assert.equal(findPill("musicSubmitted").getAttribute("aria-pressed"), "true");
+  assert.equal(findPill("musicSubmitted").disabled, false);
+  const footer = getCard().children[getCard().children.length - 1];
+  assert.match(footer.children[0].textContent, /Last edited by Alex/);
+  const historyBtn = footer.children[1].children[1];
+  assert.equal(historyBtn.textContent, "History (2)");
+
+  // 2. Open History modal -> displays chronological audit diffs
+  historyBtn.click();
+  assert.equal(h.getEl("delivery-history-modal").open, true);
+  assert.equal(h.getEl("delivery-history-list").children.length, 2);
+  assert.equal(h.getEl("delivery-history-list").children[0].children[0].children[0].textContent, "Alex");
+  assert.equal(h.getEl("delivery-history-list").children[0].children[1].textContent, "Music Submitted: No → Yes");
+  assert.equal(h.getEl("delivery-history-list").children[1].children[0].children[0].textContent, "Sam");
+  assert.equal(h.getEl("delivery-history-list").children[1].children[1].textContent, "Dance Team Confirmed: No → Yes");
+  h.getEl("delivery-history-close").click();
+  assert.equal(h.getEl("delivery-history-modal").open, false);
+
+  // 3. 409 CONFLICT refreshes latest delivery state and shows conflict notice
+  postMode = "conflict";
+  await h.context.toggleDeliveryReadiness(serverItem.recordId, "Cypher Program", "introWorkshopDone");
+  assert.equal(h.getEl("delivery-notice").hidden, false);
+  assert.equal(h.getEl("delivery-notice-text").textContent, "Updated by another team member — refreshed latest status.");
+  assert.equal(findPill("videoSubmitted").getAttribute("aria-pressed"), "true", "Refreshed state from Morgan should appear");
+
+  // 4. Network error reverts toggle and shows Retry button
+  postMode = "network";
+  await h.context.toggleDeliveryReadiness(serverItem.recordId, "Cypher Program", "finaleConfirmed");
+  assert.equal(findPill("finaleConfirmed").getAttribute("aria-pressed"), "false");
+  assert.equal(h.getEl("delivery-notice").hidden, false);
+  assert.equal(h.getEl("delivery-notice-retry").hidden, false);
+
+  // 5. Edit Details modal: live Total Participants preview, localStorage draft persistence, submit & clear draft on 200 OK
+  postMode = "ok";
+  const editBtn = getCard().children[getCard().children.length - 1].children[1].children[0];
+  editBtn.click();
+  assert.equal(h.getEl("delivery-edit-modal").open, true);
+  assert.equal(h.getEl("delivery-edit-total-preview").textContent, "Total Participants: 19 (18 students + 1 teacher)");
+
+  // Edit fields and verify live preview + localStorage draft key
+  const draftKey = `h4_crm_delivery_draft_${serverItem.recordId}_Cypher Program`;
+  h.getEl("delivery-edit-students").value = "30";
+  h.getEl("delivery-edit-students").dispatchEvent(new h.context.Event("input", { bubbles: true }));
+  assert.equal(h.getEl("delivery-edit-total-preview").textContent, "Total Participants: 31 (30 students + 1 teacher)");
+  assert.equal(localStorageMap.has(draftKey), true, "Unsaved draft must be saved to localStorage");
+
+  h.getEl("delivery-edit-finaleConfirmed").checked = true;
+  h.getEl("delivery-edit-finaleConfirmed").dispatchEvent(new h.context.Event("change", { bubbles: true }));
+  h.getEl("delivery-edit-studentMentors").value = "Maya L., Devon P.";
+  h.getEl("delivery-edit-studentMentors").dispatchEvent(new h.context.Event("input", { bubbles: true }));
+
+  // Close & reopen -> draft is restored with banner
+  h.context.closeDeliveryEditModal();
+  h.context.openDeliveryEditModal(serverItem.recordId, "Cypher Program");
+  assert.equal(h.getEl("delivery-draft-banner").hidden, false);
+  assert.equal(h.getEl("delivery-edit-students").value, "30");
+  assert.equal(h.getEl("delivery-edit-finaleConfirmed").checked, true);
+
+  // Submit updated logistics -> clears draft, updates board, closes modal
+  const saved = await h.context.saveDeliveryEdits({ preventDefault() {} });
+  assert.equal(saved, true);
+  assert.equal(h.getEl("delivery-edit-modal").open, false);
+  assert.equal(localStorageMap.has(draftKey), false, "Draft must be cleared after 200 OK");
+  const lastPost = posts[posts.length - 1];
+  assert.equal(lastPost.studentsCount, 30);
+  assert.equal(lastPost.teachersCount, 1);
+  assert.equal(lastPost.finaleConfirmed, true);
+  assert.equal(lastPost.studentMentors, "Maya L., Devon P.");
+  assert.equal(lastPost.expectedLastRequestId, "req-morgan-99");
+  assert.equal(findPill("finaleConfirmed").getAttribute("aria-pressed"), "true");
+});
+
+
 
 
 

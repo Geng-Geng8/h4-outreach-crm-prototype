@@ -130,6 +130,7 @@
               <button id="programs-toggle-mine" type="button" class="supervisor-toggle-btn active" aria-pressed="true">My Schools (0)</button>
               <button id="programs-toggle-all" type="button" class="supervisor-toggle-btn" aria-pressed="false">All Team Schools (0)</button>
             </div>
+            <button id="open-delivery-board-btn" class="button secondary compact-button" type="button">Delivery Board</button>
             <button id="programs-refresh" class="button secondary" type="button">Refresh</button>
           </div>
         </div>
@@ -151,6 +152,10 @@
         <p id="programs-status" class="workspace-status" role="status" aria-live="polite"></p>
         <div id="programs-overview-matrix" class="programs-overview-matrix"></div>
         <div id="programs-drilldown" class="programs-drilldown" hidden>
+          <div id="programs-subview-bar" class="programs-subview-bar" role="group" aria-label="Program sub-view" hidden>
+            <button type="button" id="subview-pipeline-btn" class="subview-toggle-btn active" data-subview="pipeline" aria-pressed="true">Outreach Pipeline</button>
+            <button type="button" id="subview-delivery-btn" class="subview-toggle-btn" data-subview="delivery" aria-pressed="false">Delivery Board</button>
+          </div>
           <div id="programs-kpi-strip" class="dashboard-metrics programs-kpi-strip" role="group" aria-label="Filter schools by commitment temperature"></div>
           <div id="programs-quick-tag-bar" class="programs-quick-tag-bar">
             <label for="quick-tag-school-select" class="quick-tag-label">Tag a school into this program:</label>
@@ -209,6 +214,56 @@
             </div>
             <div id="programs-completed-list" class="school-list"></div>
             <p id="programs-completed-empty" class="empty-state" hidden>No completed schools recorded for this program yet.</p>
+          </div>
+
+          <div id="delivery-board" class="delivery-board" hidden>
+            <div class="delivery-board-header">
+              <div class="delivery-track-switcher" role="group" aria-label="Program delivery track">
+                <button type="button" id="delivery-track-cypher" class="delivery-track-btn active" data-delivery-track="Cypher Program" aria-pressed="true">Cypher Program (Nov–Mar)</button>
+                <button type="button" id="delivery-track-competitive" class="delivery-track-btn" data-delivery-track="Competitive Arts" aria-pressed="false">Competitive Arts (Sem 2 / Mar)</button>
+              </div>
+              <button type="button" id="delivery-refresh-btn" class="button secondary compact-button">Refresh board</button>
+            </div>
+
+            <div id="delivery-notice" class="delivery-notice" role="status" aria-live="polite" hidden>
+              <span id="delivery-notice-text"></span>
+              <button type="button" id="delivery-notice-retry" class="button secondary compact-button" hidden>Retry</button>
+            </div>
+
+            <div id="delivery-hero-strip" class="delivery-hero-strip" aria-label="Delivery summary metrics"></div>
+
+            <div id="delivery-filter-bar" class="delivery-filter-bar" role="group" aria-label="Filter schools by readiness need"></div>
+
+            <div id="delivery-empty-track" class="empty-state delivery-empty-state" hidden>
+              <h3>No schools in this delivery track yet</h3>
+              <p id="delivery-empty-track-text">Once schools tagged with this program reach Confirmed or On the Fence, they will appear here for logistics tracking.</p>
+            </div>
+
+            <div id="delivery-empty-filter" class="empty-state delivery-empty-state" hidden>
+              <p>No schools match this filter — <button type="button" id="delivery-show-all-btn" class="button secondary compact-button">Show All</button></p>
+            </div>
+
+            <section id="delivery-section-confirmed" class="delivery-tier-section delivery-tier-confirmed" aria-labelledby="delivery-confirmed-heading" hidden>
+              <div class="delivery-tier-header">
+                <div>
+                  <h3 id="delivery-confirmed-heading">Confirmed Schools</h3>
+                  <p class="delivery-tier-sub">Booked &amp; Completed schools locked in for this track.</p>
+                </div>
+                <span id="delivery-confirmed-summary" class="delivery-tier-badge">0 schools · 0 participants</span>
+              </div>
+              <div id="delivery-confirmed-list" class="delivery-card-grid"></div>
+            </section>
+
+            <section id="delivery-section-fence" class="delivery-tier-section delivery-tier-fence" aria-labelledby="delivery-fence-heading" hidden>
+              <div class="delivery-tier-header">
+                <div>
+                  <h3 id="delivery-fence-heading">On the Fence</h3>
+                  <p class="delivery-tier-sub">Tentative schools — not counted in Confirmed totals yet</p>
+                </div>
+                <span id="delivery-fence-summary" class="delivery-tier-badge">0 schools</span>
+              </div>
+              <div id="delivery-fence-list" class="delivery-card-grid"></div>
+            </section>
           </div>
         </div>
       </section>
@@ -803,6 +858,103 @@
           <p id="bulk-final-summary" class="editor-feedback" role="status" aria-live="polite"></p>
           <button type="button" id="bulk-retry-failed" class="button secondary" hidden>Retry failed saves</button>
           <button type="button" id="bulk-finish-done" class="button" hidden>Done</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="delivery-edit-modal" class="delivery-dialog" closedby="any" aria-labelledby="delivery-edit-title">
+      <form id="delivery-edit-form" novalidate>
+        <div class="editor-header">
+          <div>
+            <p class="eyebrow" id="delivery-edit-track">PROGRAM DELIVERY</p>
+            <h2 id="delivery-edit-title">Edit delivery details</h2>
+            <p id="delivery-edit-meta" class="editor-meta"></p>
+          </div>
+          <button type="button" id="delivery-edit-close" class="text-button" aria-label="Close delivery editor">Close</button>
+        </div>
+
+        <div id="delivery-draft-banner" class="draft-restore-banner" role="status" aria-live="polite" hidden>
+          <span>Restored your unsaved draft from this device.</span>
+          <button type="button" id="delivery-draft-discard" class="button secondary compact-button">Discard draft</button>
+        </div>
+
+        <div class="editor-grid delivery-edit-grid">
+          <section class="flow-step editor-wide">
+            <h3 class="step-title">Participants</h3>
+            <div class="flow-step-inputs">
+              <label>Teachers Count
+                <input id="delivery-edit-teachers" type="number" min="0" step="1" inputmode="numeric" value="0">
+              </label>
+              <label>Students Count
+                <input id="delivery-edit-students" type="number" min="0" step="1" inputmode="numeric" value="0">
+              </label>
+            </div>
+            <p id="delivery-edit-total-preview" class="delivery-total-preview" aria-live="polite">Total Participants: 0 (0 students + 0 teachers)</p>
+          </section>
+
+          <section class="flow-step editor-wide">
+            <h3 class="step-title">Readiness Checklist</h3>
+            <div class="delivery-checkbox-grid">
+              <label class="checkbox-label"><input id="delivery-edit-danceTeamConfirmed" type="checkbox"> Dance Team Confirmed</label>
+              <label class="checkbox-label"><input id="delivery-edit-introWorkshopDone" type="checkbox"> Intro Workshop Done</label>
+              <label class="checkbox-label"><input id="delivery-edit-musicSubmitted" type="checkbox"> Music Submitted</label>
+              <label class="checkbox-label"><input id="delivery-edit-videoSubmitted" type="checkbox"> Video Submitted</label>
+              <label class="checkbox-label"><input id="delivery-edit-finaleConfirmed" type="checkbox"> Finale Confirmed</label>
+              <label class="checkbox-label"><input id="delivery-edit-thankYouSent" type="checkbox"> Thank You Sent</label>
+            </div>
+          </section>
+
+          <section class="flow-step editor-wide">
+            <h3 class="step-title">Schedule &amp; Bell Times</h3>
+            <div class="flow-step-inputs">
+              <label>Workshop Date
+                <input id="delivery-edit-workshopDate" type="date">
+              </label>
+              <label>Class Time
+                <input id="delivery-edit-classTime" type="time">
+              </label>
+              <label>School Start Time
+                <input id="delivery-edit-schoolStartTime" type="time">
+              </label>
+              <label>School End Time
+                <input id="delivery-edit-schoolEndTime" type="time">
+              </label>
+            </div>
+          </section>
+
+          <section class="flow-step editor-wide">
+            <h3 class="step-title">Mentors &amp; Delivery Notes</h3>
+            <label class="editor-wide">Student Mentors
+              <textarea id="delivery-edit-studentMentors" rows="3" maxlength="1000" placeholder="e.g. Group A: Maya L., Jordan K."></textarea>
+              <span class="field-help">Names &amp; groups only — do not enter student phone numbers or personal emails</span>
+            </label>
+            <label class="editor-wide">Delivery Notes
+              <textarea id="delivery-edit-deliveryNotes" rows="3" maxlength="4000" placeholder="Gym booking, AV setup, parking, arrival notes…"></textarea>
+            </label>
+          </section>
+        </div>
+
+        <div class="editor-actions">
+          <p id="delivery-edit-feedback" class="editor-feedback" role="status" aria-live="polite"></p>
+          <button type="button" id="delivery-edit-cancel" class="button secondary">Cancel</button>
+          <button type="submit" id="delivery-edit-save" class="button">Save delivery details</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="delivery-history-modal" class="delivery-dialog delivery-history-dialog" closedby="any" aria-labelledby="delivery-history-title">
+      <div class="delivery-history-shell">
+        <div class="editor-header">
+          <div>
+            <p class="eyebrow" id="delivery-history-track">EDIT HISTORY</p>
+            <h2 id="delivery-history-title">Delivery edit history</h2>
+            <p id="delivery-history-meta" class="editor-meta"></p>
+          </div>
+          <button type="button" id="delivery-history-close" class="text-button" aria-label="Close edit history">Close</button>
+        </div>
+        <div id="delivery-history-list" class="delivery-history-list"></div>
+        <div class="editor-actions">
+          <button type="button" id="delivery-history-done" class="button secondary">Close</button>
         </div>
       </div>
     </dialog>
