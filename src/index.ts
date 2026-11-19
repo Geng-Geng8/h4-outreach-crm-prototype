@@ -70,6 +70,25 @@ function time24(input: unknown): string {
   }
   return value;
 }
+const MAX_DELIVERY_VISITS = 5;
+function dateList(input: unknown): string {
+  const raw = text(input, 100).trim();
+  if (raw === "") return "";
+  const parts = raw.split(",").map((part) => part.trim());
+  if (parts.length > MAX_DELIVERY_VISITS || parts.some((part) => part === "")) {
+    throw new ApiError(422, "INVALID_DATE");
+  }
+  return parts.map((part) => date(part)).join(", ");
+}
+function time24List(input: unknown): string {
+  const raw = text(input, 50).trim();
+  if (raw === "") return "";
+  const parts = raw.split(",").map((part) => part.trim());
+  if (parts.length > MAX_DELIVERY_VISITS || parts.some((part) => part === "")) {
+    throw new ApiError(422, "INVALID_TIME");
+  }
+  return parts.map((part) => time24(part)).join(", ");
+}
 function parseGoalTags(goal: unknown): string[] {
   return String(goal ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
@@ -652,8 +671,8 @@ export class SheetCoordinator extends DurableObject<Env> {
       const nextVideoSubmitted = parseBool(input.videoSubmitted, prev.videoSubmitted);
       const nextFinaleConfirmed = parseBool(input.finaleConfirmed, prev.finaleConfirmed);
       const nextThankYouSent = parseBool(input.thankYouSent, prev.thankYouSent);
-      const nextWorkshopDate = input.workshopDate !== undefined ? date(input.workshopDate) : prev.workshopDate;
-      const nextClassTime = input.classTime !== undefined ? time24(input.classTime) : prev.classTime;
+      const nextWorkshopDate = input.workshopDate !== undefined ? dateList(input.workshopDate) : prev.workshopDate;
+      const nextClassTime = input.classTime !== undefined ? time24List(input.classTime) : prev.classTime;
       const nextSchoolStartTime = input.schoolStartTime !== undefined ? time24(input.schoolStartTime) : prev.schoolStartTime;
       const nextSchoolEndTime = input.schoolEndTime !== undefined ? time24(input.schoolEndTime) : prev.schoolEndTime;
       const nextStudentMentors = input.studentMentors !== undefined ? text(input.studentMentors, 1000) : prev.studentMentors;

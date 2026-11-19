@@ -2281,6 +2281,11 @@ dialog::backdrop {
   color: #92400e;
   font-weight: 700;
 }
+.delivery-visit-badge {
+  background: #edf5ea;
+  border-color: #c8dec2;
+  color: #153528;
+}
 
 /* 6 Tap-to-Toggle Readiness Pills */
 .delivery-readiness-grid {
@@ -2428,6 +2433,60 @@ dialog::backdrop {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
   gap: 10px 14px;
+}
+.delivery-visits-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.delivery-visit-actions {
+  display: flex;
+  align-items: center;
+}
+.delivery-add-visit-btn {
+  min-height: 36px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.delivery-visit-2-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: #f3f7f1;
+  border: 1px solid #d5e2d0;
+}
+.delivery-visit-2-row[hidden] {
+  display: none;
+}
+.delivery-visit-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.delivery-visit-row-label {
+  font-size: 11.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #153528;
+}
+.delivery-remove-visit-btn {
+  font-size: 12px;
+  font-weight: 700;
+  color: #991b1b;
+  padding: 2px 6px;
+}
+.delivery-remove-visit-btn:hover {
+  color: #7f1d1d;
+  text-decoration: underline;
+}
+.delivery-bell-inputs {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #d7e1d3;
 }
 .delivery-history-list {
   display: flex;

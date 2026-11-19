@@ -906,13 +906,34 @@
 
           <section class="flow-step editor-wide">
             <h3 class="step-title">Schedule &amp; Bell Times</h3>
-            <div class="flow-step-inputs">
-              <label>Workshop Date
-                <input id="delivery-edit-workshopDate" type="date">
-              </label>
-              <label>Class Time
-                <input id="delivery-edit-classTime" type="time">
-              </label>
+            <div class="delivery-visits-editor">
+              <div class="flow-step-inputs">
+                <label>Visit 1 Date
+                  <input id="delivery-edit-workshopDate" type="date">
+                </label>
+                <label>Visit 1 Class Time
+                  <input id="delivery-edit-classTime" type="time">
+                </label>
+              </div>
+              <div class="delivery-visit-actions">
+                <button type="button" id="delivery-add-visit-btn" class="button secondary compact-button delivery-add-visit-btn">+ Add 2nd Visit Date</button>
+              </div>
+              <div id="delivery-visit-2-row" class="delivery-visit-2-row" hidden>
+                <div class="delivery-visit-row-header">
+                  <span class="delivery-visit-row-label">Visit 2</span>
+                  <button type="button" id="delivery-remove-visit-2-btn" class="text-button delivery-remove-visit-btn">Remove</button>
+                </div>
+                <div class="flow-step-inputs">
+                  <label>Visit 2 Date
+                    <input id="delivery-edit-workshopDate-2" type="date">
+                  </label>
+                  <label>Visit 2 Class Time
+                    <input id="delivery-edit-classTime-2" type="time">
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div class="flow-step-inputs delivery-bell-inputs">
               <label>School Start Time
                 <input id="delivery-edit-schoolStartTime" type="time">
               </label>

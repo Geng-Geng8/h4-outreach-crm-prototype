@@ -5103,6 +5103,28 @@ function formatDeliveryTime12h(timeStr) {
   return `${h12}:${m} ${period}`;
 }
 
+function parseDeliveryList(raw) {
+  return String(raw || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function parseDeliveryVisits(workshopDate, classTime) {
+  const dates = parseDeliveryList(workshopDate);
+  const times = parseDeliveryList(classTime);
+  const count = Math.max(dates.length, times.length);
+  const visits = [];
+  for (let i = 0; i < count; i += 1) {
+    visits.push({
+      index: i + 1,
+      date: dates[i] || "",
+      time: times[i] || "",
+    });
+  }
+  return visits;
+}
+
 function formatDeliveryDate(dateStr, includeYear = true) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || "").trim());
   if (!match) return String(dateStr || "").trim();
@@ -5312,23 +5334,42 @@ function createDeliveryCard(item) {
 
   // Schedule Strip
   const scheduleStrip = dashboardNode("div", "", "delivery-schedule-strip");
-  if (item.workshopDate) {
-    scheduleStrip.append(
-      dashboardNode("span", `📅 ${formatDeliveryDate(item.workshopDate, true)}`, "delivery-schedule-badge")
-    );
+  const visits = parseDeliveryVisits(item.workshopDate, item.classTime);
+  if (visits.length > 1) {
+    for (const visit of visits) {
+      const dateText = visit.date ? formatDeliveryDate(visit.date, true) : "Date needed";
+      const timeText = visit.time ? formatDeliveryTime12h(visit.time) : "";
+      const visitLabel = timeText
+        ? `📅 Visit ${visit.index}: ${dateText} · ${timeText}`
+        : `📅 Visit ${visit.index}: ${dateText}`;
+      scheduleStrip.append(
+        dashboardNode(
+          "span",
+          visitLabel,
+          `delivery-schedule-badge delivery-visit-badge${!visit.date ? " is-missing" : ""}`
+        )
+      );
+    }
   } else {
-    scheduleStrip.append(
-      dashboardNode("span", "📅 Date needed", "delivery-schedule-badge is-missing")
-    );
-  }
-  if (item.classTime) {
-    scheduleStrip.append(
-      dashboardNode("span", `🕘 Class ${formatDeliveryTime12h(item.classTime)}`, "delivery-schedule-badge")
-    );
-  } else {
-    scheduleStrip.append(
-      dashboardNode("span", "🕘 Time needed", "delivery-schedule-badge is-missing")
-    );
+    const singleVisit = visits[0] || { date: "", time: "" };
+    if (singleVisit.date) {
+      scheduleStrip.append(
+        dashboardNode("span", `📅 ${formatDeliveryDate(singleVisit.date, true)}`, "delivery-schedule-badge")
+      );
+    } else {
+      scheduleStrip.append(
+        dashboardNode("span", "📅 Date needed", "delivery-schedule-badge is-missing")
+      );
+    }
+    if (singleVisit.time) {
+      scheduleStrip.append(
+        dashboardNode("span", `🕘 Class ${formatDeliveryTime12h(singleVisit.time)}`, "delivery-schedule-badge")
+      );
+    } else {
+      scheduleStrip.append(
+        dashboardNode("span", "🕘 Time needed", "delivery-schedule-badge is-missing")
+      );
+    }
   }
   if (item.schoolStartTime || item.schoolEndTime) {
     const startFmt = item.schoolStartTime ? formatDeliveryTime12h(item.schoolStartTime) : "?";
@@ -5459,15 +5500,27 @@ function renderDeliveryBoard() {
 
     const finaleCount = confirmedAll.filter((i) => Boolean(i.finaleConfirmed)).length;
 
-    const upcoming = confirmedAll
-      .filter((i) => i.workshopDate && i.workshopDate >= today)
-      .sort((a, b) => {
-        const cmpDate = a.workshopDate.localeCompare(b.workshopDate);
-        if (cmpDate !== 0) return cmpDate;
-        return (a.classTime || "99:99").localeCompare(b.classTime || "99:99");
-      })[0];
+    const upcomingVisits = [];
+    for (const item of confirmedAll) {
+      const itemVisits = parseDeliveryVisits(item.workshopDate, item.classTime);
+      for (const visit of itemVisits) {
+        if (visit.date && visit.date >= today) {
+          upcomingVisits.push({
+            date: visit.date,
+            time: visit.time,
+            schoolName: item.schoolName,
+          });
+        }
+      }
+    }
+    upcomingVisits.sort((a, b) => {
+      const cmpDate = a.date.localeCompare(b.date);
+      if (cmpDate !== 0) return cmpDate;
+      return (a.time || "99:99").localeCompare(b.time || "99:99");
+    });
+    const upcoming = upcomingVisits[0];
     const nextVisitText = upcoming
-      ? `${formatDeliveryDate(upcoming.workshopDate, false)} · ${upcoming.schoolName}${upcoming.classTime ? ` · ${formatDeliveryTime12h(upcoming.classTime)}` : ""}`
+      ? `${formatDeliveryDate(upcoming.date, false)} · ${upcoming.schoolName}${upcoming.time ? ` · ${formatDeliveryTime12h(upcoming.time)}` : ""}`
       : "No upcoming dates set";
 
     // Card 1: Confirmed Reach
@@ -5692,8 +5745,24 @@ async function toggleDeliveryReadiness(recordId, programTrack, field) {
   }
 }
 
+function setDeliveryVisit2Visible(visible) {
+  const row2 = el("delivery-visit-2-row");
+  const addBtn = el("delivery-add-visit-btn");
+  if (row2) row2.hidden = !visible;
+  if (addBtn) addBtn.hidden = Boolean(visible);
+}
+
 function readDeliveryEditFormValues() {
   const toNonNegIntStr = (id) => String(el(id)?.value ?? "").trim();
+  const visit2Visible = el("delivery-visit-2-row") ? !el("delivery-visit-2-row").hidden : false;
+  const d1 = String(el("delivery-edit-workshopDate")?.value ?? "").trim();
+  const t1 = String(el("delivery-edit-classTime")?.value ?? "").trim();
+  const d2 = visit2Visible ? String(el("delivery-edit-workshopDate-2")?.value ?? "").trim() : "";
+  const t2 = visit2Visible ? String(el("delivery-edit-classTime-2")?.value ?? "").trim() : "";
+  const extraDates = Array.isArray(deliveryEditing?.extraDates) ? deliveryEditing.extraDates : [];
+  const extraTimes = Array.isArray(deliveryEditing?.extraTimes) ? deliveryEditing.extraTimes : [];
+  const workshopDate = [d1, d2, ...extraDates].filter(Boolean).join(", ");
+  const classTime = [t1, t2, ...extraTimes].filter(Boolean).join(", ");
   return {
     teachersCount: toNonNegIntStr("delivery-edit-teachers"),
     studentsCount: toNonNegIntStr("delivery-edit-students"),
@@ -5703,8 +5772,8 @@ function readDeliveryEditFormValues() {
     videoSubmitted: Boolean(el("delivery-edit-videoSubmitted")?.checked),
     finaleConfirmed: Boolean(el("delivery-edit-finaleConfirmed")?.checked),
     thankYouSent: Boolean(el("delivery-edit-thankYouSent")?.checked),
-    workshopDate: String(el("delivery-edit-workshopDate")?.value ?? "").trim(),
-    classTime: String(el("delivery-edit-classTime")?.value ?? "").trim(),
+    workshopDate,
+    classTime,
     schoolStartTime: String(el("delivery-edit-schoolStartTime")?.value ?? "").trim(),
     schoolEndTime: String(el("delivery-edit-schoolEndTime")?.value ?? "").trim(),
     studentMentors: String(el("delivery-edit-studentMentors")?.value ?? ""),
@@ -5719,8 +5788,17 @@ function populateDeliveryEditForm(values) {
     const input = el(`delivery-edit-${f.key}`);
     if (input) input.checked = Boolean(values[f.key]);
   }
-  if (el("delivery-edit-workshopDate")) el("delivery-edit-workshopDate").value = String(values.workshopDate ?? "");
-  if (el("delivery-edit-classTime")) el("delivery-edit-classTime").value = String(values.classTime ?? "");
+  const dates = parseDeliveryList(values.workshopDate);
+  const times = parseDeliveryList(values.classTime);
+  if (deliveryEditing) {
+    deliveryEditing.extraDates = dates.slice(2);
+    deliveryEditing.extraTimes = times.slice(2);
+  }
+  if (el("delivery-edit-workshopDate")) el("delivery-edit-workshopDate").value = dates[0] || "";
+  if (el("delivery-edit-classTime")) el("delivery-edit-classTime").value = times[0] || "";
+  if (el("delivery-edit-workshopDate-2")) el("delivery-edit-workshopDate-2").value = dates[1] || "";
+  if (el("delivery-edit-classTime-2")) el("delivery-edit-classTime-2").value = times[1] || "";
+  setDeliveryVisit2Visible(Boolean(dates[1] || times[1]));
   if (el("delivery-edit-schoolStartTime")) el("delivery-edit-schoolStartTime").value = String(values.schoolStartTime ?? "");
   if (el("delivery-edit-schoolEndTime")) el("delivery-edit-schoolEndTime").value = String(values.schoolEndTime ?? "");
   if (el("delivery-edit-studentMentors")) el("delivery-edit-studentMentors").value = String(values.studentMentors ?? "");
@@ -6003,6 +6081,7 @@ if (typeof window !== "undefined") {
   window.closeDeliveryHistoryModal = closeDeliveryHistoryModal;
   window.formatDeliveryTime12h = formatDeliveryTime12h;
   window.formatDeliveryDate = formatDeliveryDate;
+  window.parseDeliveryVisits = parseDeliveryVisits;
 }
 
 function renderDirectory() {
@@ -6871,11 +6950,23 @@ const handleDeliveryDraftInput = () => {
   updateDeliveryTotalPreview();
   saveDeliveryDraft(deliveryEditing.recordId, deliveryEditing.programTrack, readDeliveryEditFormValues());
 };
+el("delivery-add-visit-btn")?.addEventListener("click", () => {
+  setDeliveryVisit2Visible(true);
+  el("delivery-edit-workshopDate-2")?.focus?.();
+});
+el("delivery-remove-visit-2-btn")?.addEventListener("click", () => {
+  if (el("delivery-edit-workshopDate-2")) el("delivery-edit-workshopDate-2").value = "";
+  if (el("delivery-edit-classTime-2")) el("delivery-edit-classTime-2").value = "";
+  setDeliveryVisit2Visible(false);
+  handleDeliveryDraftInput();
+});
 for (const fieldId of [
   "delivery-edit-teachers",
   "delivery-edit-students",
   "delivery-edit-workshopDate",
   "delivery-edit-classTime",
+  "delivery-edit-workshopDate-2",
+  "delivery-edit-classTime-2",
   "delivery-edit-schoolStartTime",
   "delivery-edit-schoolEndTime",
   "delivery-edit-studentMentors",

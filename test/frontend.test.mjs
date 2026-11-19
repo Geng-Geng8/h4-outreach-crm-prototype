@@ -5634,6 +5634,191 @@ test("Program Delivery Board: 1-tap readiness toggle, concurrency lock, 409 conf
   assert.equal(findPill("finaleConfirmed").getAttribute("aria-pressed"), "true");
 });
 
+test("Program Delivery Board: multi-visit card rendering, Next Upcoming Visit auto-advancing to Visit 2, and Edit Details Visit 2 serialization", async (t) => {
+  const localStorageMap = new Map();
+  let items = [
+    {
+      deliveryId: "del-multi-1",
+      recordId: "66666666-6666-4666-8666-666666666666",
+      schoolName: "St. Jude Catholic School",
+      schoolBoard: "TCDSB",
+      region: "North York",
+      stage: "Booked",
+      assignedTo: "Alex",
+      programTrack: "Cypher Program",
+      teachersCount: 2,
+      studentsCount: 28,
+      danceTeamConfirmed: true,
+      introWorkshopDone: true,
+      musicSubmitted: false,
+      videoSubmitted: false,
+      finaleConfirmed: false,
+      thankYouSent: false,
+      // Visit 1 has already passed; Visit 2 is upcoming
+      workshopDate: "2020-01-10, 2099-12-15",
+      classTime: "09:15, 09:15",
+      schoolStartTime: "08:30",
+      schoolEndTime: "15:00",
+      studentMentors: "Maya L.",
+      deliveryNotes: "Two-part workshop",
+      lastEditedBy: "Alex",
+      lastEditedAt: "2026-11-18T14:00:00.000Z",
+      lastRequestId: "req-multi-1",
+      history: [],
+    },
+    {
+      deliveryId: "del-single-2",
+      recordId: "77777777-7777-4777-8777-777777777777",
+      schoolName: "Oakwood Collegiate",
+      schoolBoard: "TDSB",
+      region: "Toronto",
+      stage: "Booked",
+      assignedTo: "Sam",
+      programTrack: "Cypher Program",
+      teachersCount: 1,
+      studentsCount: 20,
+      danceTeamConfirmed: true,
+      introWorkshopDone: false,
+      musicSubmitted: false,
+      videoSubmitted: false,
+      finaleConfirmed: false,
+      thankYouSent: false,
+      workshopDate: "2099-12-20",
+      classTime: "10:00",
+      schoolStartTime: "",
+      schoolEndTime: "",
+      studentMentors: "",
+      deliveryNotes: "",
+      lastEditedBy: "Sam",
+      lastEditedAt: "2026-11-18T15:00:00.000Z",
+      lastRequestId: "req-single-1",
+      history: [],
+    },
+  ];
+
+  const posts = [];
+  const h = setupEnv({
+    localStorageMap,
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: items.map((item) => ({
+            recordId: item.recordId,
+            schoolName: item.schoolName,
+            outreachGoal: "Cypher Program",
+            stage: "Booked",
+            lastRequestId: "v1",
+          })),
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/delivery/update")) {
+        const body = JSON.parse(init.body);
+        posts.push(body);
+        items = items.map((item) => (
+          item.recordId === body.recordId
+            ? {
+                ...item,
+                workshopDate: body.workshopDate ?? item.workshopDate,
+                classTime: body.classTime ?? item.classTime,
+                lastEditedBy: "Alex",
+                lastEditedAt: new Date().toISOString(),
+                lastRequestId: body.requestId,
+              }
+            : item
+        ));
+        const updated = items.find((item) => item.recordId === body.recordId);
+        return Response.json({
+          ok: true,
+          code: "SUCCESS",
+          requestId: body.requestId,
+          delivery: updated,
+          diff: `Workshop Date: → ${updated.workshopDate}`,
+        });
+      }
+      if (url.includes("/api/delivery")) {
+        return Response.json({ ok: true, deliveries: items });
+      }
+      return Response.json({ ok: true, schools: [] });
+    },
+  });
+  t.after(h.cleanup);
+
+  await h.signIn("alex@example.test");
+  await h.context.openDeliveryBoard("Cypher Program");
+
+  // 1. Multi-visit card schedule strip renders Visit 1 and Visit 2 cleanly
+  const multiCard = h.getEl("delivery-confirmed-list").children[0];
+  const scheduleBadges = multiCard.children[1].children.map((n) => n.textContent);
+  assert.deepEqual(scheduleBadges, [
+    "📅 Visit 1: Jan 10, 2020 · 9:15 AM",
+    "📅 Visit 2: Dec 15, 2099 · 9:15 AM",
+    "🔔 Bell 8:30 AM–3:00 PM",
+  ]);
+
+  // 2. Hero Next Upcoming Visit automatically skips past Visit 1 (2020-01-10) and picks Visit 2 (2099-12-15)
+  const heroCards = h.getEl("delivery-hero-strip").children;
+  assert.equal(heroCards[3].children[1].textContent, "Dec 15 · St. Jude Catholic School · 9:15 AM");
+
+  // 3. Edit Details modal on single-visit school: add Visit 2, persist in localStorage draft, save serialized strings
+  const singleRecordId = items[1].recordId;
+  h.context.openDeliveryEditModal(singleRecordId, "Cypher Program");
+  assert.equal(h.getEl("delivery-visit-2-row").hidden, true);
+  assert.equal(h.getEl("delivery-add-visit-btn").hidden, false);
+  assert.equal(h.getEl("delivery-edit-workshopDate").value, "2099-12-20");
+  assert.equal(h.getEl("delivery-edit-classTime").value, "10:00");
+
+  h.getEl("delivery-add-visit-btn").click();
+  assert.equal(h.getEl("delivery-visit-2-row").hidden, false);
+  assert.equal(h.getEl("delivery-add-visit-btn").hidden, true);
+
+  h.getEl("delivery-edit-workshopDate-2").value = "2099-12-27";
+  h.getEl("delivery-edit-workshopDate-2").dispatchEvent(new h.context.Event("input", { bubbles: true }));
+  h.getEl("delivery-edit-classTime-2").value = "11:30";
+  h.getEl("delivery-edit-classTime-2").dispatchEvent(new h.context.Event("input", { bubbles: true }));
+
+  const draftKey = `h4_crm_delivery_draft_${singleRecordId}_Cypher Program`;
+  const savedDraft = JSON.parse(localStorageMap.get(draftKey));
+  assert.equal(savedDraft.payload.workshopDate, "2099-12-20, 2099-12-27");
+  assert.equal(savedDraft.payload.classTime, "10:00, 11:30");
+
+  // Close and reopen -> Visit 2 row restored from draft
+  h.context.closeDeliveryEditModal();
+  h.context.openDeliveryEditModal(singleRecordId, "Cypher Program");
+  assert.equal(h.getEl("delivery-visit-2-row").hidden, false);
+  assert.equal(h.getEl("delivery-edit-workshopDate-2").value, "2099-12-27");
+  assert.equal(h.getEl("delivery-edit-classTime-2").value, "11:30");
+
+  // Save -> sends serialized comma-separated workshopDate & classTime and updates card
+  const savedTwo = await h.context.saveDeliveryEdits({ preventDefault() {} });
+  assert.equal(savedTwo, true);
+  assert.equal(posts[0].workshopDate, "2099-12-20, 2099-12-27");
+  assert.equal(posts[0].classTime, "10:00, 11:30");
+
+  const updatedSingleCard = h.getEl("delivery-confirmed-list").children[1];
+  const updatedBadges = updatedSingleCard.children[1].children.map((n) => n.textContent);
+  assert.deepEqual(updatedBadges, [
+    "📅 Visit 1: Dec 20, 2099 · 10:00 AM",
+    "📅 Visit 2: Dec 27, 2099 · 11:30 AM",
+  ]);
+
+  // 4. Remove Visit 2 -> hides Visit 2 row, clears inputs, and saves back as single visit
+  h.context.openDeliveryEditModal(singleRecordId, "Cypher Program");
+  assert.equal(h.getEl("delivery-visit-2-row").hidden, false);
+  h.getEl("delivery-remove-visit-2-btn").click();
+  assert.equal(h.getEl("delivery-visit-2-row").hidden, true);
+  assert.equal(h.getEl("delivery-add-visit-btn").hidden, false);
+  assert.equal(h.getEl("delivery-edit-workshopDate-2").value, "");
+  assert.equal(h.getEl("delivery-edit-classTime-2").value, "");
+
+  const savedOne = await h.context.saveDeliveryEdits({ preventDefault() {} });
+  assert.equal(savedOne, true);
+  assert.equal(posts[1].workshopDate, "2099-12-20");
+  assert.equal(posts[1].classTime, "10:00");
+});
+
 
 
 

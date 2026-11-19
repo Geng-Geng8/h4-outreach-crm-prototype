@@ -364,3 +364,118 @@ test("program delivery via read-only router & GoogleSheetsCoordinator: auth, COR
   assert.equal(h.demoSheets.attempts, 1);
   assert.equal(h.demoSheets.batches[0].data.length, 2);
 });
+
+test("program delivery: supports comma-separated multi-date and multi-time visits with validation and clean diffs", async (t) => {
+  const h = await harness(t);
+  const school = h.sheets.tables.Schools[1];
+  school[C.goal] = "Cypher Program";
+  school[C.stage] = "Booked";
+
+  // 1. Save single visit first
+  const req1 = crypto.randomUUID();
+  const first = await h.post("/api/delivery/update", {
+    requestId: req1,
+    recordId: RECORD,
+    programTrack: "Cypher Program",
+    expectedLastRequestId: "",
+    workshopDate: "2026-12-08",
+    classTime: "09:15",
+  }, ACTOR);
+  assert.equal(first.status, 200);
+  assert.equal(first.body.delivery.workshopDate, "2026-12-08");
+  assert.equal(first.body.delivery.classTime, "09:15");
+
+  // 2. Save unnormalized comma-separated multi-date / multi-time -> normalized as ", " joined
+  const req2 = crypto.randomUUID();
+  const multi = await h.post("/api/delivery/update", {
+    requestId: req2,
+    recordId: RECORD,
+    programTrack: "Cypher Program",
+    expectedLastRequestId: req1,
+    workshopDate: " 2026-12-08 ,2026-12-15 ",
+    classTime: "09:15,  10:30",
+  }, ACTOR);
+  assert.equal(multi.status, 200);
+  assert.equal(multi.body.delivery.workshopDate, "2026-12-08, 2026-12-15");
+  assert.equal(multi.body.delivery.classTime, "09:15, 10:30");
+
+  // Verify persisted to Col M & Col N in Program Delivery sheet
+  const deliveryRow = h.sheets.tables["Program Delivery"][1];
+  assert.equal(deliveryRow[DeliveryCol.workshopDate], "2026-12-08, 2026-12-15");
+  assert.equal(deliveryRow[DeliveryCol.classTime], "09:15, 10:30");
+
+  // Verify clean human-readable diff in Activity Log
+  assert.match(multi.body.diff, /Workshop Date: 2026-12-08 → 2026-12-08, 2026-12-15/);
+  assert.match(multi.body.diff, /Class Time: 09:15 → 09:15, 10:30/);
+  const latestActivity = h.sheets.tables["Activity Log"].slice(1).find((r) => r[ActivityCol.requestId] === req2);
+  assert.ok(latestActivity);
+  assert.equal(latestActivity[ActivityCol.messageSummary], multi.body.diff);
+
+  // 3. Up to 5 visits accepted
+  const req3 = crypto.randomUUID();
+  const fiveVisits = await h.post("/api/delivery/update", {
+    requestId: req3,
+    recordId: RECORD,
+    programTrack: "Cypher Program",
+    expectedLastRequestId: req2,
+    workshopDate: "2026-12-01,2026-12-02,2026-12-03,2026-12-04,2026-12-05",
+    classTime: "09:00,09:30,10:00,10:30,11:00",
+  }, ACTOR);
+  assert.equal(fiveVisits.status, 200);
+  assert.equal(
+    fiveVisits.body.delivery.workshopDate,
+    "2026-12-01, 2026-12-02, 2026-12-03, 2026-12-04, 2026-12-05"
+  );
+  assert.equal(fiveVisits.body.delivery.classTime, "09:00, 09:30, 10:00, 10:30, 11:00");
+
+  // 4. Reject >5 visits, invalid calendar dates, trailing commas, and invalid times
+  const sixDates = await h.post("/api/delivery/update", {
+    requestId: crypto.randomUUID(),
+    recordId: RECORD,
+    programTrack: "Cypher Program",
+    expectedLastRequestId: req3,
+    workshopDate: "2026-12-01, 2026-12-02, 2026-12-03, 2026-12-04, 2026-12-05, 2026-12-06",
+  }, ACTOR);
+  assert.equal(sixDates.status, 422);
+  assert.equal(sixDates.body.code, "INVALID_DATE");
+
+  const badDateInList = await h.post("/api/delivery/update", {
+    requestId: crypto.randomUUID(),
+    recordId: RECORD,
+    programTrack: "Cypher Program",
+    expectedLastRequestId: req3,
+    workshopDate: "2026-12-08, 2026-02-30",
+  }, ACTOR);
+  assert.equal(badDateInList.status, 422);
+  assert.equal(badDateInList.body.code, "INVALID_DATE");
+
+  const trailingCommaDate = await h.post("/api/delivery/update", {
+    requestId: crypto.randomUUID(),
+    recordId: RECORD,
+    programTrack: "Cypher Program",
+    expectedLastRequestId: req3,
+    workshopDate: "2026-12-08, ",
+  }, ACTOR);
+  assert.equal(trailingCommaDate.status, 422);
+  assert.equal(trailingCommaDate.body.code, "INVALID_DATE");
+
+  const badTimeInList = await h.post("/api/delivery/update", {
+    requestId: crypto.randomUUID(),
+    recordId: RECORD,
+    programTrack: "Cypher Program",
+    expectedLastRequestId: req3,
+    classTime: "09:15, 25:00",
+  }, ACTOR);
+  assert.equal(badTimeInList.status, 422);
+  assert.equal(badTimeInList.body.code, "INVALID_TIME");
+
+  const sixTimes = await h.post("/api/delivery/update", {
+    requestId: crypto.randomUUID(),
+    recordId: RECORD,
+    programTrack: "Cypher Program",
+    expectedLastRequestId: req3,
+    classTime: "09:00, 09:30, 10:00, 10:30, 11:00, 11:30",
+  }, ACTOR);
+  assert.equal(sixTimes.status, 422);
+  assert.equal(sixTimes.body.code, "INVALID_TIME");
+});
