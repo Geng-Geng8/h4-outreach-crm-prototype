@@ -498,12 +498,13 @@
               <label id="field-primary-owner" class="assignment-field">
                 <span class="field-label-text">Primary Owner</span>
                 <select id="edit-primary-owner" class="assignee-select" aria-label="Primary assigned owner"></select>
-                <span class="field-help">Main point of contact. Can be reassigned by the owner or a supervisor.</span>
+                <div id="primary-owner-readonly" class="collaborators-chip-list" hidden></div>
+                <span id="primary-owner-help" class="field-help">Main point of contact. Only supervisors can reassign or remove team members.</span>
               </label>
               <div id="collaborators-block" class="assignment-field">
                 <span class="field-label-text">Co-Assignees / Collaborators</span>
                 <div id="collaborators-list" class="collaborators-chip-list" role="list"></div>
-                <div class="collaborator-add-row">
+                <div id="collaborator-add-row" class="collaborator-add-row">
                   <select id="add-collaborator-select" class="add-collaborator-select" aria-label="Add collaborator">
                     <option value="">Select team member…</option>
                   </select>
@@ -512,6 +513,7 @@
                 <span class="field-help">Collaborators can view and update this school on their dashboards.</span>
               </div>
             </div>
+            <p id="assignment-readonly-note" class="field-help assignment-readonly-note" hidden>Only supervisors can reassign or remove team members.</p>
           </section>
           <div class="legacy-contact-fields" hidden aria-hidden="true">
             <label id="field-contactName">Contact name<input id="edit-contactName" maxlength="300" autocomplete="off"></label>

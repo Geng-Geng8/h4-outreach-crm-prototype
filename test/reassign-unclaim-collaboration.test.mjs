@@ -6,6 +6,7 @@ import { harness, C, ACTOR, OTHER, SUPERVISOR, RECORD, VERSION } from "./harness
 const REASSIGN = "/api/schools/reassign";
 const UNCLAIM = "/api/schools/unclaim";
 const CLAIM = "/api/schools/claim";
+const JOIN = "/api/schools/join";
 const DETAIL = "/api/schools/detail";
 
 test("co-assignee collaboration: school with multiple owners allows access to all assigned co-owners and supervisor, but denies non-owners", async (t) => {
@@ -39,7 +40,7 @@ test("co-assignee collaboration: school with multiple owners allows access to al
   assert.equal(thirdRes.body.code, "NOT_OWNER");
 });
 
-test("reassign endpoint: updates Column D, Column Z, appends Activity Log row, and protects Column Q/R formulas", async (t) => {
+test("reassign endpoint: supervisor updates Column D, Column Z, appends Activity Log row, and protects Column Q/R formulas", async (t) => {
   const h = await harness(t);
   const qFormula = h.sheets.tables.Schools[1][16];
   const rFormula = h.sheets.tables.Schools[1][17];
@@ -51,7 +52,7 @@ test("reassign endpoint: updates Column D, Column Z, appends Activity Log row, a
     expectedRequestId: VERSION,
     newOwnerEmails: [OTHER, SUPERVISOR],
     newOwnerNames: ["Sam", "Morgan"],
-  }, ACTOR);
+  }, SUPERVISOR);
 
   assert.equal(reassignRes.status, 200);
   assert.equal(reassignRes.body.ok, true);
@@ -76,12 +77,23 @@ test("reassign endpoint: updates Column D, Column Z, appends Activity Log row, a
   assert.equal(log[5], "Reassigned"); // Outcome (Col F, index 5)
   assert.equal(log[7], "Reassigned to Sam, Morgan"); // Summary (Col H, index 7)
   assert.equal(log[11], reqId); // Request ID (Col L, index 11)
-  assert.equal(log[12], ACTOR); // Actor Email (Col M, index 12)
+  assert.equal(log[12], SUPERVISOR); // Actor Email (Col M, index 12)
   assert.equal(log[13], "Reassign"); // Activity Type (Col N, index 13)
 });
 
-test("reassign endpoint: enforces permissions (Supervisor can reassign any; non-owner is rejected) and checks stale version", async (t) => {
+test("reassign endpoint: enforces Supervisor-only permissions (co-op owner and non-owner rejected with 403 SUPERVISOR_ROLE_REQUIRED) and checks stale version", async (t) => {
   const h = await harness(t);
+
+  // Assigned co-op owner cannot reassign
+  const ownerCoopRes = await h.post(REASSIGN, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: VERSION,
+    newOwnerEmails: [OTHER],
+    newOwnerNames: ["Sam"],
+  }, ACTOR);
+  assert.equal(ownerCoopRes.status, 403);
+  assert.equal(ownerCoopRes.body.code, "SUPERVISOR_ROLE_REQUIRED");
 
   // Non-owner student cannot reassign
   const nonOwnerRes = await h.post(REASSIGN, {
@@ -92,16 +104,16 @@ test("reassign endpoint: enforces permissions (Supervisor can reassign any; non-
     newOwnerNames: ["Sam"],
   }, OTHER);
   assert.equal(nonOwnerRes.status, 403);
-  assert.equal(nonOwnerRes.body.code, "NOT_OWNER");
+  assert.equal(nonOwnerRes.body.code, "SUPERVISOR_ROLE_REQUIRED");
 
-  // Stale version is rejected with 409
+  // Stale version is rejected with 409 for supervisor
   const staleRes = await h.post(REASSIGN, {
     requestId: randomUUID(),
     recordId: RECORD,
     expectedRequestId: "00000000-0000-4000-8000-000000000099",
     newOwnerEmails: [OTHER],
     newOwnerNames: ["Sam"],
-  }, ACTOR);
+  }, SUPERVISOR);
   assert.equal(staleRes.status, 409);
   assert.equal(staleRes.body.code, "CONFLICT_STALE_VERSION");
 
@@ -118,7 +130,7 @@ test("reassign endpoint: enforces permissions (Supervisor can reassign any; non-
   assert.equal(h.sheets.tables.Schools[1][C.owner], OTHER);
 });
 
-test("unclaim endpoint: clears ownership, resets stage and engagementStatus, clears followUp, logs audit, and preserves Q/R", async (t) => {
+test("unclaim endpoint: supervisor clears ownership, resets stage and engagementStatus, clears followUp, logs audit, and preserves Q/R", async (t) => {
   const h = await harness(t);
   const qFormula = h.sheets.tables.Schools[1][16];
   const rFormula = h.sheets.tables.Schools[1][17];
@@ -134,7 +146,7 @@ test("unclaim endpoint: clears ownership, resets stage and engagementStatus, cle
     requestId: reqId,
     recordId: RECORD,
     expectedRequestId: VERSION,
-  }, ACTOR);
+  }, SUPERVISOR);
 
   assert.equal(unclaimRes.status, 200);
   assert.equal(unclaimRes.body.ok, true);
@@ -159,14 +171,23 @@ test("unclaim endpoint: clears ownership, resets stage and engagementStatus, cle
   const log = logs[0];
   assert.equal(log[4], "App");
   assert.equal(log[5], "Unclaimed");
-  assert.equal(log[7], "School released back to directory by Alex");
+  assert.equal(log[7], "School released back to directory by Morgan");
   assert.equal(log[11], reqId);
-  assert.equal(log[12], ACTOR);
+  assert.equal(log[12], SUPERVISOR);
   assert.equal(log[13], "Unclaim");
 });
 
-test("unclaim endpoint: enforces permissions (Supervisor allowed; non-owner denied) and stale version conflict", async (t) => {
+test("unclaim endpoint: enforces Supervisor-only permissions (co-op owner and non-owner rejected with 403 SUPERVISOR_ROLE_REQUIRED) and stale version conflict", async (t) => {
   const h = await harness(t);
+
+  // Assigned co-op owner cannot unclaim
+  const ownerCoopRes = await h.post(UNCLAIM, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: VERSION,
+  }, ACTOR);
+  assert.equal(ownerCoopRes.status, 403);
+  assert.equal(ownerCoopRes.body.code, "SUPERVISOR_ROLE_REQUIRED");
 
   // Non-owner cannot unclaim
   const nonOwnerRes = await h.post(UNCLAIM, {
@@ -175,14 +196,14 @@ test("unclaim endpoint: enforces permissions (Supervisor allowed; non-owner deni
     expectedRequestId: VERSION,
   }, OTHER);
   assert.equal(nonOwnerRes.status, 403);
-  assert.equal(nonOwnerRes.body.code, "NOT_OWNER");
+  assert.equal(nonOwnerRes.body.code, "SUPERVISOR_ROLE_REQUIRED");
 
-  // Stale version rejected
+  // Stale version rejected for supervisor
   const staleRes = await h.post(UNCLAIM, {
     requestId: randomUUID(),
     recordId: RECORD,
     expectedRequestId: "00000000-0000-4000-8000-000000000099",
-  }, ACTOR);
+  }, SUPERVISOR);
   assert.equal(staleRes.status, 409);
   assert.equal(staleRes.body.code, "CONFLICT_STALE_VERSION");
 
@@ -197,7 +218,7 @@ test("unclaim endpoint: enforces permissions (Supervisor allowed; non-owner deni
   assert.equal(h.sheets.tables.Schools[1][C.engagementStatus], "Available");
 });
 
-test("unclaimed school flow end-to-end: unclaim releases school to directory and allows re-claiming", async (t) => {
+test("unclaimed school flow end-to-end: supervisor unclaim releases school to directory and allows re-claiming", async (t) => {
   const h = await harness(t);
   const osn = "900001"; // Maple Example Secondary
   assert.equal(h.sheets.tables.Schools[1][C.osn], osn);
@@ -207,13 +228,13 @@ test("unclaimed school flow end-to-end: unclaim releases school to directory and
   assert.equal(statusBefore.status, 200);
   assert.ok(statusBefore.body.claimedOsns.includes(osn));
 
-  // Unclaim the school
+  // Unclaim the school as Supervisor
   const unclaimReqId = randomUUID();
   const unclaimRes = await h.post(UNCLAIM, {
     requestId: unclaimReqId,
     recordId: RECORD,
     expectedRequestId: VERSION,
-  }, ACTOR);
+  }, SUPERVISOR);
   assert.equal(unclaimRes.status, 200);
 
   // Check demo-status: now available!
@@ -237,4 +258,80 @@ test("unclaimed school flow end-to-end: unclaim releases school to directory and
   assert.equal(reclaimedRow[C.owner], OTHER);
   assert.equal(reclaimedRow[C.engagementStatus], "Claimed");
   assert.equal(reclaimedRow[C.stage], "Not Contacted");
+});
+
+test("student self-join: co-op appends self onto supervisor claimed school without removing supervisor, is idempotent, and rejects unclaimed schools", async (t) => {
+  const h = await harness(t);
+  const qFormula = h.sheets.tables.Schools[1][16];
+  const rFormula = h.sheets.tables.Schools[1][17];
+
+  // Assign school solely to Supervisor Morgan
+  h.sheets.tables.Schools[1][C.owner] = SUPERVISOR;
+  h.sheets.tables.Schools[1][C.assigned] = "Morgan";
+  h.sheets.tables.Schools[1][C.engagementStatus] = "Claimed";
+
+  // Before joining, co-op Alex cannot open detail
+  const beforeDetail = await h.get(`${DETAIL}?recordId=${RECORD}`, ACTOR);
+  assert.equal(beforeDetail.status, 403);
+  assert.equal(beforeDetail.body.code, "NOT_OWNER");
+
+  // Co-op Alex calls POST /api/schools/join
+  const joinReqId = randomUUID();
+  const joinRes = await h.post(JOIN, {
+    requestId: joinReqId,
+    recordId: RECORD,
+  }, ACTOR);
+
+  assert.equal(joinRes.status, 200);
+  assert.equal(joinRes.body.ok, true);
+  assert.equal(joinRes.body.record.ownerEmail, `${SUPERVISOR}, ${ACTOR}`);
+  assert.equal(joinRes.body.record.assignedTo, "Morgan, Alex");
+  assert.equal(joinRes.body.record.lastRequestId, joinReqId);
+
+  // Spreadsheet row keeps Morgan first, appends Alex, preserves Q/R
+  const row = h.sheets.tables.Schools[1];
+  assert.equal(row[C.owner], `${SUPERVISOR}, ${ACTOR}`);
+  assert.equal(row[C.assigned], "Morgan, Alex");
+  assert.equal(row[C.version], joinReqId);
+  assert.equal(row[16], qFormula);
+  assert.equal(row[17], rFormula);
+
+  // Activity Log audit entry
+  const logs = h.sheets.tables["Activity Log"].slice(1);
+  assert.equal(logs.length, 1);
+  const log = logs[0];
+  assert.equal(log[3], "Alex"); // Assigned To
+  assert.equal(log[4], "App"); // Channel
+  assert.equal(log[5], "Joined"); // Outcome
+  assert.equal(log[7], "Alex joined as collaborator"); // Message Summary
+  assert.equal(log[11], joinReqId);
+  assert.equal(log[12], ACTOR);
+  assert.equal(log[13], "Reassign"); // Activity Type
+
+  // After joining, co-op Alex can access school detail
+  const afterDetail = await h.get(`${DETAIL}?recordId=${RECORD}`, ACTOR);
+  assert.equal(afterDetail.status, 200);
+  assert.equal(afterDetail.body.ok, true);
+
+  // Joining again with a new requestId is idempotent (alreadyJoined: true) and does not duplicate
+  const dupRes = await h.post(JOIN, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+  }, ACTOR);
+  assert.equal(dupRes.status, 200);
+  assert.equal(dupRes.body.ok, true);
+  assert.equal(dupRes.body.alreadyJoined, true);
+  assert.equal(h.sheets.tables.Schools[1][C.owner], `${SUPERVISOR}, ${ACTOR}`);
+  assert.equal(h.sheets.tables["Activity Log"].slice(1).length, 1);
+
+  // Unclaimed school rejects join with 422 SCHOOL_UNCLAIMED
+  h.sheets.tables.Schools[1][C.owner] = "";
+  h.sheets.tables.Schools[1][C.assigned] = "";
+  h.sheets.tables.Schools[1][C.engagementStatus] = "Available";
+  const unclaimedRes = await h.post(JOIN, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+  }, ACTOR);
+  assert.equal(unclaimedRes.status, 422);
+  assert.equal(unclaimedRes.body.code, "SCHOOL_UNCLAIMED");
 });

@@ -415,7 +415,9 @@ test("Team Progress combines school filters without individual performance cards
   assert.equal(h.getEl("dashboard-rows").children.length, 7);
   assert.equal(h.getEl("dashboard-metrics").children.length, 0);
   assert.equal(h.getEl("dashboard-team").children.length, 0);
-  assert.equal(h.getEl("dashboard-rows").children.find((row) => row.children[0].children[0].textContent === "School 1").children[5].textContent, "View only");
+  const viewOnlyCell = h.getEl("dashboard-rows").children.find((row) => row.children[0].children[0].textContent === "School 1").children[5];
+  assert.equal(viewOnlyCell.children[0].children[0].textContent, "View only");
+  assert.equal(viewOnlyCell.children[0].children[1].textContent, "+ Join");
   assert.equal(h.getEl("dashboard-rows").children[0].children[5].children[0].textContent, "Open school →");
   h.getEl("dashboard-stage").value = "Booked"; h.context.renderDashboard();
   assert.equal(h.getEl("dashboard-count").textContent, "Showing 1 of 7 claimed schools");
@@ -3509,7 +3511,7 @@ test("school editor: assignee selector loads CRM users, supports changing primar
       if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
       if (url.includes("/api/bootstrap")) {
         return Response.json({
-          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          currentUser: { name: "Morgan", email: "morgan@example.test", role: "Supervisor" },
           schools: [schoolRecord],
           sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
         });
@@ -3534,7 +3536,7 @@ test("school editor: assignee selector loads CRM users, supports changing primar
     },
   });
   t.after(cleanup);
-  await signIn("alex@example.test");
+  await signIn("morgan@example.test");
 
   await context.openSchoolEditor(schoolRecord.recordId, false, "details");
   assert.equal(getEl("assignment-section").hidden, false);
@@ -3577,7 +3579,7 @@ test("school editor: release / unclaim school flow prompts inline confirmation a
       if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
       if (url.includes("/api/bootstrap")) {
         return Response.json({
-          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          currentUser: { name: "Morgan", email: "morgan@example.test", role: "Supervisor" },
           schools: [schoolRecord],
           sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
         });
@@ -3594,7 +3596,7 @@ test("school editor: release / unclaim school flow prompts inline confirmation a
     },
   });
   t.after(cleanup);
-  await signIn("alex@example.test");
+  await signIn("morgan@example.test");
 
   await context.openSchoolEditor(schoolRecord.recordId, false, "details");
   assert.equal(getEl("editor-unclaim-btn").hidden, false);
@@ -5817,6 +5819,210 @@ test("Program Delivery Board: multi-visit card rendering, Next Upcoming Visit au
   assert.equal(savedOne, true);
   assert.equal(posts[1].workshopDate, "2099-12-20");
   assert.equal(posts[1].classTime, "10:00");
+});
+
+test("student self-join UI: unassigned team schools render View only + Join School, and clicking Join unlocks editing immediately", async (t) => {
+  const mySchool = {
+    recordId: "00000000-0000-4000-8000-000000000201",
+    schoolName: "Alex Own Secondary",
+    schoolBoard: "TDSB",
+    geographicRegion: "East",
+    stage: "Contacted",
+    assignedTo: "Alex",
+    outreachGoal: "Cypher Program",
+    goal: "Cypher Program",
+    lastContacted: "2026-11-10",
+    followUpDue: "2026-11-25",
+    canEdit: true,
+    isMySchool: true,
+  };
+  const teamSchool = {
+    recordId: "00000000-0000-4000-8000-000000000202",
+    schoolName: "Morgan Cypher Collegiate",
+    schoolBoard: "PDSB",
+    geographicRegion: "West",
+    stage: "Booked",
+    assignedTo: "Morgan",
+    outreachGoal: "Cypher Program",
+    goal: "Cypher Program",
+    lastContacted: "2026-11-12",
+    followUpDue: "2026-11-28",
+    canEdit: false,
+  };
+
+  let dashboardFetches = 0;
+  let joinPayload = null;
+  const h = setupEnv({
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: [mySchool],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/dashboard")) {
+        dashboardFetches++;
+        return Response.json({ ok: true, schools: [mySchool, teamSchool] });
+      }
+      if (url.includes("/api/schools/join")) {
+        joinPayload = JSON.parse(init.body);
+        return Response.json({
+          ok: true,
+          code: "SUCCESS",
+          requestId: joinPayload.requestId,
+          record: {
+            ...teamSchool,
+            assignedTo: "Morgan, Alex",
+            ownerEmail: "morgan@example.test, alex@example.test",
+            lastRequestId: joinPayload.requestId,
+          },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(h.cleanup);
+
+  let confirmPrompt = "";
+  h.context.window.confirm = (msg) => {
+    confirmPrompt = msg;
+    return true;
+  };
+  h.context.confirm = h.context.window.confirm;
+
+  await h.signIn("alex@example.test");
+
+  // Opening Programs tab as a non-supervisor triggers loadDashboard() automatically
+  h.context.switchTab("programs");
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(dashboardFetches, 1);
+
+  // Switch Programs scope to "all" and select Cypher Program
+  h.context.setProgramsScope("all");
+  h.context.selectProgram("Cypher Program");
+
+  // Check the unassigned team school action card in Confirmed list
+  const confirmedList = h.getEl("programs-confirmed-list");
+  assert.equal(confirmedList.children.length, 1);
+  const card = confirmedList.children[0];
+  const cardTexts = card.children.map((c) => c.textContent);
+  assert.ok(cardTexts.some((t) => t === "Assigned to Morgan"), "Expected Assigned to Morgan on card");
+  const actionDiv = card.children[card.children.length - 1];
+  const actionLabels = actionDiv.children.map((c) => c.textContent);
+  assert.deepEqual(actionLabels, ["View only", "+ Join School"]);
+  assert.equal(actionDiv.children[1].getAttribute("aria-label"), "Join Morgan Cypher Collegiate");
+
+  // Click "+ Join School" -> confirms, calls /api/schools/join, and unlocks editing immediately
+  await actionDiv.children[1].onclick();
+  assert.equal(confirmPrompt, "Join Morgan Cypher Collegiate as a collaborator so you can edit it?");
+  assert.ok(joinPayload);
+  assert.equal(joinPayload.recordId, teamSchool.recordId);
+  assert.equal(h.getEl("save-toast").textContent, "✓ Joined Morgan Cypher Collegiate — you can now edit this school");
+
+  // Card now renders edit buttons and updated assignee without reload
+  const updatedCard = h.getEl("programs-confirmed-list").children[0];
+  assert.ok(updatedCard.children.some((c) => c.textContent === "Assigned to Morgan, Alex"));
+  const updatedActions = updatedCard.children[updatedCard.children.length - 1].children.map((c) => c.textContent);
+  assert.deepEqual(updatedActions, ["Log outreach", "Open school", "Contact info", "Set reminder"]);
+
+  // Dashboard row also switched to "Open school →"
+  const dashRow = h.getEl("dashboard-rows").children.find((r) => r.children[0].children[0].textContent === "Morgan Cypher Collegiate");
+  assert.equal(dashRow.children[5].children[0].textContent, "Open school →");
+});
+
+test("school editor modal: roster controls and unclaim are disabled/hidden for co-op students and active for supervisors", async (t) => {
+  const schoolRecord = {
+    recordId: "00000000-0000-4000-8000-000000000210",
+    schoolName: "East York Collegiate",
+    schoolBoard: "TDSB",
+    geographicRegion: "East",
+    stage: "Contacted",
+    assignedTo: "Morgan, Alex",
+    ownerEmail: "morgan@example.test, alex@example.test",
+    lastRequestId: "00000000-0000-4000-8000-000000000211",
+  };
+  const mockUsers = [
+    { email: "morgan@example.test", name: "Morgan", role: "Supervisor" },
+    { email: "alex@example.test", name: "Alex", role: "co-op" },
+    { email: "sam@example.test", name: "Sam", role: "co-op" },
+  ];
+
+  // 1. Co-op student viewing an assigned school
+  const coopEnv = setupEnv({
+    fetchHandler: async (url) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: [schoolRecord],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/schools/detail")) {
+        return Response.json({ ok: true, record: schoolRecord, users: mockUsers });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(coopEnv.cleanup);
+  await coopEnv.signIn("alex@example.test");
+  await coopEnv.context.openSchoolEditor(schoolRecord.recordId, false, "details");
+
+  assert.equal(coopEnv.getEl("edit-primary-owner").disabled, true);
+  assert.equal(coopEnv.getEl("edit-primary-owner").hidden, true);
+  assert.equal(coopEnv.getEl("primary-owner-readonly").hidden, false);
+  assert.equal(coopEnv.getEl("primary-owner-readonly").children[0].textContent, "Morgan");
+  assert.equal(coopEnv.getEl("add-collaborator-select").disabled, true);
+  assert.equal(coopEnv.getEl("add-collaborator-select").hidden, true);
+  assert.equal(coopEnv.getEl("add-collaborator-btn").disabled, true);
+  assert.equal(coopEnv.getEl("add-collaborator-btn").hidden, true);
+  assert.equal(coopEnv.getEl("editor-unclaim-btn").hidden, true);
+  assert.equal(coopEnv.getEl("assignment-readonly-note").hidden, false);
+  assert.equal(coopEnv.getEl("assignment-readonly-note").textContent, "Only supervisors can reassign or remove team members.");
+
+  // Collaborator chip has no remove ("✕") button for co-op
+  const coopChip = coopEnv.getEl("collaborators-list").children[0];
+  assert.equal(coopChip.children.length, 1);
+  assert.equal(coopChip.children[0].textContent, "Alex");
+
+  // 2. Supervisor viewing the same school
+  const supEnv = setupEnv({
+    fetchHandler: async (url) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Morgan", email: "morgan@example.test", role: "Supervisor" },
+          schools: [schoolRecord],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/schools/detail")) {
+        return Response.json({ ok: true, record: schoolRecord, users: mockUsers });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(supEnv.cleanup);
+  await supEnv.signIn("morgan@example.test");
+  await supEnv.context.openSchoolEditor(schoolRecord.recordId, false, "details");
+
+  assert.equal(supEnv.getEl("edit-primary-owner").disabled, false);
+  assert.equal(supEnv.getEl("edit-primary-owner").hidden, false);
+  assert.equal(supEnv.getEl("primary-owner-readonly").hidden, true);
+  assert.equal(supEnv.getEl("add-collaborator-select").disabled, false);
+  assert.equal(supEnv.getEl("add-collaborator-select").hidden, false);
+  assert.equal(supEnv.getEl("add-collaborator-btn").disabled, false);
+  assert.equal(supEnv.getEl("add-collaborator-btn").hidden, false);
+  assert.equal(supEnv.getEl("editor-unclaim-btn").hidden, false);
+  assert.equal(supEnv.getEl("editor-unclaim-btn").disabled, false);
+  assert.equal(supEnv.getEl("assignment-readonly-note").hidden, true);
+
+  // Collaborator chip has remove ("✕") button for supervisor
+  const supChip = supEnv.getEl("collaborators-list").children[0];
+  assert.equal(supChip.children.length, 2);
+  assert.equal(supChip.children[1].textContent, "✕");
 });
 
 

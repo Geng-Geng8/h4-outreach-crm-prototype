@@ -942,13 +942,13 @@ function renderSchools() {
 function editorInputs(disabled) {
   for (const field of editFields) el(`edit-${field}`).disabled = disabled;
   for (const field of outreachFields) el(`log-${field}`).disabled = disabled;
-  if (el("edit-primary-owner")) el("edit-primary-owner").disabled = disabled;
-  if (el("add-collaborator-select")) el("add-collaborator-select").disabled = disabled;
-  if (el("add-collaborator-btn")) el("add-collaborator-btn").disabled = disabled;
+  if (el("edit-primary-owner")) el("edit-primary-owner").disabled = disabled || !isSupervisor;
+  if (el("add-collaborator-select")) el("add-collaborator-select").disabled = disabled || !isSupervisor;
+  if (el("add-collaborator-btn")) el("add-collaborator-btn").disabled = disabled || !isSupervisor;
   if (el("add-program-select")) el("add-program-select").disabled = disabled;
   if (el("add-program-status")) el("add-program-status").disabled = disabled;
   if (el("add-program-btn")) el("add-program-btn").disabled = disabled;
-  if (el("editor-unclaim-btn")) el("editor-unclaim-btn").disabled = disabled;
+  if (el("editor-unclaim-btn")) el("editor-unclaim-btn").disabled = disabled || !isSupervisor;
   if (el("unclaim-cancel-btn")) el("unclaim-cancel-btn").disabled = disabled;
   if (el("unclaim-confirm-btn")) el("unclaim-confirm-btn").disabled = disabled;
   if (typeof document?.querySelectorAll === "function") {
@@ -1645,29 +1645,31 @@ function hasFormChanges(edit = editing) {
   if (!edit || !edit.original) return false;
   if (edit.pending) return true;
 
-  // Check uncommitted collaborator selection in dropdown
-  const addSelect = el("add-collaborator-select");
-  const selectedCollab = addSelect?.value?.trim().toLowerCase();
-  const primaryEmail = (edit.primaryOwner?.email || "").trim().toLowerCase();
-  if (selectedCollab && selectedCollab !== primaryEmail && !(edit.collaborators || []).some((c) => c.email.toLowerCase() === selectedCollab)) {
-    return true;
-  }
-
-  // Check assignees comparison when assignees were modified
-  if (edit.assigneesChanged) {
-    const origEmails = String(edit.original.ownerEmail || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-    const origNames = String(edit.original.assignedTo || "").split(",").map((n) => n.trim()).filter(Boolean);
-    const newEmails = [
-      edit.primaryOwner?.email,
-      ...(edit.collaborators || []).map((c) => c.email),
-    ].filter(Boolean).map((e) => e.trim().toLowerCase());
-    const newNames = [
-      edit.primaryOwner?.name,
-      ...(edit.collaborators || []).map((c) => c.name),
-    ].filter(Boolean).map((n) => n.trim());
-
-    if (newEmails.join(",") !== origEmails.join(",") || newNames.join(",") !== origNames.join(",")) {
+  // Check uncommitted collaborator selection in dropdown (supervisors only)
+  if (isSupervisor) {
+    const addSelect = el("add-collaborator-select");
+    const selectedCollab = addSelect?.value?.trim().toLowerCase();
+    const primaryEmail = (edit.primaryOwner?.email || "").trim().toLowerCase();
+    if (selectedCollab && selectedCollab !== primaryEmail && !(edit.collaborators || []).some((c) => c.email.toLowerCase() === selectedCollab)) {
       return true;
+    }
+
+    // Check assignees comparison when assignees were modified
+    if (edit.assigneesChanged) {
+      const origEmails = String(edit.original.ownerEmail || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+      const origNames = String(edit.original.assignedTo || "").split(",").map((n) => n.trim()).filter(Boolean);
+      const newEmails = [
+        edit.primaryOwner?.email,
+        ...(edit.collaborators || []).map((c) => c.email),
+      ].filter(Boolean).map((e) => e.trim().toLowerCase());
+      const newNames = [
+        edit.primaryOwner?.name,
+        ...(edit.collaborators || []).map((c) => c.name),
+      ].filter(Boolean).map((n) => n.trim());
+
+      if (newEmails.join(",") !== origEmails.join(",") || newNames.join(",") !== origNames.join(",")) {
+        return true;
+      }
     }
   }
 
@@ -1956,7 +1958,7 @@ function closeSchoolEditor() {
   }
   if (typeof closeContactForm === "function") closeContactForm(true);
   if (el("unclaim-confirm-panel")) el("unclaim-confirm-panel").hidden = true;
-  if (el("editor-unclaim-btn")) el("editor-unclaim-btn").hidden = false;
+  if (el("editor-unclaim-btn")) el("editor-unclaim-btn").hidden = true;
   editorSeq++; editorRead?.abort(); editing = null;
   el("school-editor").close();
 }
@@ -2104,12 +2106,16 @@ function renderSchoolContacts(contacts = []) {
 
 function renderAssigneeSection(canEdit) {
   const primarySelect = el("edit-primary-owner");
+  const primaryReadonly = el("primary-owner-readonly");
   const collabsList = el("collaborators-list");
+  const addRow = el("collaborator-add-row");
   const addSelect = el("add-collaborator-select");
   const addBtn = el("add-collaborator-btn");
+  const readonlyNote = el("assignment-readonly-note");
 
   if (!primarySelect || !editing) return;
 
+  const canManageRoster = Boolean(canEdit && isSupervisor);
   const users = editing.crmUsers || [];
 
   if (typeof primarySelect.replaceChildren === "function") {
@@ -2140,7 +2146,23 @@ function renderAssigneeSection(canEdit) {
   }
 
   primarySelect.value = currentPrimaryEmail;
-  primarySelect.disabled = !canEdit;
+  primarySelect.disabled = !canManageRoster;
+  primarySelect.hidden = !canManageRoster;
+
+  if (primaryReadonly) {
+    if (typeof primaryReadonly.replaceChildren === "function") {
+      primaryReadonly.replaceChildren();
+    } else {
+      primaryReadonly.innerHTML = "";
+    }
+    primaryReadonly.hidden = canManageRoster;
+    if (!canManageRoster) {
+      const badge = document.createElement("span");
+      badge.className = "collaborator-chip primary-owner-badge";
+      badge.textContent = editing.primaryOwner?.name || editing.primaryOwner?.email || "Unassigned";
+      primaryReadonly.append(badge);
+    }
+  }
 
   if (typeof collabsList.replaceChildren === "function") {
     collabsList.replaceChildren();
@@ -2161,16 +2183,17 @@ function renderAssigneeSection(canEdit) {
       nameText.textContent = collab.name || collab.email;
       chip.append(nameText);
 
-      if (canEdit) {
+      if (canManageRoster) {
         const removeBtn = document.createElement("button");
         removeBtn.type = "button";
         removeBtn.className = "collaborator-chip-remove";
         removeBtn.setAttribute("aria-label", `Remove collaborator ${collab.name || collab.email}`);
         removeBtn.textContent = "✕";
         removeBtn.onclick = () => {
+          if (!isSupervisor) return;
           editing.assigneesChanged = true;
           editing.collaborators = (editing.collaborators || []).filter((c) => c.email.toLowerCase() !== collab.email.toLowerCase());
-          renderAssigneeSection(canEdit);
+          renderAssigneeSection(canManageRoster);
           updateDirtyState();
         };
         chip.append(removeBtn);
@@ -2203,12 +2226,21 @@ function renderAssigneeSection(canEdit) {
     addSelect.append(opt);
   }
 
-  addSelect.disabled = !canEdit || availableUsers.length === 0;
-  if (addBtn) addBtn.disabled = !canEdit || availableUsers.length === 0;
+  if (addRow) addRow.hidden = !canManageRoster;
+  addSelect.disabled = !canManageRoster || availableUsers.length === 0;
+  addSelect.hidden = !canManageRoster;
+  if (addBtn) {
+    addBtn.disabled = !canManageRoster || availableUsers.length === 0;
+    addBtn.hidden = !canManageRoster;
+  }
+  if (readonlyNote) {
+    readonlyNote.hidden = canManageRoster;
+    readonlyNote.textContent = "Only supervisors can reassign or remove team members.";
+  }
 }
 
 async function unclaimSchool() {
-  if (!credential || !editing?.original || editing.busy) return;
+  if (!isSupervisor || !credential || !editing?.original || editing.busy) return;
   const session = sessionVersion, edit = editing;
   edit.busy = true;
   editorInputs(true);
@@ -2268,7 +2300,7 @@ async function unclaimSchool() {
       el("editor-close").disabled = false;
       el("editor-reload").disabled = false;
       if (el("unclaim-confirm-panel")) el("unclaim-confirm-panel").hidden = true;
-      if (el("editor-unclaim-btn")) el("editor-unclaim-btn").hidden = false;
+      if (el("editor-unclaim-btn")) el("editor-unclaim-btn").hidden = !isSupervisor;
     }
   }
 }
@@ -2894,12 +2926,12 @@ async function openSchoolEditor(id, reload = false, mode = "details") {
     editing.collaborators = draft?.collaborators ?? initialCollaborators;
     editing.assigneesChanged = Boolean(draft?.assigneesChanged);
 
-    const canEditAssignment = isSupervisor || isAssignedToMe(data.record);
+    const canEditAssignment = isSupervisor;
     renderAssigneeSection(canEditAssignment);
     updateDirtyState();
 
     if (el("assignment-section")) el("assignment-section").hidden = mode === "activity";
-    if (el("editor-unclaim-btn")) el("editor-unclaim-btn").hidden = mode === "activity" || !canEditAssignment;
+    if (el("editor-unclaim-btn")) el("editor-unclaim-btn").hidden = mode === "activity" || !isSupervisor;
     if (el("unclaim-confirm-panel")) el("unclaim-confirm-panel").hidden = true;
 
     const staleDraft = draft?.original && draft.original.lastRequestId !== data.record.lastRequestId && !editing.pending;
@@ -2983,24 +3015,25 @@ async function saveSchoolEdits(event) {
         values.goal = updatedGoal;
       }
 
-      const addSelect = el("add-collaborator-select");
-      const uncommittedEmail = addSelect?.value?.trim().toLowerCase();
-      if (uncommittedEmail) {
-        const currentPrimaryEmail = (edit.primaryOwner?.email || "").trim().toLowerCase();
-        if (uncommittedEmail !== currentPrimaryEmail && !(edit.collaborators || []).some((c) => c.email.toLowerCase() === uncommittedEmail)) {
-          const foundUser = (edit.crmUsers || []).find((u) => u.email.toLowerCase() === uncommittedEmail);
-          const newCollab = {
-            email: uncommittedEmail,
-            name: foundUser ? foundUser.name : uncommittedEmail,
-          };
-          if (!edit.collaborators) edit.collaborators = [];
-          edit.collaborators.push(newCollab);
-          edit.assigneesChanged = true;
-          const canEdit = isSupervisor || isAssignedToMe(edit.original);
-          renderAssigneeSection(canEdit);
-          updateDirtyState();
+      if (isSupervisor) {
+        const addSelect = el("add-collaborator-select");
+        const uncommittedEmail = addSelect?.value?.trim().toLowerCase();
+        if (uncommittedEmail) {
+          const currentPrimaryEmail = (edit.primaryOwner?.email || "").trim().toLowerCase();
+          if (uncommittedEmail !== currentPrimaryEmail && !(edit.collaborators || []).some((c) => c.email.toLowerCase() === uncommittedEmail)) {
+            const foundUser = (edit.crmUsers || []).find((u) => u.email.toLowerCase() === uncommittedEmail);
+            const newCollab = {
+              email: uncommittedEmail,
+              name: foundUser ? foundUser.name : uncommittedEmail,
+            };
+            if (!edit.collaborators) edit.collaborators = [];
+            edit.collaborators.push(newCollab);
+            edit.assigneesChanged = true;
+            renderAssigneeSection(isSupervisor);
+            updateDirtyState();
+          }
+          if (addSelect) addSelect.value = "";
         }
-        if (addSelect) addSelect.value = "";
       }
 
       const origEmails = String(edit.original.ownerEmail || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
@@ -3017,6 +3050,7 @@ async function saveSchoolEdits(event) {
       ].filter(Boolean).map((n) => n.trim());
 
       const assigneesChanged = Boolean(
+        isSupervisor &&
         edit.assigneesChanged &&
         edit.primaryOwner &&
         (newEmails.join(",") !== origEmails.join(",") || newNames.join(",") !== origNames.join(","))
@@ -4130,20 +4164,109 @@ async function openAction(id, action = "open") {
   const focus = action === "reminder" ? "edit-followUpDue" : action === "contact" ? "edit-contactName" : null;
   if (focus) el(focus).focus?.();
 }
+async function joinSchool(school) {
+  if (!credential || !school?.recordId || config?.writesEnabled !== true) return;
+  const confirmFn = typeof window !== "undefined" && typeof window.confirm === "function"
+    ? window.confirm.bind(window)
+    : (typeof confirm === "function" ? confirm : () => true);
+  if (!confirmFn(`Join ${school.schoolName} as a collaborator so you can edit it?`)) return;
+  const session = sessionVersion;
+  try {
+    const response = await apiFetch("./api/schools/join", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credential}`, "content-type": "application/json" },
+      credentials: "omit",
+      cache: "no-store",
+      body: JSON.stringify({ requestId: crypto.randomUUID(), recordId: school.recordId }),
+    });
+    const data = await response.json();
+    if (session !== sessionVersion || !credential) return;
+    if (response.status === 401 || response.status === 403) {
+      forgetSession();
+      status(messages[data.code] ?? "Your access changed. Please sign in again.");
+      el("google-button").hidden = false;
+      if (config?.ready) await showGoogleButton();
+      return;
+    }
+    if (!response.ok || !data.ok) {
+      showSaveToast(data.message || "Could not join school. Please try again.");
+      return;
+    }
+    const updatedAssignedTo = data.record?.assignedTo || [school.assignedTo, currentUser?.name].filter(Boolean).join(", ");
+    const updatedOwnerEmail = data.record?.ownerEmail || [school.ownerEmail, currentUser?.email].filter(Boolean).join(", ");
+    const existingTeam = teamSchools.find((s) => s.recordId === school.recordId);
+    if (existingTeam) {
+      existingTeam.canEdit = true;
+      existingTeam.isMySchool = true;
+      existingTeam.assignedTo = updatedAssignedTo;
+      if (updatedOwnerEmail) existingTeam.ownerEmail = updatedOwnerEmail;
+    }
+    const existingMine = schools.find((s) => s.recordId === school.recordId);
+    if (existingMine) {
+      existingMine.isMySchool = true;
+      existingMine.canEdit = true;
+      existingMine.assignedTo = updatedAssignedTo;
+      if (updatedOwnerEmail) existingMine.ownerEmail = updatedOwnerEmail;
+    } else {
+      schools.push({
+        ...school,
+        ...(data.record ? {
+          schoolName: data.record.schoolName || school.schoolName,
+          schoolBoard: data.record.schoolBoard || school.schoolBoard,
+          stage: data.record.stage || school.stage,
+          priority: data.record.priority ?? school.priority ?? "",
+          geographicRegion: data.record.geographicRegion ?? school.geographicRegion ?? "",
+          outreachGoal: data.record.outreachGoal ?? school.outreachGoal ?? school.goal ?? "",
+          goal: data.record.outreachGoal ?? school.outreachGoal ?? school.goal ?? "",
+          lastContacted: data.record.lastContacted ?? school.lastContacted ?? "",
+          followUpDue: data.record.followUpDue ?? school.followUpDue ?? "",
+          nextAction: data.record.nextAction ?? school.nextAction ?? "",
+        } : {}),
+        assignedTo: updatedAssignedTo,
+        ownerEmail: updatedOwnerEmail,
+        isMySchool: true,
+        canEdit: true,
+      });
+    }
+    if (dashboardLoaded && el("dashboard-owner")) {
+      dashboardOptions("dashboard-owner", "Everyone", [...new Set(teamSchools.flatMap((s) => (s.assignedTo || "").split(",").map((n) => n.trim()).filter(Boolean)))].sort());
+    }
+    renderHome();
+    renderSchools();
+    renderDashboard();
+    renderProgramsView();
+    showSaveToast(`✓ Joined ${school.schoolName} — you can now edit this school`);
+  } catch {
+    if (session === sessionVersion) {
+      showSaveToast("Connection interrupted. Please try joining again.");
+    }
+  }
+}
 function actionCard(school, reasons = []) {
   const card = dashboardNode("article", "", "school-card action-card");
   const badge = schoolBadge(school.stage);
   const programBadges = createProgramBadges(school.outreachGoal || school.goal || "");
   card.append(badge, ...programBadges, dashboardNode("h3", school.schoolName));
-  if (isSupervisor) card.append(dashboardNode("p", `Assigned to ${assignee(school)}`, "school-meta"));
+  const assignedLabel = assignee(school);
+  if (assignedLabel) card.append(dashboardNode("p", `Assigned to ${assignedLabel}`, "school-meta"));
   if (reasons.length) card.append(dashboardNode("p", reasons.join(" · "), "attention-reasons"));
   appendNextAction(card, school);
   const actions = dashboardNode("div", "", "action-buttons");
-  for (const [label, action, className] of [["Log outreach", "log", "button"], ["Open school", "open", "button secondary"], ["Contact info", "contact", "text-button"], ["Set reminder", "reminder", "text-button"]]) {
-    const button = dashboardNode("button", label, className); button.type = "button";
-    button.setAttribute("aria-label", `${label} for ${school.schoolName}`);
-    button.disabled = config?.writesEnabled !== true;
-    button.onclick = () => openAction(school.recordId, action); actions.append(button);
+  if (school.canEdit === false) {
+    actions.append(dashboardNode("span", "View only", "view-only-badge"));
+    const joinBtn = dashboardNode("button", "+ Join School", "button secondary join-school-btn");
+    joinBtn.type = "button";
+    joinBtn.setAttribute("aria-label", `Join ${school.schoolName}`);
+    joinBtn.disabled = config?.writesEnabled !== true;
+    joinBtn.onclick = () => joinSchool(school);
+    actions.append(joinBtn);
+  } else {
+    for (const [label, action, className] of [["Log outreach", "log", "button"], ["Open school", "open", "button secondary"], ["Contact info", "contact", "text-button"], ["Set reminder", "reminder", "text-button"]]) {
+      const button = dashboardNode("button", label, className); button.type = "button";
+      button.setAttribute("aria-label", `${label} for ${school.schoolName}`);
+      button.disabled = config?.writesEnabled !== true;
+      button.onclick = () => openAction(school.recordId, action); actions.append(button);
+    }
   }
   card.append(actions); return card;
 }
@@ -4282,6 +4405,15 @@ function renderDashboard() {
       const open = dashboardNode("button", "Open school →", "text-button"); open.type = "button";
       open.setAttribute("aria-label", `Open ${school.schoolName}`); open.onclick = () => openSchoolEditor(school.recordId);
       actions.append(open);
+    } else if (school.canEdit === false && config?.writesEnabled) {
+      const wrap = dashboardNode("div", "", "dashboard-view-only-actions");
+      wrap.append(dashboardNode("span", "View only", "view-only-badge"));
+      const joinBtn = dashboardNode("button", "+ Join", "button secondary compact-button join-school-btn");
+      joinBtn.type = "button";
+      joinBtn.setAttribute("aria-label", `Join ${school.schoolName}`);
+      joinBtn.onclick = () => joinSchool(school);
+      wrap.append(joinBtn);
+      actions.append(wrap);
     } else actions.textContent = "View only";
     el("dashboard-rows").append(row);
   }
@@ -6539,7 +6671,7 @@ el("editor-reload")?.addEventListener("click", () => { if (editing) openSchoolEd
 el("draft-discard-btn")?.addEventListener("click", discardCurrentDraft);
 el("school-editor")?.addEventListener("cancel", (event) => { event.preventDefault(); closeSchoolEditor(); });
 el("edit-primary-owner")?.addEventListener("change", (e) => {
-  if (!editing) return;
+  if (!editing || !isSupervisor) return;
   editing.assigneesChanged = true;
   const newEmail = e.target.value.toLowerCase();
   const foundUser = (editing.crmUsers || []).find((u) => u.email.toLowerCase() === newEmail);
@@ -6548,17 +6680,17 @@ el("edit-primary-owner")?.addEventListener("change", (e) => {
     name: foundUser ? foundUser.name : (editing.primaryOwner?.name || newEmail),
   };
   editing.collaborators = (editing.collaborators || []).filter((c) => c.email.toLowerCase() !== newEmail);
-  const canEdit = isSupervisor || isAssignedToMe(editing.original);
-  renderAssigneeSection(canEdit);
+  renderAssigneeSection(isSupervisor);
   updateDirtyState();
   scheduleDraftAutoSave();
 });
 el("add-collaborator-select")?.addEventListener("change", () => {
+  if (!isSupervisor) return;
   updateDirtyState();
   scheduleDraftAutoSave();
 });
 el("add-collaborator-btn")?.addEventListener("click", () => {
-  if (!editing) return;
+  if (!editing || !isSupervisor) return;
   const select = el("add-collaborator-select");
   const selectedEmail = select?.value.trim().toLowerCase();
   if (!selectedEmail) return;
@@ -6577,8 +6709,7 @@ el("add-collaborator-btn")?.addEventListener("click", () => {
   editing.collaborators.push(newCollab);
 
   if (select) select.value = "";
-  const canEdit = isSupervisor || isAssignedToMe(editing.original);
-  renderAssigneeSection(canEdit);
+  renderAssigneeSection(isSupervisor);
   updateDirtyState();
   scheduleDraftAutoSave();
 });
@@ -6633,12 +6764,13 @@ el("add-program-btn")?.addEventListener("click", () => {
   scheduleDraftAutoSave();
 });
 el("editor-unclaim-btn")?.addEventListener("click", () => {
+  if (!isSupervisor) return;
   el("unclaim-confirm-panel").hidden = false;
   el("editor-unclaim-btn").hidden = true;
 });
 el("unclaim-cancel-btn")?.addEventListener("click", () => {
   el("unclaim-confirm-panel").hidden = true;
-  el("editor-unclaim-btn").hidden = false;
+  el("editor-unclaim-btn").hidden = !isSupervisor;
 });
 el("unclaim-confirm-btn")?.addEventListener("click", async () => {
   await unclaimSchool();

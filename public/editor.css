@@ -1514,6 +1514,40 @@
 .collaborator-add-row select {
   flex: 1;
 }
+.primary-owner-badge {
+  background: #e6f2e8;
+  border-color: #9dc5a6;
+  color: #153528;
+}
+.assignment-readonly-note {
+  margin: 8px 0 0;
+  color: #55645b;
+  font-style: italic;
+}
+.view-only-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background: #eef2ee;
+  border: 1px solid #cfd9cf;
+  color: #4a5d52;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dashboard-view-only-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.join-school-btn {
+  min-height: 34px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 650;
+}
 
 /* Program Track Chips & Controls in Modal */
 .program-tracks-field {

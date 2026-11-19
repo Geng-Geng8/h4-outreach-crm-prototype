@@ -27,7 +27,7 @@ type Result = { status: number; body: Record<string, unknown> };
 type Journal = { request_id: string; fingerprint: string; state: string; plan: string; result: string };
 type Plan = { batch: Batch; result: Result };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const paths = new Set(["/api/schools/claim", "/api/schools/update", "/api/schools/contacts", "/api/schools/reassign", "/api/schools/unclaim", "/api/activities", "/api/delivery/update"]);
+const paths = new Set(["/api/schools/claim", "/api/schools/join", "/api/schools/update", "/api/schools/contacts", "/api/schools/reassign", "/api/schools/unclaim", "/api/activities", "/api/delivery/update"]);
 
 function json(status: number, body: object): Response {
   return Response.json(body, { status, headers: { "cache-control": "no-store" } });
@@ -524,6 +524,13 @@ export class SheetCoordinator extends DurableObject<Env> {
     ).toArray()[0];
     if (pending) throw new ApiError(503, "WORKBOOK_BLOCKED", { pendingRequestId: pending.request_id });
     const plan = this.plan(path, input, actor, snapshot);
+    if (plan.batch.data.length === 0) {
+      this.ctx.storage.sql.exec(
+        "INSERT INTO operations (request_id, fingerprint, state, plan, result) VALUES (?, ?, 'committed', ?, ?)",
+        requestId, hash, JSON.stringify(plan), JSON.stringify(plan.result),
+      );
+      return json(plan.result.status, plan.result.body);
+    }
     this.ctx.storage.sql.exec(
       "INSERT INTO operations (request_id, fingerprint, state, plan, result) VALUES (?, ?, 'pending', ?, '')",
       requestId, hash, JSON.stringify(plan),
@@ -817,7 +824,53 @@ export class SheetCoordinator extends DurableObject<Env> {
       row[C.stage] = "Not Contacted"; row[C.count] = 0;
       row[C.engagementStatus] = "Claimed";
       activityType = outcome = "Claimed";
+    } else if (path === "/api/schools/join") {
+      onlyKeys(input, ["requestId", "recordId"]);
+      if (typeof input.recordId !== "string" || !uuid.test(input.recordId)) {
+        throw new ApiError(422, "INVALID_RECORD_ID");
+      }
+      const matches = snapshot.Schools.map((candidate, index) => ({ candidate, number: index + 1 }))
+        .filter(({ candidate, number }) => number > 1 && candidate[C.id] === input.recordId);
+      if (matches.length !== 1) throw new ApiError(matches.length ? 503 : 404, matches.length ? "DUPLICATE_RECORD_ID" : "RECORD_NOT_FOUND");
+      row = padded(matches[0]!.candidate); rowNumber = matches[0]!.number;
+      const existingOwnerEmails = String(row[C.owner] ?? "").split(",").map((e) => e.trim()).filter(Boolean);
+      const ownerEmailsLower = existingOwnerEmails.map((e) => e.toLowerCase());
+      if (ownerEmailsLower.length === 0 || String(row[C.engagementStatus] ?? "").trim() === "Available") {
+        throw new ApiError(422, "SCHOOL_UNCLAIMED");
+      }
+      if (ownerEmailsLower.includes(actor.email)) {
+        return {
+          batch: { valueInputOption: "RAW", data: [] },
+          result: { status: 200, body: { ok: true, code: "SUCCESS", requestId, alreadyJoined: true, record: editableRecord(row) } },
+        };
+      }
+      const existingAssignedNames = String(row[C.assigned] ?? "").split(",").map((n) => n.trim()).filter(Boolean);
+      row[C.owner] = [...existingOwnerEmails, actor.email].join(", ");
+      row[C.assigned] = [...existingAssignedNames, actor.name].join(", ");
+      row[C.version] = requestId;
+      let activityNumber = 2;
+      while ((snapshot["Activity Log"][activityNumber - 1] ?? []).some((cell) => cell !== "")) activityNumber++;
+      const activity: Row = [
+        crypto.randomUUID(), day, row[C.name]!, actor.name, "App", "Joined",
+        String(row[C.contactName] ?? ""), `${actor.name} joined as collaborator`,
+        row[C.action]!, row[C.due]!, row[C.id]!, requestId,
+        actor.email, "Reassign", this.env.GOOGLE_SHEET_ID === "synthetic-h4" ? "Local synthetic proof" : "App",
+        "",
+      ];
+      return {
+        batch: {
+          valueInputOption: "RAW",
+          data: [
+            ...schoolWrites(rowNumber, row),
+            { range: `'Activity Log'!A${activityNumber}:P${activityNumber}`, values: [activity] },
+          ],
+        },
+        result: { status: 200, body: { ok: true, code: "SUCCESS", requestId, record: editableRecord(row) } },
+      };
     } else {
+      if ((path === "/api/schools/reassign" || path === "/api/schools/unclaim") && actor.role !== "Supervisor") {
+        throw new ApiError(403, "SUPERVISOR_ROLE_REQUIRED");
+      }
       if (typeof input.recordId !== "string" || !uuid.test(input.recordId) ||
           typeof input.expectedRequestId !== "string" || !uuid.test(input.expectedRequestId)) {
         throw new ApiError(422, "INVALID_RECORD_VERSION");
