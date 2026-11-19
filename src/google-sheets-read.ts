@@ -12,7 +12,7 @@ export interface ReadOnlyConfig {
   GOOGLE_PRIVATE_KEY?: string;
   ALLOWED_ORIGIN?: string;
 }
-export type CrmUser = { email: string; name: string; role: "Supervisor" | "co-op" };
+export type CrmUser = { email: string; name: string; role: "Supervisor" | "co-op" | "Volunteer" };
 export type SchoolSummary = {
   recordId: string; schoolName: string; schoolBoard: string;
   assignedTo: string; outreachGoal: string; goal: string; stage: string; priority: string; geographicRegion: string;
@@ -140,7 +140,7 @@ export class GoogleSheetsReadOnly {
     const row = matches[0]!;
     const active = value(row[3]).trim().toUpperCase();
     const role = value(row[2]).trim();
-    if (!["TRUE", ""].includes(active) || !["Supervisor", "co-op"].includes(role)) {
+    if (!["TRUE", ""].includes(active) || !["Supervisor", "co-op", "Volunteer"].includes(role)) {
       throw new ApiError(403, "USER_NOT_ALLOWED");
     }
     return { email, name: value(row[1]).trim() || email, role: role as CrmUser["role"] };
@@ -227,7 +227,7 @@ export class GoogleSheetsReadOnly {
       const email = value(row[0]).trim().toLowerCase();
       if (!email) continue;
       const id = await studentId(email), active = ["TRUE", ""].includes(value(row[3]).trim().toUpperCase());
-      const student = value(row[2]).trim() === "co-op";
+      const student = ["co-op", "Volunteer"].includes(value(row[2]).trim());
       owners.set(email, { id, active, student });
       if (student) students.push({ id, name: value(row[1]).trim() || "Unnamed student", active });
     }
@@ -263,7 +263,7 @@ export class GoogleSheetsReadOnly {
       .filter((row) => {
         const active = value(row[3]).trim().toUpperCase();
         const role = value(row[2]).trim();
-        return ["TRUE", ""].includes(active) && ["Supervisor", "co-op"].includes(role);
+        return ["TRUE", ""].includes(active) && ["Supervisor", "co-op", "Volunteer"].includes(role);
       })
       .map((row) => ({
         email: value(row[0]).trim().toLowerCase(),

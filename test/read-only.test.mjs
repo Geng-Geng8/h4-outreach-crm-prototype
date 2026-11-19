@@ -515,3 +515,40 @@ test("demo identity verifies active CRM membership, maps to isolated synthetic a
   assert.equal(unclaimedEntry.available, true);
 });
 
+test("Volunteer role can authenticate, bootstrap, view team schools read-only, and appears in Supervisor overview", async (t) => {
+  const h = await readHarness(t);
+  const VOLUNTEER = "jordan@example.test";
+  h.tables["CRM Users"].push([VOLUNTEER, "Jordan", "Volunteer", true]);
+
+  const volunteerToken = await h.token({ email: VOLUNTEER, sub: "fixture-volunteer-jordan" });
+
+  // 1. Volunteer can bootstrap with role "Volunteer" and scoped visibility
+  const boot = await h.bootstrap(volunteerToken);
+  assert.equal(boot.status, 200);
+  assert.equal(boot.body.currentUser.email, VOLUNTEER);
+  assert.equal(boot.body.currentUser.name, "Jordan");
+  assert.equal(boot.body.currentUser.role, "Volunteer");
+  assert.equal(boot.body.visibility.scope, "assigned-school-summaries");
+  assert.equal(boot.body.overview, undefined);
+  assert.equal(boot.body.schools.length, 0);
+
+  // 2. Volunteer can view team schools on /api/dashboard in read-only mode (canEdit: false) without private fields
+  const dashRes = await h.request("/api/dashboard", { token: volunteerToken });
+  assert.equal(dashRes.status, 200);
+  const dashData = await dashRes.json();
+  assert.equal(dashData.schools.length, 2);
+  assert.ok(dashData.schools.every((s) => s.canEdit === false));
+  assert.doesNotMatch(JSON.stringify(dashData), /PRIVATE_|@|ownerEmail|notes|activities|contactName|lastRequestId/);
+
+  // 3. Volunteer is rejected from Supervisor overview
+  const overviewDenied = await h.request("/api/dashboard?view=overview", { token: volunteerToken });
+  assert.equal(overviewDenied.status, 403);
+  assert.equal((await overviewDenied.json()).code, "SUPERVISOR_ROLE_REQUIRED");
+
+  // 4. Supervisor's bootstrap overview includes the Volunteer in students breakdown
+  const supToken = await h.token({ email: SUPERVISOR, sub: "fixture-supervisor" });
+  const supBoot = await h.bootstrap(supToken);
+  assert.equal(supBoot.status, 200);
+  assert.ok(supBoot.body.overview.students.some((s) => s.name === "Jordan" && s.active === true));
+});
+

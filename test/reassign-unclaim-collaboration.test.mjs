@@ -335,3 +335,62 @@ test("student self-join: co-op appends self onto supervisor claimed school witho
   assert.equal(unclaimedRes.status, 422);
   assert.equal(unclaimedRes.body.code, "SCHOOL_UNCLAIMED");
 });
+
+test("Volunteer role: can authenticate, self-join a claimed school, appear in /api/users, and is rejected from reassign and unclaim with 403 SUPERVISOR_ROLE_REQUIRED", async (t) => {
+  const h = await harness(t);
+  const VOLUNTEER = "jordan@example.test";
+  h.sheets.tables["CRM Users"].push([VOLUNTEER, "Jordan", "Volunteer", "TRUE"]);
+
+  // Assign school solely to Supervisor Morgan
+  h.sheets.tables.Schools[1][C.owner] = SUPERVISOR;
+  h.sheets.tables.Schools[1][C.assigned] = "Morgan";
+  h.sheets.tables.Schools[1][C.engagementStatus] = "Claimed";
+
+  // Volunteer appears in GET /api/users
+  const usersRes = await h.get("/api/users", VOLUNTEER);
+  assert.equal(usersRes.status, 200);
+  const volunteerEntry = usersRes.body.users.find((u) => u.email === VOLUNTEER);
+  assert.deepEqual(volunteerEntry, { email: VOLUNTEER, name: "Jordan", role: "Volunteer" });
+
+  // Before joining, Volunteer cannot access school detail
+  const beforeDetail = await h.get(`${DETAIL}?recordId=${RECORD}`, VOLUNTEER);
+  assert.equal(beforeDetail.status, 403);
+  assert.equal(beforeDetail.body.code, "NOT_OWNER");
+
+  // Volunteer can self-join a claimed school via POST /api/schools/join
+  const joinReqId = randomUUID();
+  const joinRes = await h.post(JOIN, {
+    requestId: joinReqId,
+    recordId: RECORD,
+  }, VOLUNTEER);
+  assert.equal(joinRes.status, 200);
+  assert.equal(joinRes.body.ok, true);
+  assert.equal(joinRes.body.record.ownerEmail, `${SUPERVISOR}, ${VOLUNTEER}`);
+  assert.equal(joinRes.body.record.assignedTo, "Morgan, Jordan");
+
+  // After joining, Volunteer can access school detail and sees Volunteer role in users list
+  const afterDetail = await h.get(`${DETAIL}?recordId=${RECORD}`, VOLUNTEER);
+  assert.equal(afterDetail.status, 200);
+  assert.equal(afterDetail.body.ok, true);
+  assert.ok(afterDetail.body.users.some((u) => u.email === VOLUNTEER && u.role === "Volunteer"));
+
+  // Volunteer is rejected from POST /api/schools/reassign with 403 SUPERVISOR_ROLE_REQUIRED
+  const reassignRes = await h.post(REASSIGN, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: joinReqId,
+    newOwnerEmails: [VOLUNTEER],
+    newOwnerNames: ["Jordan"],
+  }, VOLUNTEER);
+  assert.equal(reassignRes.status, 403);
+  assert.equal(reassignRes.body.code, "SUPERVISOR_ROLE_REQUIRED");
+
+  // Volunteer is rejected from POST /api/schools/unclaim with 403 SUPERVISOR_ROLE_REQUIRED
+  const unclaimRes = await h.post(UNCLAIM, {
+    requestId: randomUUID(),
+    recordId: RECORD,
+    expectedRequestId: joinReqId,
+  }, VOLUNTEER);
+  assert.equal(unclaimRes.status, 403);
+  assert.equal(unclaimRes.body.code, "SUPERVISOR_ROLE_REQUIRED");
+});

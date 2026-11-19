@@ -2129,7 +2129,7 @@ function renderAssigneeSection(canEdit) {
   for (const user of users) {
     const opt = document.createElement("option");
     opt.value = user.email;
-    opt.textContent = `${user.name} (${user.role === "Supervisor" ? "Supervisor" : "Student"})`;
+    opt.textContent = `${user.name} (${user.role === "Supervisor" ? "Supervisor" : user.role === "Volunteer" ? "Volunteer" : "Student"})`;
     if (user.email.toLowerCase() === currentPrimaryEmail) {
       opt.selected = true;
       foundPrimary = true;
@@ -2222,7 +2222,7 @@ function renderAssigneeSection(canEdit) {
   for (const user of availableUsers) {
     const opt = document.createElement("option");
     opt.value = user.email;
-    opt.textContent = `${user.name} (${user.role === "Supervisor" ? "Supervisor" : "Student"})`;
+    opt.textContent = `${user.name} (${user.role === "Supervisor" ? "Supervisor" : user.role === "Volunteer" ? "Volunteer" : "Student"})`;
     addSelect.append(opt);
   }
 
@@ -6574,7 +6574,7 @@ async function refresh() {
     dashboardLoaded = false;
     el("user-name").textContent = data.currentUser.name;
     el("user-email").textContent = data.currentUser.email;
-    el("user-role").textContent = data.currentUser.role === "Supervisor" ? "Supervisor" : "Student co-op";
+    el("user-role").textContent = data.currentUser.role === "Supervisor" ? "Supervisor" : data.currentUser.role === "Volunteer" ? "Volunteer" : "Student co-op";
     el("avatar").textContent = data.currentUser.name.slice(0, 1).toUpperCase();
     isSupervisor = nextSupervisor;
     if (firstLoad && el("home-view")) currentTab = resumeView || "home";

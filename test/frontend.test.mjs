@@ -6025,6 +6025,133 @@ test("school editor modal: roster controls and unclaim are disabled/hidden for c
   assert.equal(supChip.children[1].textContent, "✕");
 });
 
+test("Volunteer role UI: renders Volunteer header label, View only + Join School for unassigned team schools, and read-only roster in School Editor", async (t) => {
+  const assignedSchool = {
+    recordId: "00000000-0000-4000-8000-000000000220",
+    schoolName: "Westview Volunteer High",
+    schoolBoard: "TDSB",
+    geographicRegion: "West",
+    stage: "Contacted",
+    assignedTo: "Morgan, Jordan",
+    ownerEmail: "morgan@example.test, jordan@example.test",
+    outreachGoal: "Cypher Program",
+    goal: "Cypher Program",
+    lastRequestId: "00000000-0000-4000-8000-000000000221",
+    canEdit: true,
+    isMySchool: true,
+  };
+  const unassignedTeamSchool = {
+    recordId: "00000000-0000-4000-8000-000000000222",
+    schoolName: "Northview Team Secondary",
+    schoolBoard: "YRDSB",
+    geographicRegion: "North",
+    stage: "Booked",
+    assignedTo: "Morgan",
+    outreachGoal: "Cypher Program",
+    goal: "Cypher Program",
+    canEdit: false,
+  };
+  const mockUsers = [
+    { email: "morgan@example.test", name: "Morgan", role: "Supervisor" },
+    { email: "alex@example.test", name: "Alex", role: "co-op" },
+    { email: "jordan@example.test", name: "Jordan", role: "Volunteer" },
+  ];
+
+  let joinCalled = false;
+  const volEnv = setupEnv({
+    fetchHandler: async (url, init = {}) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Jordan", email: "jordan@example.test", role: "Volunteer" },
+          schools: [assignedSchool],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/dashboard")) {
+        return Response.json({ ok: true, schools: [assignedSchool, unassignedTeamSchool] });
+      }
+      if (url.includes("/api/schools/detail")) {
+        return Response.json({ ok: true, record: assignedSchool, users: mockUsers });
+      }
+      if (url.includes("/api/schools/join")) {
+        joinCalled = true;
+        const body = JSON.parse(init.body);
+        return Response.json({
+          ok: true,
+          code: "SUCCESS",
+          requestId: body.requestId,
+          record: {
+            ...unassignedTeamSchool,
+            assignedTo: "Morgan, Jordan",
+            ownerEmail: "morgan@example.test, jordan@example.test",
+            lastRequestId: body.requestId,
+          },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(volEnv.cleanup);
+
+  volEnv.context.window.confirm = () => true;
+  volEnv.context.confirm = volEnv.context.window.confirm;
+
+  await volEnv.signIn("jordan@example.test");
+
+  // Header role badge renders "Volunteer"
+  assert.equal(volEnv.getEl("user-role").textContent, "Volunteer");
+
+  // Unassigned team school renders View only + "+ Join School" and clicking Join unlocks editing
+  volEnv.context.switchTab("programs");
+  await new Promise((r) => setTimeout(r, 20));
+  volEnv.context.setProgramsScope("all");
+  volEnv.context.selectProgram("Cypher Program");
+
+  const confirmedList = volEnv.getEl("programs-confirmed-list");
+  assert.equal(confirmedList.children.length, 1);
+  const actionDiv = confirmedList.children[0].children[confirmedList.children[0].children.length - 1];
+  assert.deepEqual(actionDiv.children.map((c) => c.textContent), ["View only", "+ Join School"]);
+  await actionDiv.children[1].onclick();
+  assert.equal(joinCalled, true);
+  assert.equal(volEnv.getEl("save-toast").textContent, "✓ Joined Northview Team Secondary — you can now edit this school");
+
+  // Inside School Editor modal, Volunteer sees read-only roster and hidden Unclaim button
+  await volEnv.context.openSchoolEditor(assignedSchool.recordId, false, "details");
+  assert.equal(volEnv.getEl("edit-primary-owner").disabled, true);
+  assert.equal(volEnv.getEl("edit-primary-owner").hidden, true);
+  assert.equal(volEnv.getEl("add-collaborator-select").disabled, true);
+  assert.equal(volEnv.getEl("add-collaborator-btn").disabled, true);
+  assert.equal(volEnv.getEl("editor-unclaim-btn").hidden, true);
+  assert.equal(volEnv.getEl("assignment-readonly-note").hidden, false);
+  assert.equal(volEnv.getEl("collaborators-list").children[0].children.length, 1);
+
+  // Supervisor sees Volunteer user labeled "(Volunteer)" in assignee dropdowns
+  const supEnv = setupEnv({
+    fetchHandler: async (url) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Morgan", email: "morgan@example.test", role: "Supervisor" },
+          schools: [assignedSchool],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/schools/detail")) {
+        return Response.json({ ok: true, record: assignedSchool, users: mockUsers });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(supEnv.cleanup);
+  await supEnv.signIn("morgan@example.test");
+  await supEnv.context.openSchoolEditor(assignedSchool.recordId, false, "details");
+  const primaryLabels = supEnv.getEl("edit-primary-owner").children.map((o) => o.textContent);
+  assert.ok(primaryLabels.includes("Morgan (Supervisor)"));
+  assert.ok(primaryLabels.includes("Alex (Student)"));
+  assert.ok(primaryLabels.includes("Jordan (Volunteer)"));
+});
+
 
 
 

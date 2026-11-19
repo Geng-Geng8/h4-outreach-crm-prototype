@@ -21,7 +21,7 @@ interface Env {
   GOOGLE_PRIVATE_KEY?: string;
 }
 
-type Actor = { email: string; name: string; role: "Supervisor" | "co-op" };
+type Actor = { email: string; name: string; role: "Supervisor" | "co-op" | "Volunteer" };
 type Input = Record<string, unknown>;
 type Result = { status: number; body: Record<string, unknown> };
 type Journal = { request_id: string; fingerprint: string; state: string; plan: string; result: string };
@@ -116,10 +116,11 @@ function actorFrom(snapshot: Snapshot, email: string): Actor {
   if (matches.length !== 1) throw new ApiError(403, "USER_NOT_ALLOWED");
   const row = matches[0]!;
   const active = String(row[3] ?? "").trim().toUpperCase();
-  if (!["", "TRUE"].includes(active) || !["Supervisor", "co-op"].includes(String(row[2]))) {
+  const role = String(row[2] ?? "").trim();
+  if (!["", "TRUE"].includes(active) || !["Supervisor", "co-op", "Volunteer"].includes(role)) {
     throw new ApiError(403, "USER_NOT_ALLOWED");
   }
-  return { email, name: String(row[1]), role: row[2] as Actor["role"] };
+  return { email, name: String(row[1]), role: role as Actor["role"] };
 }
 function writableBlank(row: Row): boolean {
   return row.every((cell, index) => index === 16 || index === 17 || cell === "");
@@ -170,7 +171,7 @@ export class SheetCoordinator extends DurableObject<Env> {
             .filter((uRow) => {
               const active = String(uRow[3] ?? "").trim().toUpperCase();
               const role = String(uRow[2] ?? "").trim();
-              return ["", "TRUE"].includes(active) && ["Supervisor", "co-op"].includes(role);
+              return ["", "TRUE"].includes(active) && ["Supervisor", "co-op", "Volunteer"].includes(role);
             })
             .map((uRow) => ({
               email: String(uRow[0]).trim().toLowerCase(),
@@ -270,7 +271,7 @@ export class SheetCoordinator extends DurableObject<Env> {
             .filter((uRow) => {
               const active = String(uRow[3] ?? "").trim().toUpperCase();
               const role = String(uRow[2] ?? "").trim();
-              return ["", "TRUE"].includes(active) && ["Supervisor", "co-op"].includes(role);
+              return ["", "TRUE"].includes(active) && ["Supervisor", "co-op", "Volunteer"].includes(role);
             })
             .map((uRow) => ({
               email: String(uRow[0]).trim().toLowerCase(),
