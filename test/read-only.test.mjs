@@ -393,24 +393,44 @@ test("read-only directory browsing calculates availability server-side and exclu
   assert.equal(result.body.directory.length, 4);
 
   // Maple Example Secondary is already claimed in Schools (osn 900001) -> available must be false
+  // and includes safe claim metadata (recordId, assignedTo, alreadyJoined) without leaking ownerEmail
   const maple = result.body.directory.find((d) => d.osn === "900001");
   assert.ok(maple);
   assert.equal(maple.schoolName, "Maple Example Secondary");
   assert.equal(maple.available, false);
+  assert.equal(maple.recordId, "00000000-0000-4000-8000-000000000001");
+  assert.equal(maple.assignedTo, "Alex");
+  assert.equal(maple.alreadyJoined, true);
 
-  // Other unclaimed schools are available
+  // Another CRM member (Sam) sees alreadyJoined: false for Alex's claimed school
+  const samResult = await h.directory(await h.token({ email: "sam@example.test", sub: "sam-sub" }));
+  assert.equal(samResult.status, 200);
+  const mapleForSam = samResult.body.directory.find((d) => d.osn === "900001");
+  assert.ok(mapleForSam);
+  assert.equal(mapleForSam.available, false);
+  assert.equal(mapleForSam.recordId, "00000000-0000-4000-8000-000000000001");
+  assert.equal(mapleForSam.assignedTo, "Alex");
+  assert.equal(mapleForSam.alreadyJoined, false);
+  assert.doesNotMatch(JSON.stringify(samResult.body), /PRIVATE_|alex@example\.test|sam@example\.test|ownerEmail/);
+
+  // Other unclaimed schools are available and remain completely unchanged
   const unclaimed = result.body.directory.find((d) => d.osn === "900002");
   assert.ok(unclaimed);
   assert.equal(unclaimed.schoolName, "Example School 2");
   assert.equal(unclaimed.available, true);
 
   // Private notes, student owners, contact details must not leak in directory
-  assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_|alex@example\.test|sam@example\.test/);
+  assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_|alex@example\.test|sam@example\.test|ownerEmail/);
+  const baseKeys = [
+    "osn", "schoolName", "schoolBoard", "schoolLevel", "gradeRange",
+    "city", "streetAddress", "postalCode", "geographicRegion", "available",
+  ];
+  const claimedKeys = [...baseKeys, "recordId", "assignedTo", "alreadyJoined"];
   for (const entry of result.body.directory) {
-    assert.deepEqual(Object.keys(entry).sort(), [
-      "osn", "schoolName", "schoolBoard", "schoolLevel", "gradeRange",
-      "city", "streetAddress", "postalCode", "geographicRegion", "available",
-    ].sort());
+    assert.deepEqual(
+      Object.keys(entry).sort(),
+      (entry.available ? baseKeys : claimedKeys).sort(),
+    );
   }
 
   // Live mutations remain blocked

@@ -4230,6 +4230,13 @@ async function joinSchool(school) {
         canEdit: true,
       });
     }
+    const existingDir = directory.find((d) => (school.recordId && d.recordId === school.recordId) || (school.osn && d.osn === school.osn));
+    if (existingDir) {
+      existingDir.available = false;
+      existingDir.alreadyJoined = true;
+      existingDir.assignedTo = updatedAssignedTo;
+      if (school.recordId) existingDir.recordId = school.recordId;
+    }
     if (dashboardLoaded && el("dashboard-owner")) {
       dashboardOptions("dashboard-owner", "Everyone", [...new Set(teamSchools.flatMap((s) => (s.assignedTo || "").split(",").map((n) => n.trim()).filter(Boolean)))].sort());
     }
@@ -4237,6 +4244,7 @@ async function joinSchool(school) {
     renderSchools();
     renderDashboard();
     renderProgramsView();
+    if (el("dir-list") && el("dir-search")) renderDirectory();
     showSaveToast(`✓ Joined ${school.schoolName} — you can now edit this school`);
   } catch {
     if (session === sessionVersion) {
@@ -6236,16 +6244,44 @@ function renderDirectory() {
     const details = document.createElement("p"); details.className = "assignment";
     details.textContent = [school.schoolLevel, school.gradeRange, school.streetAddress, school.postalCode].filter(Boolean).join(" · ") || "Basic directory listing";
     const note = document.createElement("p"); note.style.fontSize = "10px"; note.style.color = "#8b9487"; note.style.margin = "8px 0 0";
-    note.textContent = school.available ? "Available in directory" : "Claimed in CRM (Read-only)";
+    note.textContent = school.available
+      ? "Available in directory"
+      : (school.assignedTo ? `Claimed by ${school.assignedTo}` : "Claimed in CRM");
     card.append(badge, heading, meta, details, note);
     if (school.available) {
       const claimBtn = document.createElement("button");
-      claimBtn.className = "button secondary small";
+      claimBtn.className = "button secondary small dir-card-action-btn";
       claimBtn.style.marginTop = "10px";
       claimBtn.textContent = "Claim school";
       claimBtn.type = "button";
       claimBtn.onclick = () => claimDirectorySchool(school.osn, claimBtn);
       card.append(claimBtn);
+    } else if (school.alreadyJoined) {
+      const joinedActions = document.createElement("div");
+      joinedActions.className = "dir-card-actions";
+      const joinedBadge = document.createElement("span");
+      joinedBadge.className = "badge-available dir-joined-badge";
+      joinedBadge.textContent = "You're on this school ✓";
+      joinedActions.append(joinedBadge);
+      if (school.recordId) {
+        const openBtn = document.createElement("button");
+        openBtn.className = "button secondary small dir-card-action-btn";
+        openBtn.textContent = "Open school →";
+        openBtn.type = "button";
+        openBtn.onclick = () => openSchoolEditor(school.recordId);
+        joinedActions.append(openBtn);
+      }
+      card.append(joinedActions);
+    } else if (school.recordId && config?.writesEnabled) {
+      const joinBtn = document.createElement("button");
+      joinBtn.className = "button secondary small dir-card-action-btn";
+      joinBtn.style.marginTop = "10px";
+      joinBtn.style.width = "100%";
+      joinBtn.style.minHeight = "44px";
+      joinBtn.textContent = "+ Join School";
+      joinBtn.type = "button";
+      joinBtn.onclick = () => joinSchool(school);
+      card.append(joinBtn);
     }
     el("dir-list").append(card);
   }
@@ -6284,7 +6320,12 @@ async function claimDirectorySchool(osn, btn) {
         feedback.textContent = data.message || "School claimed successfully.";
       }
       const item = directory.find((s) => s.osn === osn);
-      if (item) item.available = false;
+      if (item) {
+        item.available = false;
+        item.alreadyJoined = true;
+        if (data.record?.recordId) item.recordId = data.record.recordId;
+        if (currentUser?.name) item.assignedTo = currentUser.name;
+      }
       renderDirectory();
       await refresh();
     } else if (["REAL_WRITES_DISABLED", "SHEETS_REJECTED", "TEST_SHEET_EDIT_ACCESS_REQUIRED"].includes(data.code)) {

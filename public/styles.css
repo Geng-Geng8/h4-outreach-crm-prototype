@@ -752,6 +752,22 @@ footer span span {
   border-radius: var(--radius-full);
   display: inline-block;
 }
+.dir-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.dir-joined-badge {
+  align-self: flex-start;
+  text-transform: none;
+  letter-spacing: 0.2px;
+}
+.dir-card-action-btn {
+  width: 100%;
+  min-height: 44px;
+  min-block-size: 44px;
+}
 .claim-btn {
   margin-top: 16px;
   width: 100%;
@@ -1033,10 +1049,24 @@ button.dashboard-metric:hover { border-color: var(--brand-pine); box-shadow: var
   .dashboard-due .dashboard-school-meta { margin: 0; }
   .dashboard-filters input, .dashboard-filters select { font-size: 16px; }
   .action-buttons button, .workspace-tabs button { min-height: 44px; }
+  .dashboard-table .text-button,
+  #dir-list .school-card .button,
+  .dir-card-action-btn {
+    min-height: 44px;
+    min-block-size: 44px;
+  }
   .workspace-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: visible; gap: 4px; }
   .workspace-tabs .tab-btn { padding: 10px 4px; font-size: 11px; white-space: normal; line-height: 1.35; border-radius: var(--radius-md); }
   #home-view:not(.student-home) .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #home-view:not(.student-home) .dashboard-metric:last-child { grid-column: 1 / -1; }
+}
+@media (pointer: coarse) {
+  .dashboard-table .text-button,
+  #dir-list .school-card .button,
+  .dir-card-action-btn {
+    min-height: 44px;
+    min-block-size: 44px;
+  }
 }
 
 /* Supervisor Schools View Segmented Control */

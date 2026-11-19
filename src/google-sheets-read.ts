@@ -30,6 +30,9 @@ export type DirectoryEntry = {
   schoolLevel: string; gradeRange: string; city: string;
   streetAddress: string; postalCode: string; geographicRegion: string;
   available: boolean;
+  recordId?: string;
+  assignedTo?: string;
+  alreadyJoined?: boolean;
 };
 type ValueRange = { range: string; values?: Row[] };
 
@@ -44,9 +47,11 @@ function normalizeRole(cell: Cell | null | undefined): CrmUser["role"] | null {
 function checkHeader(row: Row | undefined, expected: readonly string[]) {
   if (expected.some((header, index) => row?.[index] !== header)) throw new ApiError(503, "SCHEMA_MISMATCH");
 }
+function normalizeName(val: unknown): string {
+  return String(val).normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+}
 function sameName(a: unknown, b: unknown): boolean {
-  const normalize = (val: unknown) => String(val).normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
-  return normalize(a) === normalize(b);
+  return normalizeName(a) === normalizeName(b);
 }
 function checkDirectoryHeader(row: Row | undefined) {
   if (!row) throw new ApiError(503, "SCHEMA_MISMATCH");
@@ -280,32 +285,41 @@ export class GoogleSheetsReadOnly {
       });
   }
 
-  async directory(): Promise<DirectoryEntry[]> {
+  async directory(user?: CrmUser): Promise<DirectoryEntry[]> {
     const ranges = await this.read([
       "'School Directory'!A:O",
       "'Schools'!A:B",
+      "'Schools'!D:D",
       "'Schools'!Y:Y",
       "'Schools'!Z:Z",
     ]);
-    const [dirRange, schoolsBase, schoolsOsn, schoolsOwner] = ranges.map((r) => r.values ?? []);
+    const [dirRange, schoolsBase, schoolsAssigned, schoolsOsn, schoolsOwner] = ranges.map((r) => r.values ?? []);
     checkDirectoryHeader(dirRange?.[0]);
     checkHeader(schoolsBase?.[0], ["Record ID", "School / Organization"]);
+    checkHeader(schoolsAssigned?.[0], ["Assigned To"]);
     checkHeader(schoolsOsn?.[0], ["Ontario School Number"]);
     checkHeader(schoolsOwner?.[0], ["Owner Email"]);
 
-    const claimedOsns = new Set<string>();
-    const claimedNames: string[] = [];
+    type ClaimedMeta = { recordId: string; assignedTo: string; ownerEmails: string[] };
+    const claimedByOsn = new Map<string, ClaimedMeta>();
+    const claimedByName = new Map<string, ClaimedMeta>();
     for (let i = 1; i < (schoolsBase?.length ?? 0); i++) {
       const row = schoolsBase![i];
       if (!row || !value(row[0])) continue;
-      const owner = value(schoolsOwner?.[i]?.[0]).trim();
-      if (!owner) continue;
+      const ownerRaw = value(schoolsOwner?.[i]?.[0]).trim();
+      if (!ownerRaw) continue;
+      const recordId = value(row[0]).trim();
       const name = value(row[1]).trim();
+      const assignedTo = value(schoolsAssigned?.[i]?.[0]).trim();
       const osn = value(schoolsOsn?.[i]?.[0]).trim();
-      if (osn) claimedOsns.add(osn);
-      if (name) claimedNames.push(name);
+      const ownerEmails = ownerRaw.toLowerCase().split(",").map((e) => e.trim()).filter(Boolean);
+      const meta: ClaimedMeta = { recordId, assignedTo, ownerEmails };
+      if (osn && !claimedByOsn.has(osn)) claimedByOsn.set(osn, meta);
+      const normalized = normalizeName(name);
+      if (normalized && !claimedByName.has(normalized)) claimedByName.set(normalized, meta);
     }
 
+    const userEmail = user?.email?.trim().toLowerCase() ?? "";
     const entries: DirectoryEntry[] = [];
     for (let index = 1; index < (dirRange?.length ?? 0); index++) {
       const row = dirRange![index];
@@ -315,11 +329,11 @@ export class GoogleSheetsReadOnly {
       const rawStatus = value(row[14]).trim();
       // Requirement: Blank Status does NOT count as Available. Require explicit Available.
       const isStatusAvailable = rawStatus.toLowerCase() === "available";
-      const isOsnClaimed = osn !== "" && claimedOsns.has(osn);
-      const isNameClaimed = claimedNames.some((claimedName) => sameName(claimedName, schoolName));
-      const available = isStatusAvailable && !isOsnClaimed && !isNameClaimed;
+      const matchedClaim = (osn !== "" ? claimedByOsn.get(osn) : undefined)
+        ?? claimedByName.get(normalizeName(schoolName));
+      const available = isStatusAvailable && !matchedClaim;
 
-      entries.push({
+      const entry: DirectoryEntry = {
         osn, schoolName,
         schoolBoard: value(row[2]).trim(),
         schoolLevel: value(row[3]).trim(),
@@ -329,7 +343,13 @@ export class GoogleSheetsReadOnly {
         postalCode: value(row[7]).trim(),
         geographicRegion: value(row[11]).trim(),
         available,
-      });
+      };
+      if (!available && matchedClaim) {
+        entry.recordId = matchedClaim.recordId;
+        entry.assignedTo = matchedClaim.assignedTo;
+        entry.alreadyJoined = userEmail ? matchedClaim.ownerEmails.includes(userEmail) : false;
+      }
+      entries.push(entry);
     }
     return entries;
   }

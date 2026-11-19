@@ -79,6 +79,7 @@ export async function readHarness(t, overrides = {}) {
           ["'Schools'!S1:S1000", [18]], ["'Schools'!S:S", [18]],
           ["'Schools'!Z1:Z1000", [25]], ["'Schools'!Z:Z", [25]],
           ["'Schools'!A1:B1000", [0, 1]], ["'Schools'!A:B", [0, 1]],
+          ["'Schools'!D1:D1000", [3]], ["'Schools'!D:D", [3]],
           ["'Schools'!Y1:Y1000", [24]], ["'Schools'!Y:Y", [24]],
         ]).get(range);
         if (!selected) { unexpected.push(range); throw new Error("Private or unknown range requested"); }

@@ -6170,6 +6170,150 @@ test("Volunteer role UI: renders Volunteer header label, View only + Join School
   assert.equal(lowerEnv.getEl("user-role").textContent, "Volunteer");
 });
 
+test("Find School directory cards show Claimed by + '+ Join School' and flip to 'You're on this school ✓' after joining", async (t) => {
+  let joinPayload = null;
+  let editorRecordId = "";
+  const claimedDirectorySchool = {
+    osn: "751537",
+    schoolName: "Glen Supervisor Secondary",
+    schoolBoard: "TDSB",
+    schoolLevel: "Secondary",
+    gradeRange: "9-12",
+    city: "Toronto",
+    streetAddress: "100 Main St",
+    postalCode: "M1M 1M1",
+    geographicRegion: "Toronto",
+    available: false,
+    recordId: "SCH-501",
+    assignedTo: "Glen",
+    alreadyJoined: false,
+  };
+  const alreadyJoinedSchool = {
+    osn: "751538",
+    schoolName: "Already Mine Collegiate",
+    schoolBoard: "YRDSB",
+    schoolLevel: "Secondary",
+    gradeRange: "9-12",
+    city: "Markham",
+    streetAddress: "200 Oak Ave",
+    postalCode: "L3R 1A1",
+    geographicRegion: "York",
+    available: false,
+    recordId: "SCH-502",
+    assignedTo: "Alex",
+    alreadyJoined: true,
+  };
+
+  const { context, getEl, signIn, cleanup } = setupEnv({
+    fetchHandler: async (url, init) => {
+      const path = String(url);
+      if (path.includes("/api/config")) {
+        return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      }
+      if (path.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: [{
+            recordId: "SCH-502",
+            schoolName: "Already Mine Collegiate",
+            schoolBoard: "YRDSB",
+            assignedTo: "Alex",
+            stage: "Contacted",
+            priority: "Medium",
+            geographicRegion: "York",
+            isMySchool: true,
+          }],
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (path.includes("/api/directory")) {
+        return Response.json({
+          ok: true,
+          directory: [claimedDirectorySchool, alreadyJoinedSchool],
+        });
+      }
+      if (path.includes("/api/schools/join")) {
+        joinPayload = JSON.parse(init.body);
+        return Response.json({
+          ok: true,
+          code: "SUCCESS",
+          record: {
+            recordId: "SCH-501",
+            schoolName: "Glen Supervisor Secondary",
+            schoolBoard: "TDSB",
+            assignedTo: "Glen, Alex",
+            ownerEmail: "glen@example.test, alex@example.test",
+            stage: "Contacted",
+            priority: "High",
+            geographicRegion: "Toronto",
+          },
+        });
+      }
+      if (path.includes("/api/schools/detail")) {
+        editorRecordId = new URL(path, "http://localhost").searchParams.get("recordId") || "";
+        return Response.json({
+          ok: true,
+          record: {
+            recordId: editorRecordId,
+            schoolName: "Glen Supervisor Secondary",
+            schoolBoard: "TDSB",
+            assignedTo: "Glen, Alex",
+            ownerEmail: "glen@example.test, alex@example.test",
+            stage: "Contacted",
+            lastRequestId: "req-501",
+          },
+          activities: [],
+          contacts: [],
+          users: [],
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  t.after(cleanup);
+  context.window.confirm = () => true;
+  context.confirm = context.window.confirm;
+
+  await signIn("alex@example.test");
+  getEl("tab-directory").click();
+  await new Promise((r) => setTimeout(r, 20));
+
+  const dirList = getEl("dir-list");
+  assert.equal(dirList.children.length, 2);
+
+  // Card 1: Supervisor-claimed school shows "Claimed by Glen" and "+ Join School" button (44px min-height)
+  const claimedCard = dirList.children[0];
+  const claimedNote = claimedCard.children[4];
+  const joinBtn = claimedCard.children[5];
+  assert.equal(claimedNote.textContent, "Claimed by Glen");
+  assert.equal(joinBtn.textContent, "+ Join School");
+  assert.equal(joinBtn.style.minHeight, "44px");
+
+  // Card 2: Already joined school shows "You're on this school ✓" and "Open school →"
+  const joinedCard = dirList.children[1];
+  const joinedActions = joinedCard.children[5];
+  assert.deepEqual(
+    joinedActions.children.map((c) => c.textContent),
+    ["You're on this school ✓", "Open school →"],
+  );
+
+  // Tap "+ Join School" on Card 1 -> calls /api/schools/join and flips card immediately
+  await joinBtn.onclick();
+  assert.equal(joinPayload?.recordId, "SCH-501");
+
+  const updatedCard = getEl("dir-list").children[0];
+  assert.equal(updatedCard.children[4].textContent, "Claimed by Glen, Alex");
+  const updatedActions = updatedCard.children[5];
+  assert.deepEqual(
+    updatedActions.children.map((c) => c.textContent),
+    ["You're on this school ✓", "Open school →"],
+  );
+
+  // Clicking "Open school →" opens the school editor for the joined record
+  await updatedActions.children[1].onclick();
+  assert.equal(editorRecordId, "SCH-501");
+});
+
 
 
 

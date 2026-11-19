@@ -245,8 +245,8 @@ export default (() => {
             if (setup(env).length) throw new ApiError(503, "GOOGLE_SETUP_REQUIRED");
             const identity = await verifyGoogleIdentity(request, env.GOOGLE_CLIENT_ID!);
             if (!reader?.matches(env)) reader = new GoogleSheetsReadOnly(env);
-            await reader.authorize(identity.email);
-            const directory = await reader.directory();
+            const user = await reader.authorize(identity.email);
+            const directory = await reader.directory(user);
             return json(200, { ok: true, mode: "read-only", writesEnabled: false, directory });
           } catch (error) {
             return error instanceof ApiError
