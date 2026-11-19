@@ -2320,6 +2320,32 @@ dialog::backdrop {
   border-color: #c8dec2;
   color: #153528;
 }
+.delivery-gcal-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #8eb69b;
+  color: #153528;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  touch-action: manipulation;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.delivery-gcal-link:hover,
+.delivery-gcal-link:focus-visible {
+  background: #153528;
+  border-color: #153528;
+  color: #ffffff;
+}
 
 /* 6 Tap-to-Toggle Readiness Pills */
 .delivery-readiness-grid {
@@ -2420,12 +2446,26 @@ dialog::backdrop {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+  min-width: 0;
 }
 .delivery-card-actions button {
   flex: 1 1 auto;
-  min-height: 40px;
+  min-block-size: 40px;
+  min-width: 0;
+  max-width: 100%;
   padding: 7px 11px;
   font-size: 12.5px;
+  touch-action: manipulation;
+}
+.delivery-copy-btn[data-copied] {
+  background: #dcfce7;
+  border-color: #16a34a;
+  color: #14532d;
+}
+.delivery-copy-btn[data-failed] {
+  background: #fef2f2;
+  border-color: #dc2626;
+  color: #991b1b;
 }
 
 /* Delivery Edit & History Modals */
@@ -2581,6 +2621,19 @@ dialog::backdrop {
   .subview-toggle-btn {
     padding: 10px 8px;
     font-size: 12.5px;
+  }
+  .delivery-gcal-link,
+  .delivery-copy-btn,
+  .delivery-card-actions button {
+    min-block-size: 44px;
+  }
+}
+
+@media (pointer: coarse) {
+  .delivery-gcal-link,
+  .delivery-copy-btn,
+  .delivery-card-actions button {
+    min-block-size: 44px;
   }
 }
 

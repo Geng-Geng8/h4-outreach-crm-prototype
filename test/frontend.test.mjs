@@ -1161,6 +1161,8 @@ function setupEnv({ fetchHandler, apiOrigin = "", online = true, missingIds = []
     Headers: globalThis.Headers,
     Response: globalThis.Response,
     Request: globalThis.Request,
+    URL: globalThis.URL,
+    URLSearchParams: globalThis.URLSearchParams,
     AbortController: globalThis.AbortController,
     Event: globalThis.Event,
     atob: (str) => Buffer.from(str, "base64").toString("binary"),
@@ -5753,7 +5755,9 @@ test("Program Delivery Board: multi-visit card rendering, Next Upcoming Visit au
 
   // 1. Multi-visit card schedule strip renders Visit 1 and Visit 2 cleanly
   const multiCard = h.getEl("delivery-confirmed-list").children[0];
-  const scheduleBadges = multiCard.children[1].children.map((n) => n.textContent);
+  const scheduleBadges = multiCard.children[1].children
+    .filter((n) => n.classList.contains("delivery-schedule-badge"))
+    .map((n) => n.textContent);
   assert.deepEqual(scheduleBadges, [
     "📅 Visit 1: Jan 10, 2020 · 9:15 AM",
     "📅 Visit 2: Dec 15, 2099 · 9:15 AM",
@@ -5800,7 +5804,9 @@ test("Program Delivery Board: multi-visit card rendering, Next Upcoming Visit au
   assert.equal(posts[0].classTime, "10:00, 11:30");
 
   const updatedSingleCard = h.getEl("delivery-confirmed-list").children[1];
-  const updatedBadges = updatedSingleCard.children[1].children.map((n) => n.textContent);
+  const updatedBadges = updatedSingleCard.children[1].children
+    .filter((n) => n.classList.contains("delivery-schedule-badge"))
+    .map((n) => n.textContent);
   assert.deepEqual(updatedBadges, [
     "📅 Visit 1: Dec 20, 2099 · 10:00 AM",
     "📅 Visit 2: Dec 27, 2099 · 11:30 AM",
@@ -6312,6 +6318,218 @@ test("Find School directory cards show Claimed by + '+ Join School' and flip to 
   // Clicking "Open school →" opens the school editor for the joined record
   await updatedActions.children[1].onclick();
   assert.equal(editorRecordId, "SCH-501");
+});
+
+test("Program Delivery Board: 1-tap + Google Calendar deep links (timed, all-day, rollover, multi-visit, privacy) and Copy Mentor Brief", async (t) => {
+  const deliveryData = [
+    {
+      deliveryId: "del-gcal-1",
+      recordId: "88888888-8888-4888-8888-888888888881",
+      schoolName: "St. Jude Catholic School",
+      streetAddress: "123 Main St",
+      city: "Toronto",
+      schoolBoard: "TCDSB",
+      region: "North York",
+      stage: "Booked",
+      assignedTo: "Alex",
+      programTrack: "Cypher Program",
+      teachersCount: 2,
+      studentsCount: 28,
+      danceTeamConfirmed: true,
+      introWorkshopDone: false,
+      musicSubmitted: false,
+      videoSubmitted: false,
+      finaleConfirmed: false,
+      thankYouSent: false,
+      workshopDate: "2026-12-08, 2026-12-15",
+      classTime: "09:15, ",
+      schoolStartTime: "08:30",
+      schoolEndTime: "15:00",
+      studentMentors: "Maya L., Devon P.",
+      deliveryNotes: "Gym A reserved — sign in at main office",
+      // Sensitive fields that MUST NEVER appear in calendar links or copied mentor brief
+      primaryContactName: "Principal Secret",
+      primaryContactEmail: "secret.teacher@tcdsb.example",
+      primaryContactPhone: "416-555-0199",
+      notes: "PRIVATE OUTREACH NOTE DO NOT SHARE",
+      lastEditedBy: "Alex",
+      lastEditedAt: "2026-11-18T14:00:00.000Z",
+      lastRequestId: "req-gcal-1",
+      history: [],
+    },
+    {
+      deliveryId: "del-gcal-2",
+      recordId: "88888888-8888-4888-8888-888888888882",
+      schoolName: "Undated Collegiate",
+      schoolBoard: "TDSB",
+      region: "East",
+      stage: "Booked",
+      assignedTo: "Sam",
+      programTrack: "Cypher Program",
+      teachersCount: 1,
+      studentsCount: 15,
+      danceTeamConfirmed: false,
+      introWorkshopDone: false,
+      musicSubmitted: false,
+      videoSubmitted: false,
+      finaleConfirmed: false,
+      thankYouSent: false,
+      workshopDate: "",
+      classTime: "",
+      schoolStartTime: "",
+      schoolEndTime: "",
+      studentMentors: "",
+      deliveryNotes: "",
+      lastEditedBy: "Sam",
+      lastEditedAt: "2026-11-18T15:00:00.000Z",
+      lastRequestId: "req-gcal-2",
+      history: [],
+    },
+  ];
+
+  const h = setupEnv({
+    timerDelay: () => 25,
+    fetchHandler: async (url) => {
+      if (url.includes("/api/config")) return Response.json({ ready: true, writesEnabled: true, googleClientId: "test-client-id" });
+      if (url.includes("/api/bootstrap")) {
+        return Response.json({
+          currentUser: { name: "Alex", email: "alex@example.test", role: "co-op" },
+          schools: deliveryData.map((d) => ({
+            recordId: d.recordId,
+            schoolName: d.schoolName,
+            outreachGoal: "Cypher Program",
+            stage: "Booked",
+            lastRequestId: "v1",
+          })),
+          sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        });
+      }
+      if (url.includes("/api/delivery")) {
+        return Response.json({ ok: true, deliveries: deliveryData });
+      }
+      return Response.json({ ok: true, schools: [] });
+    },
+  });
+  t.after(h.cleanup);
+
+  await h.signIn("alex@example.test");
+  await h.context.openDeliveryBoard("Cypher Program");
+
+  // 1. Direct unit checks on buildGoogleCalendarUrl
+  const timedUrl = h.context.buildGoogleCalendarUrl(deliveryData[0], { date: "2026-12-08", time: "09:15" }, 0, 2);
+  const parsedTimed = new URL(timedUrl);
+  assert.equal(parsedTimed.origin + parsedTimed.pathname, "https://calendar.google.com/calendar/render");
+  assert.equal(parsedTimed.searchParams.get("action"), "TEMPLATE");
+  assert.equal(parsedTimed.searchParams.get("ctz"), "America/Toronto");
+  assert.equal(parsedTimed.searchParams.get("text"), "H4 Cypher Program — St. Jude Catholic School (Visit 1)");
+  assert.equal(parsedTimed.searchParams.get("dates"), "20261208T091500/20261208T101500");
+  assert.equal(parsedTimed.searchParams.get("location"), "St. Jude Catholic School, 123 Main St, Toronto");
+  const timedDetails = parsedTimed.searchParams.get("details");
+  assert.match(timedDetails, /Program: Cypher Program/);
+  assert.match(timedDetails, /Visit: Visit 1 · Dec 8, 2026 at 9:15 AM/);
+  assert.match(timedDetails, /Bell Times: 8:30 AM – 3:00 PM/);
+  assert.match(timedDetails, /Headcount: 30 \(28 students \/ 2 teachers\)/);
+  assert.match(timedDetails, /Assigned Mentors: Maya L\., Devon P\./);
+  assert.match(timedDetails, /Logistics Notes: Gym A reserved/);
+  // Privacy guardrail: zero leaked contacts or private notes
+  assert.doesNotMatch(timedUrl, /Principal Secret|secret\.teacher|416-555-0199|PRIVATE OUTREACH NOTE/);
+
+  // Hour rollover check (23:30 on Dec 31 -> 00:30 on Jan 1)
+  const rolloverUrl = h.context.buildGoogleCalendarUrl(deliveryData[0], { date: "2026-12-31", time: "23:30" }, 0, 1);
+  assert.equal(new URL(rolloverUrl).searchParams.get("dates"), "20261231T233000/20270101T003000");
+
+  // All-day format check when time is empty
+  const allDayUrl = h.context.buildGoogleCalendarUrl(deliveryData[0], { date: "2026-12-15", time: "" }, 1, 2);
+  const parsedAllDay = new URL(allDayUrl);
+  assert.equal(parsedAllDay.searchParams.get("dates"), "20261215/20261216");
+  assert.equal(parsedAllDay.searchParams.get("text"), "H4 Cypher Program — St. Jude Catholic School (Visit 2)");
+  assert.equal(parsedAllDay.searchParams.get("ctz"), "America/Toronto");
+
+  // 2. Card Schedule Strip renders separate + Google Calendar links for Visit 1 and Visit 2, and none when Date needed
+  const multiCard = h.getEl("delivery-confirmed-list").children[0];
+  const gcalLinks = multiCard.children[1].children.filter((n) => n.classList.contains("delivery-gcal-link"));
+  assert.equal(gcalLinks.length, 2);
+  assert.equal(gcalLinks[0].textContent, "+ Google Calendar");
+  assert.equal(gcalLinks[0].getAttribute("target"), "_blank");
+  assert.equal(gcalLinks[0].getAttribute("rel"), "noopener noreferrer");
+  assert.equal(gcalLinks[0].getAttribute("aria-label"), "Add St. Jude Catholic School Visit 1 to Google Calendar");
+  assert.equal(new URL(gcalLinks[0].getAttribute("href")).searchParams.get("dates"), "20261208T091500/20261208T101500");
+  assert.equal(gcalLinks[1].getAttribute("aria-label"), "Add St. Jude Catholic School Visit 2 to Google Calendar");
+  assert.equal(new URL(gcalLinks[1].getAttribute("href")).searchParams.get("dates"), "20261215/20261216");
+
+  const undatedCard = h.getEl("delivery-confirmed-list").children[1];
+  const undatedGcalLinks = undatedCard.children[1].children.filter((n) => n.classList.contains("delivery-gcal-link"));
+  assert.equal(undatedGcalLinks.length, 0);
+
+  // 3. Clicking Copy Brief copies formatted brief to clipboard, shows ✓ Copied, shows toast, and resets
+  let copiedText = "";
+  h.context.navigator.clipboard = {
+    writeText: async (text) => {
+      copiedText = text;
+    },
+  };
+
+  const footer = multiCard.children[multiCard.children.length - 1];
+  const actions = footer.children[1];
+  const copyBtn = actions.children.find((btn) => btn.classList.contains("delivery-copy-btn"));
+  assert.ok(copyBtn, "Copy Brief button is rendered in card action bar");
+  assert.equal(copyBtn.textContent, "Copy Brief");
+  assert.equal(copyBtn.getAttribute("aria-label"), "Copy mentor brief for St. Jude Catholic School");
+
+  await copyBtn.onclick();
+  assert.equal(
+    copiedText,
+    [
+      "H4 Cypher Program — St. Jude Catholic School",
+      "Board/Region: TCDSB · North York",
+      "Schedule: Visit 1: Dec 8, 2026 at 9:15 AM | Visit 2: Dec 15, 2026",
+      "Bell Times: 8:30 AM – 3:00 PM",
+      "Headcount: 30 (28 students / 2 teachers)",
+      "Mentors: Maya L., Devon P.",
+      "Notes: Gym A reserved — sign in at main office",
+    ].join("\n")
+  );
+  assert.doesNotMatch(copiedText, /Principal Secret|secret\.teacher|416-555-0199|PRIVATE OUTREACH NOTE/);
+  assert.equal(copyBtn.textContent, "✓ Copied");
+  assert.equal(copyBtn.getAttribute("data-copied"), "");
+  assert.equal(h.getEl("save-toast").textContent, "✓ Mentor brief copied to clipboard");
+  assert.equal(h.getEl("save-toast").hidden, false);
+
+  // After timer fires, button resets back to Copy Brief
+  await until(() => copyBtn.textContent === "Copy Brief");
+  assert.equal(copyBtn.getAttribute("data-copied") ?? null, null);
+
+  // 4. Fallback copy path (textarea + execCommand) when navigator.clipboard rejects
+  let fallbackCopied = "";
+  h.context.navigator.clipboard = {
+    writeText: async () => { throw new Error("Clipboard blocked"); },
+  };
+  const appendedNodes = [];
+  h.context.document.body = {
+    append: (node) => { appendedNodes.push(node); },
+  };
+  h.context.document.execCommand = (cmd) => {
+    if (cmd === "copy" && appendedNodes.length > 0) {
+      fallbackCopied = appendedNodes[appendedNodes.length - 1].value;
+      return true;
+    }
+    return false;
+  };
+
+  const undatedFooter = undatedCard.children[undatedCard.children.length - 1];
+  const undatedCopyBtn = undatedFooter.children[1].children.find((btn) => btn.classList.contains("delivery-copy-btn"));
+  await undatedCopyBtn.onclick();
+  assert.equal(
+    fallbackCopied,
+    [
+      "H4 Cypher Program — Undated Collegiate",
+      "Board/Region: TDSB · East",
+      "Schedule: Date needed",
+      "Headcount: 16 (15 students / 1 teachers)",
+      "Mentors: Unassigned",
+    ].join("\n")
+  );
+  assert.equal(undatedCopyBtn.textContent, "✓ Copied");
 });
 
 

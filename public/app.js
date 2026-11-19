@@ -5280,6 +5280,221 @@ function formatDeliveryDate(dateStr, includeYear = true) {
   ).format(dt);
 }
 
+function padGcalTwo(num) {
+  return String(num).padStart(2, "0");
+}
+
+function formatGcalDateStamp(year, month, day) {
+  return `${String(year).padStart(4, "0")}${padGcalTwo(month)}${padGcalTwo(day)}`;
+}
+
+function formatGcalDateTimeStamp(year, month, day, hour, minute) {
+  return `${formatGcalDateStamp(year, month, day)}T${padGcalTwo(hour)}${padGcalTwo(minute)}00`;
+}
+
+function buildGoogleCalendarUrl(item, visit, visitIndex = 0, totalVisits = 1) {
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(visit?.date || "").trim());
+  if (!dateMatch) return "";
+  const year = Number(dateMatch[1]);
+  const month = Number(dateMatch[2]);
+  const day = Number(dateMatch[3]);
+  const baseDate = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(baseDate.getTime())) return "";
+
+  const timeMatch = /^(\d{1,2}):(\d{2})$/.exec(String(visit?.time || "").trim());
+  let datesParam = "";
+  let hasValidTime = false;
+  if (timeMatch) {
+    const hour = Number(timeMatch[1]);
+    const minute = Number(timeMatch[2]);
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+      hasValidTime = true;
+      const startDt = new Date(Date.UTC(year, month - 1, day, hour, minute));
+      const endDt = new Date(Date.UTC(year, month - 1, day, hour + 1, minute));
+      datesParam = `${formatGcalDateTimeStamp(
+        startDt.getUTCFullYear(),
+        startDt.getUTCMonth() + 1,
+        startDt.getUTCDate(),
+        startDt.getUTCHours(),
+        startDt.getUTCMinutes()
+      )}/${formatGcalDateTimeStamp(
+        endDt.getUTCFullYear(),
+        endDt.getUTCMonth() + 1,
+        endDt.getUTCDate(),
+        endDt.getUTCHours(),
+        endDt.getUTCMinutes()
+      )}`;
+    }
+  }
+  if (!hasValidTime) {
+    const nextDt = new Date(Date.UTC(year, month - 1, day + 1));
+    datesParam = `${formatGcalDateStamp(year, month, day)}/${formatGcalDateStamp(
+      nextDt.getUTCFullYear(),
+      nextDt.getUTCMonth() + 1,
+      nextDt.getUTCDate()
+    )}`;
+  }
+
+  const programTrack = String(item?.programTrack || "Program").trim();
+  const schoolName = String(item?.schoolName || "School").trim();
+  const text = `H4 ${programTrack} — ${schoolName}${totalVisits > 1 ? ` (Visit ${visitIndex + 1})` : ""}`;
+  const location = [item?.schoolName, item?.streetAddress || item?.address, item?.city]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(", ");
+
+  const students = Number(item?.studentsCount) || 0;
+  const teachers = Number(item?.teachersCount) || 0;
+  const totalParticipants = students + teachers;
+
+  const detailLines = [
+    `Program: ${programTrack}`,
+    `Visit: ${totalVisits > 1 ? `Visit ${visitIndex + 1} · ` : ""}${formatDeliveryDate(visit.date, true)}${hasValidTime ? ` at ${formatDeliveryTime12h(visit.time)}` : ""}`,
+  ];
+  if (item?.schoolStartTime || item?.schoolEndTime) {
+    const startFmt = item.schoolStartTime ? formatDeliveryTime12h(item.schoolStartTime) : "?";
+    const endFmt = item.schoolEndTime ? formatDeliveryTime12h(item.schoolEndTime) : "?";
+    detailLines.push(`Bell Times: ${startFmt} – ${endFmt}`);
+  }
+  detailLines.push(`Headcount: ${totalParticipants} (${students} students / ${teachers} teachers)`);
+  detailLines.push(`Assigned Mentors: ${String(item?.studentMentors || "").trim() || "TBD"}`);
+  const logisticsNotes = String(item?.deliveryNotes || "").trim();
+  if (logisticsNotes) {
+    detailLines.push(`Logistics Notes: ${logisticsNotes}`);
+  }
+
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    ctz: "America/Toronto",
+    text,
+    dates: datesParam,
+    location,
+    details: detailLines.join("\n"),
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function buildMentorBriefText(item) {
+  const programTrack = String(item?.programTrack || "Program").trim();
+  const schoolName = String(item?.schoolName || "Unnamed School").trim();
+  const boardRegion = [item?.schoolBoard, item?.geographicRegion || item?.region]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(" · ");
+
+  const visits = parseDeliveryVisits(item?.workshopDate, item?.classTime);
+  let scheduleText = "Date needed";
+  if (visits.length > 1) {
+    scheduleText = visits
+      .map((visit) => {
+        const d = visit.date ? formatDeliveryDate(visit.date, true) : "Date needed";
+        const t = visit.time ? ` at ${formatDeliveryTime12h(visit.time)}` : "";
+        return `Visit ${visit.index}: ${d}${t}`;
+      })
+      .join(" | ");
+  } else if (visits.length === 1 && visits[0].date) {
+    const single = visits[0];
+    scheduleText = `${formatDeliveryDate(single.date, true)}${single.time ? ` at ${formatDeliveryTime12h(single.time)}` : ""}`;
+  }
+
+  const students = Number(item?.studentsCount) || 0;
+  const teachers = Number(item?.teachersCount) || 0;
+  const total = students + teachers;
+  const mentors = String(item?.studentMentors || "").trim() || "Unassigned";
+  const notes = String(item?.deliveryNotes || "").trim();
+
+  const lines = [
+    `H4 ${programTrack} — ${schoolName}`,
+    `Board/Region: ${boardRegion || "TBD"}`,
+    `Schedule: ${scheduleText}`,
+  ];
+  if (item?.schoolStartTime || item?.schoolEndTime) {
+    const startFmt = item.schoolStartTime ? formatDeliveryTime12h(item.schoolStartTime) : "?";
+    const endFmt = item.schoolEndTime ? formatDeliveryTime12h(item.schoolEndTime) : "?";
+    lines.push(`Bell Times: ${startFmt} – ${endFmt}`);
+  }
+  lines.push(`Headcount: ${total} (${students} students / ${teachers} teachers)`);
+  lines.push(`Mentors: ${mentors}`);
+  if (notes) {
+    lines.push(`Notes: ${notes}`);
+  }
+  return lines.join("\n");
+}
+
+const deliveryCopyTimers = new WeakMap();
+
+function legacyCopyToClipboard(text) {
+  const field = document.createElement("textarea");
+  field.value = text;
+  field.setAttribute?.("readonly", "");
+  field.setAttribute?.("aria-hidden", "true");
+  field.style.cssText = "position:fixed;inset-block-start:0;opacity:0;pointer-events:none";
+  document.body?.append?.(field);
+  field.select?.();
+  try {
+    return Boolean(document.execCommand?.("copy"));
+  } finally {
+    field.remove?.();
+  }
+}
+
+async function copyTextToClipboard(text) {
+  if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to legacy textarea copy for mobile WebViews / restricted contexts
+    }
+  }
+  return legacyCopyToClipboard(text);
+}
+
+async function copyMentorBrief(item, button) {
+  const text = buildMentorBriefText(item);
+  const copied = await copyTextToClipboard(text);
+  if (button) {
+    clearTimeout(deliveryCopyTimers.get(button));
+    button.removeAttribute?.("data-copied");
+    button.removeAttribute?.("data-failed");
+    if (copied) {
+      button.setAttribute?.("data-copied", "");
+      button.textContent = "✓ Copied";
+    } else {
+      button.setAttribute?.("data-failed", "");
+      button.textContent = "Copy failed";
+    }
+    deliveryCopyTimers.set(
+      button,
+      setTimeout(() => {
+        button.removeAttribute?.("data-copied");
+        button.removeAttribute?.("data-failed");
+        button.textContent = "Copy Brief";
+      }, 2000)
+    );
+  }
+  if (copied) {
+    showSaveToast("✓ Mentor brief copied to clipboard");
+  } else {
+    showSaveToast("Could not copy mentor brief to clipboard");
+  }
+  return copied;
+}
+
+function createDeliveryGcalLink(item, visit, visitIndex, totalVisits) {
+  const href = buildGoogleCalendarUrl(item, visit, visitIndex, totalVisits);
+  if (!href) return null;
+  const link = dashboardNode("a", "+ Google Calendar", "delivery-gcal-link");
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.setAttribute("href", href);
+  link.setAttribute("target", "_blank");
+  link.setAttribute("rel", "noopener noreferrer");
+  link.setAttribute("aria-label", `Add ${item?.schoolName || "School"} Visit ${visitIndex + 1} to Google Calendar`);
+  return link;
+}
+
 function formatDeliveryRelativeTime(isoStr) {
   if (!isoStr) return "";
   const ts = Date.parse(isoStr);
@@ -5478,7 +5693,8 @@ function createDeliveryCard(item) {
   const scheduleStrip = dashboardNode("div", "", "delivery-schedule-strip");
   const visits = parseDeliveryVisits(item.workshopDate, item.classTime);
   if (visits.length > 1) {
-    for (const visit of visits) {
+    for (let idx = 0; idx < visits.length; idx += 1) {
+      const visit = visits[idx];
       const dateText = visit.date ? formatDeliveryDate(visit.date, true) : "Date needed";
       const timeText = visit.time ? formatDeliveryTime12h(visit.time) : "";
       const visitLabel = timeText
@@ -5491,9 +5707,11 @@ function createDeliveryCard(item) {
           `delivery-schedule-badge delivery-visit-badge${!visit.date ? " is-missing" : ""}`
         )
       );
+      const gcalLink = createDeliveryGcalLink(item, visit, idx, visits.length);
+      if (gcalLink) scheduleStrip.append(gcalLink);
     }
   } else {
-    const singleVisit = visits[0] || { date: "", time: "" };
+    const singleVisit = visits[0] || { index: 1, date: "", time: "" };
     if (singleVisit.date) {
       scheduleStrip.append(
         dashboardNode("span", `📅 ${formatDeliveryDate(singleVisit.date, true)}`, "delivery-schedule-badge")
@@ -5512,6 +5730,8 @@ function createDeliveryCard(item) {
         dashboardNode("span", "🕘 Time needed", "delivery-schedule-badge is-missing")
       );
     }
+    const gcalLink = createDeliveryGcalLink(item, singleVisit, 0, 1);
+    if (gcalLink) scheduleStrip.append(gcalLink);
   }
   if (item.schoolStartTime || item.schoolEndTime) {
     const startFmt = item.schoolStartTime ? formatDeliveryTime12h(item.schoolStartTime) : "?";
@@ -5580,6 +5800,11 @@ function createDeliveryCard(item) {
   editBtn.disabled = isSaving || writesBlocked;
   editBtn.onclick = () => openDeliveryEditModal(item.recordId, item.programTrack);
 
+  const copyBriefBtn = dashboardNode("button", "Copy Brief", "button secondary compact-button delivery-copy-btn");
+  copyBriefBtn.type = "button";
+  copyBriefBtn.setAttribute("aria-label", `Copy mentor brief for ${item.schoolName || "School"}`);
+  copyBriefBtn.onclick = () => copyMentorBrief(item, copyBriefBtn);
+
   const historyCount = Array.isArray(item.history) ? item.history.length : 0;
   const historyBtn = dashboardNode("button", `History (${historyCount})`, "button secondary compact-button delivery-action-history");
   historyBtn.type = "button";
@@ -5589,7 +5814,7 @@ function createDeliveryCard(item) {
   viewSchoolBtn.type = "button";
   viewSchoolBtn.onclick = () => openSchoolEditor(item.recordId, false, "details");
 
-  actions.append(editBtn, historyBtn, viewSchoolBtn);
+  actions.append(editBtn, historyBtn, viewSchoolBtn, copyBriefBtn);
   footer.append(stamp, actions);
   card.append(footer);
 
@@ -6224,6 +6449,9 @@ if (typeof window !== "undefined") {
   window.formatDeliveryTime12h = formatDeliveryTime12h;
   window.formatDeliveryDate = formatDeliveryDate;
   window.parseDeliveryVisits = parseDeliveryVisits;
+  window.buildGoogleCalendarUrl = buildGoogleCalendarUrl;
+  window.buildMentorBriefText = buildMentorBriefText;
+  window.copyMentorBrief = copyMentorBrief;
 }
 
 function renderDirectory() {
